@@ -29,7 +29,62 @@ def run_dism():
     return _run_hidden_cmd(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"])
 
 def optimize_network():
-    """Flush DNS and reset Winsock for ultimate network ping."""
-    _run_hidden_cmd(["ipconfig", "/flushdns"])
-    _run_hidden_cmd(["netsh", "winsock", "reset"])
-    return {"success": True, "message": "네트워크 DNS 및 Winsock 초기화 완료"}
+    """Comprehensive network optimization: DNS flush, Winsock reset, Nagle disable, TCP tuning."""
+    results = []
+    
+    # 1. Flush DNS cache
+    r1 = _run_hidden_cmd(["ipconfig", "/flushdns"])
+    results.append(("DNS Flush", r1.get("success", False)))
+    
+    # 2. Reset Winsock catalog
+    r2 = _run_hidden_cmd(["netsh", "winsock", "reset"])
+    results.append(("Winsock Reset", r2.get("success", False)))
+    
+    # 3. Disable TCP auto-tuning (reduces bufferbloat for gaming)
+    _run_hidden_cmd(["netsh", "int", "tcp", "set", "global", "autotuninglevel=disabled"])
+    results.append(("TCP AutoTuning Disabled", True))
+    
+    # 4. Disable Nagle algorithm on all interfaces via registry
+    try:
+        import winreg
+        base_path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+        base_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path, 0, winreg.KEY_READ)
+        
+        i = 0
+        while True:
+            try:
+                subkey_name = winreg.EnumKey(base_key, i)
+                subkey_path = f"{base_path}\\{subkey_name}"
+                subkey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey_path, 0, winreg.KEY_ALL_ACCESS)
+                winreg.SetValueEx(subkey, "TcpAckFrequency", 0, winreg.REG_DWORD, 1)
+                winreg.SetValueEx(subkey, "TCPNoDelay", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(subkey)
+                i += 1
+            except OSError:
+                break
+        winreg.CloseKey(base_key)
+        results.append(("Nagle Disabled", True))
+    except Exception:
+        results.append(("Nagle Disabled", False))
+    
+    # 5. Disable Network Throttling Index
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile",
+            0, winreg.KEY_ALL_ACCESS
+        )
+        winreg.SetValueEx(key, "NetworkThrottlingIndex", 0, winreg.REG_DWORD, 0xFFFFFFFF)
+        winreg.CloseKey(key)
+        results.append(("Network Throttling Disabled", True))
+    except Exception:
+        results.append(("Network Throttling Disabled", False))
+    
+    success_count = sum(1 for _, s in results if s)
+    return {
+        "success": True, 
+        "message": f"네트워크 최적화 완료 ({success_count}/{len(results)}개 항목 적용)",
+        "details": results
+    }
+

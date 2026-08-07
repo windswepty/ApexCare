@@ -285,7 +285,12 @@ def _enable_privilege(priv_name):
         return False
 
 def purge_ram():
-    """Aggressively Free RAM by emptying working sets and purging the Standby Cache List."""
+    """Smart Memory Optimizer: selective trimming of idle processes + conditional standby purge.
+    
+    Unlike blanket EmptyWorkingSet (which causes page faults and stuttering),
+    this only trims genuinely idle background processes and only purges
+    standby cache when available memory is critically low (<15%).
+    """
     try:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         psapi = ctypes.WinDLL('psapi', use_last_error=True)
@@ -293,29 +298,66 @@ def purge_ram():
         
         kernel32.SetProcessWorkingSetSize.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_size_t, ctypes.c_size_t]
         
+        # Protect list: never trim these system-critical / active processes
+        _protected = {
+            'explorer.exe', 'dwm.exe', 'csrss.exe', 'svchost.exe',
+            'winlogon.exe', 'lsass.exe', 'services.exe', 'system',
+            'smss.exe', 'wininit.exe', 'fontdrvhost.exe',
+        }
+        # Also protect any known game executables (from game_booster)
+        try:
+            from backend.game_booster import GAMES_LIST
+            _protected.update(GAMES_LIST)
+        except Exception:
+            pass
+        
+        my_pid = os.getpid()
         purged_count = 0
-        # 1. Empty working sets of all processes (dumps active memory to standby list)
-        for p in psutil.process_iter(['pid']):
+        
+        # 1. Selective Working Set trimming: only trim idle background apps
+        for p in psutil.process_iter(['pid', 'name', 'status', 'cpu_percent']):
             try:
                 pid = p.info['pid']
-                if pid == 0 or pid == 4:  # Skip System/Idle
+                name = (p.info.get('name') or '').lower()
+                if pid <= 4 or pid == my_pid:
                     continue
+                if name in _protected:
+                    continue
+                    
+                # Only trim processes that are genuinely idle (very low CPU)
+                cpu = p.info.get('cpu_percent', 0) or 0
+                if cpu > 2.0:  # Process is actively using CPU, don't trim
+                    continue
+                    
+                mem_info = p.memory_info()
+                if mem_info.rss < 50 * 1024 * 1024:  # Skip tiny processes (<50MB)
+                    continue
+                
                 handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid)
                 if handle:
                     psapi.EmptyWorkingSet(handle)
-                    result = kernel32.SetProcessWorkingSetSize(handle, ctypes.c_size_t(-1), ctypes.c_size_t(-1))
                     kernel32.CloseHandle(handle)
-                    if result:
-                        purged_count += 1
+                    purged_count += 1
             except Exception:
                 pass
                 
-        # 2. Purge the Standby Cache List
-        _enable_privilege("SeProfileSingleProcessPrivilege")
-        command = ctypes.c_int(4) # MemoryPurgeStandbyList
-        ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
+        # 2. Conditional Standby Cache Purge: only when available RAM is critically low
+        mem = psutil.virtual_memory()
+        available_pct = (mem.available / mem.total) * 100
         
-        return {"success": True, "purgedProcesses": purged_count}
+        standby_purged = False
+        if available_pct < 15:
+            _enable_privilege("SeProfileSingleProcessPrivilege")
+            command = ctypes.c_int(4)  # MemoryPurgeStandbyList
+            ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
+            standby_purged = True
+        
+        return {
+            "success": True, 
+            "purgedProcesses": purged_count,
+            "standbyPurged": standby_purged,
+            "availablePctBefore": round(available_pct, 1)
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -405,8 +447,87 @@ def get_optimization_mode():
     }
 
 
+def _tune_power_params(mode):
+    """Apply detailed power plan sub-parameters via powercfg for real performance impact."""
+    import subprocess
+    CREATE_NO_WINDOW = 0x08000000
+    
+    def _powercfg(*args):
+        try:
+            subprocess.run(["powercfg"] + list(args), creationflags=CREATE_NO_WINDOW, timeout=5)
+        except Exception:
+            pass
+    
+    def _reg_set(path, name, value, vtype="REG_DWORD"):
+        try:
+            subprocess.run(["reg", "add", path, "/v", name, "/t", vtype, "/d", str(value), "/f"], 
+                         creationflags=CREATE_NO_WINDOW, timeout=5)
+        except Exception:
+            pass
+    
+    if mode == 'gaming':
+        # === CPU: Min/Max processor state = 100% (prevent frequency throttling) ===
+        # GUID: 54533251-82be-4824-96c1-47b60b740d00 (Processor)
+        # Sub: 893dee8e-2bef-41e0-89c6-b55d0929964c (min state), bc5038f7-23e0-4960-96da-33abaf5935ec (max state)
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "100")  # Min CPU = 100%
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "100")  # Max CPU = 100%
+        
+        # === Disable CPU Core Parking (prevent cores from sleeping) ===
+        # CPMINCORES = 0cc5b647... ; value = 100 means all cores stay active
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "100")
+        
+        # === Disable USB Selective Suspend (prevent USB device latency) ===
+        # 2a737441-1930-4402-8d77-b2bebba308a3 = USB settings, 48e6b7a6... = selective suspend
+        _powercfg("/setacvalueindex", "scheme_current", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "0")
+        
+        # === MMCSS: SystemResponsiveness = 0 (give games maximum CPU time) ===
+        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 0)
+        
+        # === Network: Disable Nagle (reduce online game latency) ===
+        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "NetworkThrottlingIndex", 0xFFFFFFFF)
+        
+        # === GPU: Hardware Accelerated GPU Scheduling ===
+        _reg_set(r"HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "HwSchMode", 2)
+        
+        # Apply changes
+        _powercfg("/setactive", "scheme_current")
+        
+    elif mode == 'eco':
+        # === CPU: Max processor state = 70% (save power/reduce heat) ===
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "5")   # Min CPU = 5%
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "70")  # Max CPU = 70%
+        
+        # === Enable Core Parking (let cores sleep) ===
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "50")
+        
+        # === MMCSS: SystemResponsiveness = 40 (balance) ===
+        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 40)
+        
+        _powercfg("/setactive", "scheme_current")
+        
+    else:  # standard
+        # === Balanced defaults ===
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "5")   # Min CPU = 5%
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "100") # Max CPU = 100%
+        
+        # === Moderate Core Parking ===
+        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "70")
+        
+        # === Enable USB Selective Suspend (default behavior) ===
+        _powercfg("/setacvalueindex", "scheme_current", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "1")
+        
+        # === MMCSS: SystemResponsiveness = 20 (Windows default) ===
+        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 20)
+        
+        _powercfg("/setactive", "scheme_current")
+
+
 def set_optimization_mode(mode):
-    """Switch optimization mode using pure Win32 API with OS level verification."""
+    """Switch optimization mode with real OS-level tuning for measurable performance impact.
+    
+    Goes beyond just switching power plans: applies CPU scheduling, core parking,
+    MMCSS, USB latency, and GPU scheduling parameters.
+    """
     try:
         # [공통 최적화] 모든 모드에 적용 (온도 감소 및 기본 성능 확보)
         purge_ram()
@@ -425,6 +546,9 @@ def set_optimization_mode(mode):
             target_guid = POWER_PLAN_BALANCED
             _set_power_plan(target_guid)
             _start_service("wuauserv") # 표준 모드에서는 업데이트 허용
+
+        # Apply detailed sub-parameters (CPU state, core parking, MMCSS, etc.)
+        _tune_power_params(mode)
 
         # OS 전원 플랜 적용 여부 검증
         current_active = _get_active_power_plan_guid()
