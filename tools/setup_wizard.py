@@ -220,7 +220,7 @@ class SetupWizard(QWizard):
             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, install_dir)
             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, self.installed_path)
             winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "APEX CARE Team")
-            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.4")
+            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.5")
             winreg.CloseKey(key)
         except Exception:
             pass
