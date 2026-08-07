@@ -28,72 +28,46 @@ _optimization_state = {
 def get_deep_optimization_status():
     return _optimization_state
 
+_cancel_event = threading.Event()
+
 def _run_deep_optimization():
     global _optimization_state
     _optimization_state = {
         "running": True,
         "progress_pct": 0,
-        "eta_seconds": 120,
-        "current_task": "시스템 정크 및 임시 파일 분석 중...",
+        "eta_seconds": 10,
+        "current_task": "시스템 정크 및 임시 파일 정리 중...",
         "freed_mb": 0,
         "error": None,
         "cancel_requested": False
     }
+    _cancel_event.clear()
     
     try:
         # Step 1: Deep Junk Clean
-        _optimization_state["current_task"] = "브라우저 캐시, 덤프 파일, 앱 데이터 찌꺼기 추적 및 삭제 중..."
-        _optimization_state["eta_seconds"] = 300 # 대략적인 초기 ETA
-        res = clean_junk([1, 2, 3, 4])
+        _optimization_state["current_task"] = "브라우저 캐시, 임시 파일, 업데이트 잔여물 삭제 중..."
+        _optimization_state["eta_seconds"] = 10
+        res = clean_junk([1, 2, 3, 4], cancel_event=_cancel_event)
         freed = res.get("freedMB", 0)
         _optimization_state["freed_mb"] += freed
-        _optimization_state["progress_pct"] = 10
-        if _optimization_state.get("cancel_requested"): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        _optimization_state["progress_pct"] = 40
+        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
         
-        # Step 2: Windows Component Cleanup & App Optimization
-        _optimization_state["current_task"] = "윈도우 업데이트 컴포넌트 딥 클린 중 (PC 상태에 따라 다소 시간이 걸립니다)..."
-        import subprocess
-        import re
-        try:
-            # DISM 컴포넌트 정리 실제 실행 및 진행률 파싱
-            p = subprocess.Popen(["dism.exe", "/Online", "/Cleanup-image", "/StartComponentCleanup"], 
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=0x08000000)
-            
-            for line in iter(p.stdout.readline, ''):
-                if _optimization_state.get("cancel_requested"):
-                    p.terminate()
-                    raise Exception("사용자에 의해 최적화가 취소되었습니다.")
-                
-                # '[==========100.0%==========]' 등의 포맷에서 숫자 추출
-                match = re.search(r'\[=*(\d+\.\d+)%\=*\]', line)
-                if match:
-                    pct = float(match.group(1))
-                    # 전체 진행률의 10% ~ 70% 구간에 DISM 진행률을 매핑
-                    _optimization_state["progress_pct"] = 10 + (pct * 0.6)
-            
-            p.wait()
-        except Exception as e:
-            if "취소" in str(e): raise e
-            pass
-            
-        _optimization_state["progress_pct"] = 70
-        if _optimization_state.get("cancel_requested"): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
-
-        # Step 3: RAM Purge
-        _optimization_state["current_task"] = "하드코어 RAM 메모리 압축 및 스탠바이 리스트 강제 초기화..."
+        # Step 2: RAM Purge
+        _optimization_state["current_task"] = "유휴 프로세스 정리 및 가용 메모리 확보 중..."
         purge_ram()
-        _optimization_state["progress_pct"] = 80
-        if _optimization_state.get("cancel_requested"): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        _optimization_state["progress_pct"] = 60
+        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
-        # Step 4: Network Deep Flush
-        _optimization_state["current_task"] = "Winsock 카탈로그 초기화 및 DNS 딥 플러시..."
+        # Step 3: Network Deep Flush
+        _optimization_state["current_task"] = "네트워크 캐시 및 DNS 초기화 중..."
         from backend import system_repair
         system_repair.optimize_network()
-        _optimization_state["progress_pct"] = 90
-        if _optimization_state.get("cancel_requested"): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        _optimization_state["progress_pct"] = 80
+        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
             
-        # Step 5: SSD TRIM & Defrag
-        _optimization_state["current_task"] = "모든 물리 스토리지 정밀 조각모음 및 TRIM 실행..."
+        # Step 4: SSD TRIM
+        _optimization_state["current_task"] = "물리 디스크 응답속도 최적화(TRIM) 중..."
         system_repair.run_trim()
         
         _optimization_state["progress_pct"] = 100
@@ -102,7 +76,7 @@ def _run_deep_optimization():
         
     except Exception as e:
         _optimization_state["error"] = str(e)
-        _optimization_state["current_task"] = f"오류 발생: {str(e)}"
+        _optimization_state["current_task"] = f"취소/오류: {str(e)}"
     finally:
         _optimization_state["running"] = False
 
@@ -117,6 +91,7 @@ def start_deep_optimization():
 def cancel_deep_optimization():
     if _optimization_state["running"]:
         _optimization_state["cancel_requested"] = True
+        _cancel_event.set()
         return {"success": True}
     return {"success": False, "message": "실행 중인 최적화가 없습니다."}
 
@@ -179,8 +154,8 @@ def scan_junk():
 # Junk Clean (Parallel Executor)
 # ─────────────────────────────────────────────
 
-def clean_junk(category_ids):
-    """Clean junk files using ultra-fast ThreadPoolExecutor."""
+def clean_junk(category_ids, cancel_event=None):
+    """Clean junk files using ultra-fast ThreadPoolExecutor with instant cancellation."""
     if not category_ids:
         return {"freedMB": 0}
     try:
@@ -197,6 +172,8 @@ def clean_junk(category_ids):
                 return 0
             try:
                 for entry in os.scandir(path):
+                    if cancel_event and cancel_event.is_set():
+                        break
                     try:
                         if entry.is_file(follow_symlinks=False):
                             size = entry.stat().st_size
@@ -204,7 +181,11 @@ def clean_junk(category_ids):
                             local_freed += size
                         elif entry.is_dir(follow_symlinks=False):
                             for dp, _, fns in os.walk(entry.path):
+                                if cancel_event and cancel_event.is_set():
+                                    break
                                 for fn in fns:
+                                    if cancel_event and cancel_event.is_set():
+                                        break
                                     try:
                                         local_freed += os.path.getsize(os.path.join(dp, fn))
                                     except OSError:
