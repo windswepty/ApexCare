@@ -1,0 +1,475 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Zap, 
+  RotateCw, 
+  CheckCircle2, 
+  AlertTriangle, 
+  Cpu, 
+  HardDrive, 
+  MemoryStick, 
+  Sparkles, 
+  TrendingUp, 
+  Gauge,
+  Sun,
+  Moon
+} from 'lucide-react';
+import confetti from 'canvas-confetti';
+import { playSound } from '../utils/audio';
+
+// Global variable to persist history across unmounts (e.g. when changing tabs/modes)
+let globalCpuHistory = [20, 35, 42, 38, 45, 30, 38];
+
+export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
+  const [healthScore, setHealthScore] = useState(null);
+  const [isScanning, setIsScanning] = useState(false);
+  
+  const [optStatus, setOptStatus] = useState({
+    running: false,
+    progress_pct: 0,
+    eta_seconds: 0,
+    current_task: '',
+    freed_mb: 0,
+    error: null
+  });
+
+  const [junkFound, setJunkFound] = useState(null);
+
+  const [lastOptimized, setLastOptimized] = useState(() => localStorage.getItem('apex_last_optimized') || '기록 없음');
+  const [totalFreed, setTotalFreed] = useState(() => parseFloat(localStorage.getItem('apex_total_freed')) || 0);
+
+  // Real-time metric states
+  const [cpuUsage, setCpuUsage] = useState(0);
+  const [ramUsage, setRamUsage] = useState(0);
+  const [diskUsage, setDiskUsage] = useState(0);
+
+  const [sysInfo, setSysInfo] = useState({
+    cpuModel: 'Scanning CPU...',
+    cpuCores: 0,
+    cpuThreads: 0,
+    ramTotalGB: '0',
+    ramUsedGB: '0',
+    ramFreeGB: '0',
+    diskTotalGB: '0',
+    diskUsedGB: '0',
+    diskFreeGB: '0'
+  });
+
+  // Live sparkline histories
+  const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
+
+  useEffect(() => {
+    const fetchRealStats = async () => {
+      if (window.pywebview?.api && window.pywebview?.api.getSystemStats) {
+        try {
+          const stats = await window.pywebview?.api.getSystemStats();
+          if (stats) {
+            setCpuUsage(stats.cpuUsage || 0);
+            setRamUsage(stats.ramPct || 0);
+            setDiskUsage(stats.diskPct || 0);
+            setCpuHistory(prev => {
+              const next = [...prev.slice(1), stats.cpuUsage || 0];
+              globalCpuHistory = next;
+              return next;
+            });
+            
+            setSysInfo({
+              cpuModel: stats.cpuModel || 'Unknown CPU',
+              cpuCores: stats.cpuCores || 0,
+              cpuThreads: stats.cpuThreads || 0,
+              ramTotalGB: stats.ramTotalGB || '0',
+              ramUsedGB: stats.ramUsedGB || '0',
+              ramFreeGB: stats.ramTotalGB ? (parseFloat(stats.ramTotalGB) - parseFloat(stats.ramUsedGB)).toFixed(1) : '0',
+              diskTotalGB: stats.diskTotalGB || '0',
+              diskUsedGB: stats.diskUsedGB || '0',
+              diskFreeGB: stats.diskTotalGB ? (parseFloat(stats.diskTotalGB) - parseFloat(stats.diskUsedGB)).toFixed(0) : '0'
+            });
+
+            // Dynamically compute health score from real metrics
+            if (healthScore === null || healthScore < 90) {
+              const cpuPenalty = Math.max(0, (stats.cpuUsage || 0) - 50) * 0.3;
+              const ramPenalty = Math.max(0, (stats.ramPct || 0) - 70) * 0.4;
+              const diskPenalty = Math.max(0, (stats.diskPct || 0) - 80) * 0.5;
+              const computed = Math.max(30, Math.round(100 - cpuPenalty - ramPenalty - diskPenalty));
+              if (healthScore === null) setHealthScore(computed);
+            }
+          }
+        } catch (e) {
+          // Keep previous data if failed
+        }
+      }
+    };
+
+    fetchRealStats();
+
+    const interval = setInterval(() => {
+      if (!isScanning) {
+        fetchRealStats();
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isScanning]);
+
+  const runMasterOptimization = async () => {
+    if (isScanning) return;
+    playSound('scan');
+    setIsScanning(true);
+    
+    try {
+      if (window.pywebview?.api && window.pywebview?.api.startDeepOptimization) {
+        const res = await window.pywebview.api.startDeepOptimization();
+        if (!res || !res.success) {
+          alert(res?.message || '최적화 시작에 실패했습니다.');
+          setIsScanning(false);
+          return;
+        }
+
+        const pollInterval = setInterval(async () => {
+          const status = await window.pywebview.api.getDeepOptimizationStatus();
+          if (status) {
+            setOptStatus(status);
+            
+            if (!status.running) {
+              clearInterval(pollInterval);
+              if (status.error) {
+                alert("최적화 중 오류 발생: " + status.error);
+                setIsScanning(false);
+              } else {
+                finishOptimization(status.freed_mb);
+              }
+            }
+          }
+        }, 1000);
+      } else {
+        // Fallback or missing API
+        setIsScanning(false);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('통합 최적화 도중 오류가 발생했습니다. 관리자 권한을 확인해주세요.');
+      setIsScanning(false);
+    }
+  };
+
+  const finishOptimization = (freedMB) => {
+    setHealthScore(100);
+    playSound('success');
+    
+    const now = new Date().toLocaleDateString('ko-KR');
+    localStorage.setItem('apex_last_optimized', now);
+    setLastOptimized(now);
+
+    const newTotalFreed = totalFreed + freedMB;
+    localStorage.setItem('apex_total_freed', newTotalFreed);
+    setTotalFreed(newTotalFreed);
+
+    try {
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    } catch (e) {}
+
+    setTimeout(() => {
+      setIsScanning(false);
+    }, 3000);
+  };
+
+  const getScoreColor = (score) => {
+    if (score >= 90) return 'text-emerald-500 border-emerald-500 shadow-emerald-500/20';
+    if (score >= 70) return 'text-amber-500 border-amber-500 shadow-amber-500/20';
+    return 'text-rose-500 border-rose-500 shadow-rose-500/20';
+  };
+
+  const getUsageColor = (val) => {
+    if (val < 60) return 'bg-emerald-500';
+    if (val < 85) return 'bg-amber-500';
+    return 'bg-rose-500';
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-5 auto-rows-max">
+      {/* Top Banner: Master Optimization Gauge Card */}
+      <div className="md:col-span-12 glass-panel p-8 relative overflow-hidden flex flex-col justify-center">
+
+        <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10 px-4 md:px-8">
+          {/* Left info & call to action */}
+          <div className="space-y-4 max-w-xl text-center md:text-left">
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-xs font-mono text-gray-600 dark:text-gray-300">
+                <Sparkles className="w-3.5 h-3.5 text-black dark:text-white animate-spin-slow" />
+                AI 기반 원클릭 자가진단 및 성능 복구
+              </div>
+            </div>
+            
+            <h2 className="text-3xl font-black tracking-tight text-black dark:text-white transition-colors duration-300">
+              현재 컴퓨터 상태: {' '}
+              <span className={healthScore >= 90 ? 'text-emerald-500' : 'text-amber-500'}>
+                {healthScore >= 90 ? '최상 (Optimized)' : '최적화 필요 (Action Needed)'}
+              </span>
+            </h2>
+
+            <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed transition-colors duration-300">
+              임시 정크 파일 <span className="font-mono text-black dark:text-white font-bold">{junkFound || '스캔 대기 중'}</span> 등이 시스템 속도를 저하시킬 수 있습니다. 원클릭 최적화를 실행해 보세요.
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 pt-2">
+              <button
+                onClick={runMasterOptimization}
+                disabled={isScanning}
+                className={`btn-primary text-base px-8 py-4 ${isScanning ? 'opacity-75 cursor-not-allowed hidden' : ''}`}
+              >
+                <>
+                  <Zap className="w-5 h-5 fill-current" />
+                  <span>원클릭 딥 최적화 시작</span>
+                </>
+              </button>
+
+              {isScanning && (
+                <button
+                  onClick={async () => {
+                    if (window.pywebview?.api?.cancelDeepOptimization) {
+                      await window.pywebview.api.cancelDeepOptimization();
+                    }
+                  }}
+                  className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 px-8 py-4 rounded-xl flex items-center gap-2 transition-all"
+                >
+                  <span className="w-5 h-5 flex items-center justify-center font-bold text-xl leading-none">&times;</span>
+                  <span className="font-bold">최적화 중지</span>
+                </button>
+              )}
+
+              {healthScore >= 90 && !isScanning && (
+                <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono">
+                  <CheckCircle2 className="w-4 h-4" />
+                  최적 성능 상태 유지 중
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Circular Gauge */}
+          <div className="relative flex items-center justify-center">
+            
+            <div className={`w-48 h-48 rounded-full border-4 flex flex-col items-center justify-center glass-panel shadow-2xl transition-all duration-500 ${getScoreColor(healthScore)}`}>
+              <span className="text-xs font-mono tracking-widest text-gray-500 dark:text-gray-400 uppercase">Health Score</span>
+              <span className="text-5xl font-black font-mono tracking-tight my-1 text-black dark:text-white">
+                {isScanning ? (
+                  <span className="text-gray-400 dark:text-gray-600 animate-pulse">--</span>
+                ) : (
+                  healthScore
+                )}
+              </span>
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 font-mono">/ 100</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Scan Step Progress Bar if active */}
+        {isScanning && (
+          <div className="mt-6 pt-4 border-t border-black/10 dark:border-white/10 space-y-2">
+            <div className="flex justify-between text-xs font-mono">
+              <span className="text-gray-700 dark:text-gray-300">
+                {optStatus.current_task || '딥 최적화 엔진 시작 중...'}
+              </span>
+              <div className="flex gap-4">
+                <span className="text-gray-500 dark:text-gray-400">
+                  {Math.round(optStatus.progress_pct)}%
+                </span>
+              </div>
+            </div>
+            <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+              <div 
+                className="bg-black dark:bg-white h-full rounded-full transition-all duration-700"
+                style={{ width: `${Math.round(optStatus.progress_pct)}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* NEW SECTION: Lutimize-style Info Blocks */}
+      <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="glass-panel p-5 flex items-center justify-between">
+          <div>
+            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">마지막 최적화 날짜</h4>
+            <div className="text-2xl font-black text-black dark:text-white">{lastOptimized}</div>
+          </div>
+          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+            <CheckCircle2 className="w-6 h-6 text-amber-500" />
+          </div>
+        </div>
+        
+        <div className="glass-panel p-5 flex items-center justify-between">
+          <div>
+            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">총 확보한 공간</h4>
+            <div className="text-2xl font-black text-black dark:text-white">{totalFreed.toFixed(1)} <span className="text-lg">MB</span></div>
+          </div>
+          <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
+            <HardDrive className="w-6 h-6 text-blue-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* NEW SECTION: System Info Block */}
+      <div className="md:col-span-12 glass-panel p-6">
+        <h3 className="text-sm font-bold text-black dark:text-white mb-4 flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-cyan-500" /> 시스템 정보
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
+          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+            <span className="text-gray-500 dark:text-gray-400 font-mono">Processor</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuModel}</span>
+          </div>
+          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+            <span className="text-gray-500 dark:text-gray-400 font-mono">RAM</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.ramTotalGB} GB</span>
+          </div>
+          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+            <span className="text-gray-500 dark:text-gray-400 font-mono">Storage</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.diskTotalGB} GB</span>
+          </div>
+          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+            <span className="text-gray-500 dark:text-gray-400 font-mono">Cores/Threads</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</span>
+          </div>
+        </div>
+      </div>
+
+      {/* CPU Monitor */}
+      <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+                <Cpu className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-black dark:text-white truncate max-w-[120px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</p>
+              </div>
+            </div>
+            <span className="text-xl font-bold font-mono text-black dark:text-white">{cpuUsage}%</span>
+          </div>
+
+          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-4">
+            <div 
+              className={`${getUsageColor(cpuUsage)} h-full rounded-full transition-all duration-500`}
+              style={{ width: `${cpuUsage}%` }}
+            ></div>
+          </div>
+
+          {/* Sparkline Canvas Simulation */}
+          <div className="h-12 flex items-end justify-between gap-1 pt-2">
+            {cpuHistory.map((val, idx) => (
+              <div 
+                key={idx} 
+                className={`w-full ${getUsageColor(val)} opacity-60 hover:opacity-100 rounded-t transition-all duration-300`}
+                style={{ height: `${val}%` }}
+              ></div>
+            ))}
+          </div>
+        </div>
+
+        {/* RAM Monitor */}
+        <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+                <MemoryStick className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-black dark:text-white">RAM 점유율</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.ramTotalGB} GB</p>
+              </div>
+            </div>
+            <span className="text-xl font-bold font-mono text-black dark:text-white">{ramUsage}%</span>
+          </div>
+
+          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-3">
+            <div 
+              className={`${getUsageColor(ramUsage)} h-full rounded-full transition-all duration-500`}
+              style={{ width: `${ramUsage}%` }}
+            ></div>
+          </div>
+
+          <div className="flex justify-between text-xs font-mono text-gray-500 dark:text-gray-400 mt-2">
+            <span>사용 중: {sysInfo.ramUsedGB} GB</span>
+            <span>여유: {sysInfo.ramFreeGB} GB</span>
+          </div>
+        </div>
+
+        {/* Disk NVMe Storage */}
+        <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+                <HardDrive className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-black dark:text-white">로컬 드라이브</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.diskTotalGB} GB</p>
+              </div>
+            </div>
+            <span className="text-xl font-bold font-mono text-black dark:text-white">{diskUsage}%</span>
+          </div>
+
+          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-3">
+            <div 
+              className={`${getUsageColor(diskUsage)} h-full rounded-full transition-all duration-500`}
+              style={{ width: `${diskUsage}%` }}
+            ></div>
+          </div>
+
+          <div className="flex justify-between text-xs font-mono text-gray-500 dark:text-gray-400 mt-2">
+            <span>사용: {sysInfo.diskUsedGB} GB</span>
+            <span>남음: {sysInfo.diskFreeGB} GB</span>
+          </div>
+        </div>
+
+      {/* Quick Action Navigation Grid (Bento style) */}
+      <button
+        onClick={() => onNavigate('cleaner')}
+        className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
+      >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">JUNK CLEANER</span>
+            <AlertTriangle className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          </div>
+          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">정크 파일 세척</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">클릭하여 스캔 시작</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate('ram')}
+          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">RAM BOOSTER</span>
+            <TrendingUp className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          </div>
+          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">대기 메모리 해제</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">즉시 메모리 퍼지</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate('startup')}
+          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">BOOT SPEED</span>
+            <Gauge className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          </div>
+          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">시작 프로그램 정리</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">부팅 지연 요소 관리</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate('defrag')}
+          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">DISK TRIM</span>
+            <HardDrive className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          </div>
+          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">디스크 최적화 & TRIM</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">저장소 수명 및 속도 관리</p>
+      </button>
+    </div>
+  );
+}
