@@ -23,9 +23,21 @@ export default function SystemRepair({ addToast }) {
   useEffect(() => {
     let interval;
     if (sfcStatus === 'running') {
-      interval = setInterval(() => {
+      interval = setInterval(async () => {
         setSfcProgress(p => (p < 99 ? p + 0.5 : 99));
         setSfcEta(e => (e > 0 ? e - 1 : 0));
+        if (window.pywebview?.api?.getSfcStatus) {
+          try {
+            const state = await window.pywebview.api.getSfcStatus();
+            if (state && state.status !== 'running' && state.status !== 'idle') {
+              setSfcStatus(state.status);
+              setSfcProgress(100);
+              setSfcEta(0);
+              playSound(state.status === 'success' ? 'success' : 'error');
+              if (addToast) addToast(state.status === 'success' ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
+            }
+          } catch (e) {}
+        }
       }, 1000);
     } else if (sfcStatus === 'success') {
       setSfcProgress(100);
@@ -40,9 +52,21 @@ export default function SystemRepair({ addToast }) {
   useEffect(() => {
     let interval;
     if (dismStatus === 'running') {
-      interval = setInterval(() => {
+      interval = setInterval(async () => {
         setDismProgress(p => (p < 99 ? p + 0.2 : 99));
         setDismEta(e => (e > 0 ? e - 1 : 0));
+        if (window.pywebview?.api?.getDismStatus) {
+          try {
+            const state = await window.pywebview.api.getDismStatus();
+            if (state && state.status !== 'running' && state.status !== 'idle') {
+              setDismStatus(state.status);
+              setDismProgress(100);
+              setDismEta(0);
+              playSound(state.status === 'success' ? 'success' : 'error');
+              if (addToast) addToast(state.status === 'success' ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
+            }
+          } catch (e) {}
+        }
       }, 1000);
     } else if (dismStatus === 'success') {
       setDismProgress(100);
@@ -56,20 +80,15 @@ export default function SystemRepair({ addToast }) {
 
   const runSfc = async () => {
     playSound('scan');
-    setSfcStatus('running');
     
     try {
-      let res = null;
       if (window.pywebview?.api && window.pywebview?.api.runSfc) {
-        res = await window.pywebview?.api.runSfc();
+        const res = await window.pywebview?.api.runSfc();
+        if (res?.success) setSfcStatus('running');
+        else addToast("이미 실행 중입니다.", "error");
       } else {
-        await new Promise(r => setTimeout(r, 3000));
-        res = { success: true };
+        setSfcStatus('running');
       }
-      
-      setSfcStatus(res?.success ? 'success' : 'error');
-      playSound(res?.success ? 'success' : 'error');
-      if (addToast) addToast(res?.success ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', res?.success ? 'success' : 'error');
     } catch (e) {
       setSfcStatus('error');
     }
@@ -77,20 +96,15 @@ export default function SystemRepair({ addToast }) {
 
   const runDism = async () => {
     playSound('scan');
-    setDismStatus('running');
     
     try {
-      let res = null;
       if (window.pywebview?.api && window.pywebview?.api.runDism) {
-        res = await window.pywebview?.api.runDism();
+        const res = await window.pywebview?.api.runDism();
+        if (res?.success) setDismStatus('running');
+        else addToast("이미 실행 중입니다.", "error");
       } else {
-        await new Promise(r => setTimeout(r, 3000));
-        res = { success: true };
+        setDismStatus('running');
       }
-
-      setDismStatus(res?.success ? 'success' : 'error');
-      playSound(res?.success ? 'success' : 'error');
-      if (addToast) addToast(res?.success ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', res?.success ? 'success' : 'error');
     } catch (e) {
       setDismStatus('error');
     }

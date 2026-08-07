@@ -20,9 +20,11 @@ export default function JunkCleaner({ addToast }) {
     if (window.pywebview?.api && window.pywebview?.api.scanJunk) {
       try {
         const realItems = await window.pywebview?.api.scanJunk();
-        if (realItems && realItems.length > 0) {
+        if (realItems && Array.isArray(realItems) && realItems.length > 0) {
           setItems(realItems);
           return;
+        } else if (Array.isArray(realItems)) {
+          setItems([]);
         }
       } catch (e) {}
     }

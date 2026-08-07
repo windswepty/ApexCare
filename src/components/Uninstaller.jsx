@@ -41,9 +41,12 @@ export default function Uninstaller({ addToast }) {
     setLoading(true);
     if (window.pywebview?.api) {
       try {
-        const raw_data = await window.pywebview.api.getUninstallerApps();
-        const data = typeof raw_data === 'string' ? JSON.parse(raw_data) : raw_data;
-        setApps(data || []);
+        const data = await window.pywebview.api.getUninstallerApps();
+        if (Array.isArray(data)) {
+          setApps(data);
+        } else {
+          setApps([]);
+        }
       } catch (e) {
         console.error(e);
       }

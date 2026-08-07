@@ -64,9 +64,9 @@ class Api:
 
     def getStartupApps(self):
         try:
-            return json.dumps(optimizer.get_startup_apps())
-        except Exception as e:
-            return json.dumps([])
+            return optimizer.get_startup_apps()
+        except Exception:
+            return []
 
     def toggleStartupApp(self, name, enabled):
         return optimizer.toggle_startup_app(name, enabled)
@@ -92,12 +92,18 @@ class Api:
     # --- Uninstaller Features ---
     def getUninstallerApps(self):
         try:
-            return json.dumps(uninstaller.get_installed_apps())
+            return uninstaller.get_installed_apps()
         except Exception:
-            return json.dumps([])
+            return []
 
     def uninstallApp(self, uninstall_string):
         return uninstaller.run_uninstall(uninstall_string)
+        
+    def getSfcStatus(self):
+        return system_repair.get_sfc_status()
+        
+    def getDismStatus(self):
+        return system_repair.get_dism_status()
 
     def findAppLeftovers(self, app_name):
         return uninstaller.find_leftovers(app_name)

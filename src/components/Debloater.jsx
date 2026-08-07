@@ -27,7 +27,11 @@ export default function Debloater({ addToast }) {
   const fetchItems = async () => {
     if (window.pywebview?.api?.getDebloatList) {
       const list = await window.pywebview.api.getDebloatList();
-      if (list) setItems(list);
+      if (Array.isArray(list)) {
+        setItems(list);
+      } else {
+        setItems([]);
+      }
     }
   };
 

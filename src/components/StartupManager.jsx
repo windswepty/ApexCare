@@ -13,9 +13,8 @@ export default function StartupManager({ addToast }) {
     const fetchStartup = async () => {
       if (window.pywebview?.api && window.pywebview?.api.getStartupApps) {
         try {
-          const raw_data = await window.pywebview?.api.getStartupApps();
-          const apps = typeof raw_data === 'string' ? JSON.parse(raw_data) : raw_data;
-          if (apps && apps.length > 0) {
+          const apps = await window.pywebview?.api.getStartupApps();
+          if (apps && Array.isArray(apps)) {
             setStartupApps(apps);
           }
         } catch (e) {}

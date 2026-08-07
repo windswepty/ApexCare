@@ -15,18 +15,52 @@ def _run_hidden_cmd(cmd):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+import threading
+
+_sfc_state = {"status": "idle"}
+_dism_state = {"status": "idle"}
+
+def _run_hidden_cmd_bg(cmd, state_dict):
+    try:
+        # CREATE_NO_WINDOW = 0x08000000
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=0x08000000, text=True)
+        if result.returncode == 0:
+            state_dict["status"] = "success"
+        else:
+            state_dict["status"] = "error"
+    except Exception:
+        state_dict["status"] = "error"
+
 def run_trim():
     """Run disk optimization and TRIM on ALL volumes."""
     # /C means all volumes, /O means optimize (including TRIM for SSDs)
     return _run_hidden_cmd(["defrag.exe", "/C", "/O"])
 
 def run_sfc():
-    """Run System File Checker."""
-    return _run_hidden_cmd(["sfc.exe", "/scannow"])
+    """Run System File Checker asynchronously."""
+    global _sfc_state
+    if _sfc_state["status"] == "running":
+        return {"success": False, "message": "이미 실행 중입니다."}
+    _sfc_state["status"] = "running"
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["sfc.exe", "/scannow"], _sfc_state), daemon=True)
+    t.start()
+    return {"success": True}
+
+def get_sfc_status():
+    return _sfc_state
 
 def run_dism():
-    """Run DISM RestoreHealth."""
-    return _run_hidden_cmd(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"])
+    """Run DISM RestoreHealth asynchronously."""
+    global _dism_state
+    if _dism_state["status"] == "running":
+        return {"success": False, "message": "이미 실행 중입니다."}
+    _dism_state["status"] = "running"
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state), daemon=True)
+    t.start()
+    return {"success": True}
+
+def get_dism_status():
+    return _dism_state
 
 def optimize_network():
     """Comprehensive network optimization: DNS flush, Winsock reset, Nagle disable, TCP tuning."""
