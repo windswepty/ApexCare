@@ -2,16 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Trash2, Search, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function Uninstaller() {
+export default function Uninstaller({ addToast }) {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [leftovers, setLeftovers] = useState([]);
   const [isCleaning, setIsCleaning] = useState(false);
   const [activeApp, setActiveApp] = useState(null);
-  const [step, setStep] = useState('list'); // 'list' -> 'leftovers'
-
-  useEffect(() => {
+  const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
     fetchApps();
   }, []);
 
@@ -19,8 +17,9 @@ export default function Uninstaller() {
     setLoading(true);
     if (window.pywebview?.api) {
       try {
-        const data = await window.pywebview.api.getUninstallerApps();
-        setApps(data);
+        const raw_data = await window.pywebview.api.getUninstallerApps();
+        const data = typeof raw_data === 'string' ? JSON.parse(raw_data) : raw_data;
+        setApps(data || []);
       } catch (e) {
         console.error(e);
       }
@@ -35,17 +34,20 @@ export default function Uninstaller() {
     // Launch standard uninstaller
     await window.pywebview.api.uninstallApp(app.uninstallString);
     
-    // Show alert and transition to leftovers scan
+    // Show alert and transition to waiting for user to finish
     setActiveApp(app);
-    setStep('leftovers');
+    setStep('wait_uninstall');
+  };
+
+  const handleScanLeftovers = async () => {
+    if (!window.pywebview?.api || !activeApp) return;
+    playSound('scan');
     setIsCleaning(true);
+    setStep('leftovers');
     
-    // Give user time to finish uninstaller visually
-    setTimeout(async () => {
-      const leftoverData = await window.pywebview.api.findAppLeftovers(app.name);
-      setLeftovers(leftoverData);
-      setIsCleaning(false);
-    }, 5000); // 5 sec fake/real wait for uninstaller to spawn and run
+    const leftoverData = await window.pywebview.api.findAppLeftovers(activeApp.name);
+    setLeftovers(leftoverData);
+    setIsCleaning(false);
   };
 
   const handleCleanLeftovers = async () => {
@@ -61,6 +63,7 @@ export default function Uninstaller() {
     setActiveApp(null);
     setLeftovers([]);
     fetchApps(); // refresh list
+    if (addToast) addToast(`[${activeApp.name}] 완벽 삭제 및 잔여 파일 정리가 완료되었습니다!`, 'success');
   };
 
   const skipLeftovers = () => {
@@ -147,6 +150,36 @@ export default function Uninstaller() {
             )}
           </div>
         </>
+      )}
+
+      {step === 'wait_uninstall' && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center max-w-lg mx-auto">
+          <div className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center mb-6 border border-amber-500/20">
+            <Trash2 className="w-10 h-10 text-amber-500" />
+          </div>
+          <h3 className="text-xl font-bold text-black dark:text-white mb-2">
+            [{activeApp?.name}] 언인스톨러 실행 중...
+          </h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-8">
+            화면에 표시된 윈도우 기본 제거 프로그램의 안내에 따라 삭제를 완전히 완료해주세요. 삭제가 끝나면 아래 버튼을 눌러 찌꺼기 파일을 스캔합니다.
+          </p>
+          
+          <div className="flex gap-4">
+            <button
+              onClick={skipLeftovers}
+              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors font-medium text-sm"
+            >
+              건너뛰기
+            </button>
+            <button
+              onClick={handleScanLeftovers}
+              className="px-6 py-3 bg-rose-500 text-white rounded-xl hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all font-medium text-sm flex items-center gap-2"
+            >
+              <Search className="w-4 h-4" />
+              삭제 완료! 찌꺼기 스캔하기
+            </button>
+          </div>
+        </div>
       )}
 
       {step === 'leftovers' && (

@@ -58,11 +58,11 @@ def _run_debloater(selected_ids):
             
             if item_id == "telemetry":
                 # Disable telemetry via Registry
-                cmd = 'Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection" -Name "AllowTelemetry" -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue'
+                cmd = 'New-Item -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection" -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection" -Name "AllowTelemetry" -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue'
                 subprocess.run(["powershell", "-Command", cmd], creationflags=0x08000000)
             elif item_id == "cortana":
                 # Disable Cortana via Registry
-                cmd = 'Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search" -Name "AllowCortana" -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue'
+                cmd = 'New-Item -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search" -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search" -Name "AllowCortana" -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue'
                 subprocess.run(["powershell", "-Command", cmd], creationflags=0x08000000)
             else:
                 # Remove AppxPackage
@@ -73,7 +73,6 @@ def _run_debloater(selected_ids):
             # Update progress
             pct = int(((i + 1) / total_items) * 100)
             _debloat_state["progress_pct"] = pct
-            time.sleep(1) # Slight UI breathing room
             
         _debloat_state["progress_pct"] = 100
         _debloat_state["current_task"] = "완료! 윈도우 순정화가 끝났습니다."

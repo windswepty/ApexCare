@@ -11,17 +11,60 @@ import {
   TrendingUp, 
   Gauge,
   Sun,
-  Moon
+  Moon,
+  Monitor
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { playSound } from '../utils/audio';
 
 // Global variable to persist history across unmounts (e.g. when changing tabs/modes)
-let globalCpuHistory = [20, 35, 42, 38, 45, 30, 38];
+let globalCpuHistory = Array(25).fill(0);
+let globalGpuHistory = Array(25).fill(0);
 
-export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
+const renderLineGraph = (history) => {
+  const maxPoints = 25;
+  const height = 64; // h-16
+  const width = 200;
+  
+  const points = history.map((val, i) => {
+    const x = (i / (maxPoints - 1)) * width;
+    const y = height - (val / 100) * height;
+    return `${x},${y}`;
+  });
+  
+  const linePath = `M ${points.join(' L ')}`;
+  const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
+  
+  const currentVal = history[history.length - 1] || 0;
+  let strokeColor = "stroke-emerald-500";
+  let fillColor = "fill-emerald-500/20";
+  
+  if (currentVal >= 85) {
+    strokeColor = "stroke-rose-500";
+    fillColor = "fill-rose-500/20";
+  } else if (currentVal >= 60) {
+    strokeColor = "stroke-amber-500";
+    fillColor = "fill-amber-500/20";
+  }
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-16 overflow-visible preserve-3d" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={`grad-${strokeColor}`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="currentColor" stopOpacity="0.4" className={fillColor.replace('fill-', 'text-').replace('/20', '')} />
+          <stop offset="100%" stopColor="currentColor" stopOpacity="0.0" className={fillColor.replace('fill-', 'text-').replace('/20', '')} />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#grad-${strokeColor})`} className="transition-all duration-300" />
+      <path d={linePath} fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`${strokeColor} transition-all duration-300 drop-shadow-md`} />
+    </svg>
+  );
+};
+
+export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast }) {
   const [healthScore, setHealthScore] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [modalMessage, setModalMessage] = useState(null);
   
   const [optStatus, setOptStatus] = useState({
     running: false,
@@ -39,6 +82,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
 
   // Real-time metric states
   const [cpuUsage, setCpuUsage] = useState(0);
+  const [gpuUsage, setGpuUsage] = useState(0);
   const [ramUsage, setRamUsage] = useState(0);
   const [diskUsage, setDiskUsage] = useState(0);
 
@@ -56,6 +100,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
 
   // Live sparkline histories
   const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
+  const [gpuHistory, setGpuHistory] = useState(globalGpuHistory);
 
   useEffect(() => {
     const fetchRealStats = async () => {
@@ -64,6 +109,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
           const stats = await window.pywebview?.api.getSystemStats();
           if (stats) {
             setCpuUsage(stats.cpuUsage || 0);
+            setGpuUsage(stats.gpuUsage || 0);
             setRamUsage(stats.ramPct || 0);
             setDiskUsage(stats.diskPct || 0);
             setCpuHistory(prev => {
@@ -71,11 +117,17 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
               globalCpuHistory = next;
               return next;
             });
+            setGpuHistory(prev => {
+              const next = [...prev.slice(1), stats.gpuUsage || 0];
+              globalGpuHistory = next;
+              return next;
+            });
             
             setSysInfo({
               cpuModel: stats.cpuModel || 'Unknown CPU',
               cpuCores: stats.cpuCores || 0,
               cpuThreads: stats.cpuThreads || 0,
+              gpuModel: stats.gpuModel || 'GPU 3D 엔진',
               ramTotalGB: stats.ramTotalGB || '0',
               ramUsedGB: stats.ramUsedGB || '0',
               ramFreeGB: stats.ramTotalGB ? (parseFloat(stats.ramTotalGB) - parseFloat(stats.ramUsedGB)).toFixed(1) : '0',
@@ -85,13 +137,11 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
             });
 
             // Dynamically compute health score from real metrics
-            if (healthScore === null || healthScore < 90) {
-              const cpuPenalty = Math.max(0, (stats.cpuUsage || 0) - 50) * 0.3;
-              const ramPenalty = Math.max(0, (stats.ramPct || 0) - 70) * 0.4;
-              const diskPenalty = Math.max(0, (stats.diskPct || 0) - 80) * 0.5;
-              const computed = Math.max(30, Math.round(100 - cpuPenalty - ramPenalty - diskPenalty));
-              if (healthScore === null) setHealthScore(computed);
-            }
+            const cpuPenalty = Math.max(0, (stats.cpuUsage || 0) - 50) * 0.3;
+            const ramPenalty = Math.max(0, (stats.ramPct || 0) - 70) * 0.4;
+            const diskPenalty = Math.max(0, (stats.diskPct || 0) - 80) * 0.5;
+            const computed = Math.max(30, Math.round(100 - cpuPenalty - ramPenalty - diskPenalty));
+            setHealthScore(computed);
           }
         } catch (e) {
           // Keep previous data if failed
@@ -118,7 +168,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
       if (window.pywebview?.api && window.pywebview?.api.startDeepOptimization) {
         const res = await window.pywebview.api.startDeepOptimization();
         if (!res || !res.success) {
-          alert(res?.message || '최적화 시작에 실패했습니다.');
+          setModalMessage({ title: '시작 실패', text: res?.message || '최적화 시작에 실패했습니다.', isError: true });
           setIsScanning(false);
           return;
         }
@@ -131,7 +181,11 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
             if (!status.running) {
               clearInterval(pollInterval);
               if (status.error) {
-                alert("최적화 중 오류 발생: " + status.error);
+                if (status.error.includes("취소")) {
+                  setModalMessage({ title: '작업 취소', text: '사용자에 의해 최적화가 중단되었습니다.', isError: false });
+                } else {
+                  setModalMessage({ title: '오류 발생', text: status.error, isError: true });
+                }
                 setIsScanning(false);
               } else {
                 finishOptimization(status.freed_mb);
@@ -145,13 +199,12 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
       }
     } catch (e) {
       console.error(e);
-      alert('통합 최적화 도중 오류가 발생했습니다. 관리자 권한을 확인해주세요.');
+      setModalMessage({ title: '오류 발생', text: '통합 최적화 도중 오류가 발생했습니다. 관리자 권한을 확인해주세요.', isError: true });
       setIsScanning(false);
     }
   };
 
   const finishOptimization = (freedMB) => {
-    setHealthScore(100);
     playSound('success');
     
     const now = new Date().toLocaleDateString('ko-KR');
@@ -163,12 +216,13 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
     setTotalFreed(newTotalFreed);
 
     try {
-      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+      confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
     } catch (e) {}
-
-    setTimeout(() => {
-      setIsScanning(false);
-    }, 3000);
+    
+    if (addToast) {
+      addToast('원클릭 최적화가 성공적으로 완료되었습니다!', 'success');
+    }
+    setIsScanning(false);
   };
 
   const getScoreColor = (score) => {
@@ -184,9 +238,37 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-12 gap-5 auto-rows-max">
-      {/* Top Banner: Master Optimization Gauge Card */}
-      <div className="md:col-span-12 glass-panel p-8 relative overflow-hidden flex flex-col justify-center">
+    <div className="space-y-6">
+      {/* Custom Modal Overlay */}
+      {modalMessage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setModalMessage(null)}></div>
+          <div className="relative glass-panel p-6 w-full max-w-sm rounded-2xl shadow-2xl border border-white/20 dark:border-black/20 transform animate-in fade-in zoom-in duration-200">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${modalMessage.isError ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-black dark:text-white">{modalMessage.title}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{modalMessage.text}</p>
+              </div>
+              <button
+                onClick={() => setModalMessage(null)}
+                className={`w-full py-2.5 rounded-xl font-bold transition-colors ${
+                  modalMessage.isError ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-black hover:bg-black/80 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black'
+                }`}
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Grid Layout */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        {/* Top Banner: Master Optimization Gauge Card */}
+        <div className="md:col-span-12 glass-panel p-8 relative overflow-hidden flex flex-col justify-center">
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10 px-4 md:px-8">
           {/* Left info & call to action */}
@@ -315,7 +397,11 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400 font-mono">Processor</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuModel}</span>
+            <span className="text-black dark:text-white font-medium text-right truncate max-w-[200px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</span>
+          </div>
+          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+            <span className="text-gray-500 dark:text-gray-400 font-mono">Graphics (GPU)</span>
+            <span className="text-black dark:text-white font-medium text-right truncate max-w-[200px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400 font-mono">RAM</span>
@@ -332,144 +418,124 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode }) {
         </div>
       </div>
 
-      {/* CPU Monitor */}
-      <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-black dark:text-white truncate max-w-[120px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</p>
-              </div>
+      {/* 2x2 Metric Grid (CPU, GPU, RAM, Storage) */}
+      
+      {/* 1. CPU Monitor */}
+      <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col justify-between hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+              <Cpu className="w-6 h-6" />
             </div>
-            <span className="text-xl font-bold font-mono text-black dark:text-white">{cpuUsage}%</span>
+            <div>
+              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[200px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</p>
+            </div>
           </div>
+          <span className="text-3xl font-black font-mono text-black dark:text-white">{cpuUsage}%</span>
+        </div>
 
-          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-4">
-            <div 
-              className={`${getUsageColor(cpuUsage)} h-full rounded-full transition-all duration-500`}
-              style={{ width: `${cpuUsage}%` }}
-            ></div>
+        <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
+          <div 
+            className={`${getUsageColor(cpuUsage)} h-full rounded-full transition-all duration-500`}
+            style={{ width: `${cpuUsage}%` }}
+          ></div>
+        </div>
+
+        {/* Sparkline Canvas Simulation */}
+        <div className="h-16 flex items-end justify-between gap-1 pt-2 relative">
+          {renderLineGraph(cpuHistory)}
+        </div>
+      </div>
+
+      {/* 2. GPU Monitor */}
+      <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col justify-between hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+              <Monitor className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[200px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Hardware Acceleration</p>
+            </div>
           </div>
-
-          {/* Sparkline Canvas Simulation */}
-          <div className="h-12 flex items-end justify-between gap-1 pt-2">
-            {cpuHistory.map((val, idx) => (
-              <div 
-                key={idx} 
-                className={`w-full ${getUsageColor(val)} opacity-60 hover:opacity-100 rounded-t transition-all duration-300`}
-                style={{ height: `${val}%` }}
-              ></div>
-            ))}
+          <div className="flex justify-between items-end mb-2">
+            <span className="text-3xl font-black font-mono text-black dark:text-white">{gpuUsage > 0 ? `${gpuUsage}%` : 'N/A'}</span>
+            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono mb-1">Utilization</span>
           </div>
         </div>
 
-        {/* RAM Monitor */}
-        <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
-                <MemoryStick className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-black dark:text-white">RAM 점유율</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.ramTotalGB} GB</p>
-              </div>
-            </div>
-            <span className="text-xl font-bold font-mono text-black dark:text-white">{ramUsage}%</span>
-          </div>
-
-          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-3">
-            <div 
-              className={`${getUsageColor(ramUsage)} h-full rounded-full transition-all duration-500`}
-              style={{ width: `${ramUsage}%` }}
-            ></div>
-          </div>
-
-          <div className="flex justify-between text-xs font-mono text-gray-500 dark:text-gray-400 mt-2">
-            <span>사용 중: {sysInfo.ramUsedGB} GB</span>
-            <span>여유: {sysInfo.ramFreeGB} GB</span>
-          </div>
+        <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
+          <div 
+            className={`${getUsageColor(gpuUsage)} h-full rounded-full transition-all duration-500`}
+            style={{ width: `${gpuUsage}%` }}
+          ></div>
         </div>
 
-        {/* Disk NVMe Storage */}
-        <div className="md:col-span-4 glass-panel p-5 relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
-                <HardDrive className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-black dark:text-white">로컬 드라이브</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.diskTotalGB} GB</p>
-              </div>
+        {/* Sparkline Canvas Simulation */}
+        <div className="h-16 flex items-end justify-between gap-1 pt-2 relative">
+          {renderLineGraph(gpuHistory)}
+        </div>
+      </div>
+
+      {/* 3. RAM Monitor */}
+      <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col justify-between hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+              <MemoryStick className="w-6 h-6" />
             </div>
-            <span className="text-xl font-bold font-mono text-black dark:text-white">{diskUsage}%</span>
+            <div>
+              <h3 className="font-bold text-base text-black dark:text-white">시스템 메모리 (RAM)</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.ramTotalGB} GB</p>
+            </div>
           </div>
-
-          <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden mb-3">
-            <div 
-              className={`${getUsageColor(diskUsage)} h-full rounded-full transition-all duration-500`}
-              style={{ width: `${diskUsage}%` }}
-            ></div>
-          </div>
-
-          <div className="flex justify-between text-xs font-mono text-gray-500 dark:text-gray-400 mt-2">
-            <span>사용: {sysInfo.diskUsedGB} GB</span>
-            <span>남음: {sysInfo.diskFreeGB} GB</span>
-          </div>
+          <span className="text-3xl font-black font-mono text-black dark:text-white">{ramUsage}%</span>
         </div>
 
-      {/* Quick Action Navigation Grid (Bento style) */}
-      <button
-        onClick={() => onNavigate('cleaner')}
-        className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
-      >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">JUNK CLEANER</span>
-            <AlertTriangle className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-          </div>
-          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">정크 파일 세척</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">클릭하여 스캔 시작</p>
-        </button>
+        <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
+          <div 
+            className={`${getUsageColor(ramUsage)} h-full rounded-full transition-all duration-500`}
+            style={{ width: `${ramUsage}%` }}
+          ></div>
+        </div>
 
-        <button
-          onClick={() => onNavigate('ram')}
-          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">RAM BOOSTER</span>
-            <TrendingUp className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-          </div>
-          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">대기 메모리 해제</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">즉시 메모리 퍼지</p>
-        </button>
+        <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
+          <span>사용 중: {sysInfo.ramUsedGB} GB</span>
+          <span>여유 공간: {sysInfo.ramFreeGB} GB</span>
+        </div>
+      </div>
 
-        <button
-          onClick={() => onNavigate('startup')}
-          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">BOOT SPEED</span>
-            <Gauge className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+      {/* 4. Disk Storage */}
+      <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col justify-between hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+              <HardDrive className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브 (C:\)</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.diskTotalGB} GB</p>
+            </div>
           </div>
-          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">시작 프로그램 정리</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">부팅 지연 요소 관리</p>
-        </button>
+          <span className="text-3xl font-black font-mono text-black dark:text-white">{diskUsage}%</span>
+        </div>
 
-        <button
-          onClick={() => onNavigate('defrag')}
-          className="md:col-span-2 glass-panel p-4 text-left hover:border-black dark:hover:border-white group transition-all duration-300"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 font-bold">DISK TRIM</span>
-            <HardDrive className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-          </div>
-          <h4 className="font-bold text-black dark:text-white opacity-80 group-hover:opacity-100 transition-opacity">디스크 최적화 & TRIM</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">저장소 수명 및 속도 관리</p>
-      </button>
+        <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
+          <div 
+            className={`${getUsageColor(diskUsage)} h-full rounded-full transition-all duration-500`}
+            style={{ width: `${diskUsage}%` }}
+          ></div>
+        </div>
+
+        <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
+          <span>사용 중: {sysInfo.diskUsedGB} GB</span>
+          <span>남은 용량: {sysInfo.diskFreeGB} GB</span>
+        </div>
+      </div>
+
+      </div>
     </div>
   );
 }
