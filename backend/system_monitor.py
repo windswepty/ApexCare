@@ -33,36 +33,9 @@ _cpu_thread.start()
 
 def _gpu_poller():
     global _gpu_usage
-    global _standby_gb
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-        import win32com.client
-        wmi = win32com.client.GetObject('winmgmts:')
-    except Exception as e:
-        with open("wmi_error.txt", "a") as f:
-            f.write(f"WMI Init Error: {e}\n")
-        return
-        
+    # Removed WMI polling entirely to fix severe memory leaks caused by win32com COM objects.
     while True:
-        try:
-            # Removed heavy GPU utilization WMI query that caused CPU spikes (2.6s query time).
-            _gpu_usage = 0
-            
-            # Query Standby Memory
-            try:
-                mem_perf = wmi.InstancesOf('Win32_PerfFormattedData_PerfOS_Memory')
-                if mem_perf:
-                    p = mem_perf[0]
-                    normal = int(getattr(p, 'StandbyCacheNormalPriorityBytes', 0))
-                    core = int(getattr(p, 'StandbyCacheCoreBytes', 0))
-                    reserve = int(getattr(p, 'StandbyCacheReserveBytes', 0))
-                    _standby_gb = round((normal + core + reserve) / (1024**3), 1)
-            except Exception:
-                pass
-                
-        except Exception:
-            _gpu_usage = 0
+        _gpu_usage = 0
         time.sleep(1)
 
 # Start GPU poller automatically
@@ -117,8 +90,9 @@ def get_system_stats():
         cpu_cores = psutil.cpu_count(logical=False) or 0
         cpu_threads = psutil.cpu_count(logical=True) or 0
         
-        # Standby memory estimation via WMI Poller
-        standby_gb = _standby_gb
+        # Standby memory estimation via psutil (available - free)
+        standby_bytes = mem.available - mem.free
+        standby_gb = round(max(standby_bytes, 0) / (1024**3), 1)
             
         return {
             'cpuModel': cpu_model,

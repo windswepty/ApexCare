@@ -123,6 +123,11 @@ def _booster_loop():
                 _booster_state["detected_game"] = None
                 _booster_state["boosted_pids"] = []
                 last_tamable_pids = []
+                try:
+                    from backend import optimizer
+                    optimizer.set_optimization_mode('standard')
+                except Exception:
+                    pass
             time.sleep(2)
             continue
             
@@ -158,6 +163,14 @@ def _booster_loop():
                 _booster_state["boost_count"] += 1
                 _boost_game_processes(current_game_pids)
                 _tame_processes(current_tamable_pids)
+                
+                # Hardcore boost: Change power plan and purge RAM
+                try:
+                    from backend import optimizer
+                    optimizer.set_optimization_mode('gaming')
+                    optimizer.purge_ram()
+                except Exception:
+                    pass
             elif _booster_state["detected_game"] != game_found:
                 # Game changed
                 _restore_processes(_booster_state["boosted_pids"])
@@ -185,6 +198,13 @@ def _booster_loop():
                 _booster_state["boosted_pids"] = []
                 last_tamable_pids = []
                 
+                # Restore standard mode
+                try:
+                    from backend import optimizer
+                    optimizer.set_optimization_mode('standard')
+                except Exception:
+                    pass
+                
             time.sleep(3) # Check more frequently when waiting for a game
 
 def toggle_booster(enabled):
@@ -200,6 +220,11 @@ def toggle_booster(enabled):
         _restore_processes()
         _booster_state["active"] = False
         _booster_state["detected_game"] = None
+        try:
+            from backend import optimizer
+            optimizer.set_optimization_mode('standard')
+        except Exception:
+            pass
         
     return {"success": True, "enabled": enabled}
 
