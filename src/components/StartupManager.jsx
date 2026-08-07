@@ -21,7 +21,6 @@ export default function StartupManager({ addToast }) {
         } catch (e) {}
       }
     };
-    };
 
     if (window.pywebview?.api) {
       fetchStartup();
