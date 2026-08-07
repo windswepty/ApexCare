@@ -4,11 +4,11 @@ echo APEX CARE Setup Wizard Build Script
 echo =========================================
 
 echo [1/2] Cleaning up previous build files...
-if exist "build\APEX CARE Setup 1.0.5" rmdir /s /q "build\APEX CARE Setup 1.0.5"
-if exist "dist\APEX CARE Setup 1.0.5.exe" del /q "dist\APEX CARE Setup 1.0.5.exe"
+if exist "build\APEX CARE Setup 1.0.4" rmdir /s /q "build\APEX CARE Setup 1.0.4"
+if exist "dist\APEX CARE Setup 1.0.4.exe" del /q "dist\APEX CARE Setup 1.0.4.exe"
 
 echo [2/2] Building Setup Wizard with PyInstaller...
-pyinstaller --noconfirm --onefile --windowed --icon="public\setup_icon.ico" --add-data "dist/APEX CARE Payload.exe;." --add-data "dist/APEX CARE Uninstaller.exe;." --add-data "public/eula.txt;." --add-data "public/setup_icon.ico;." --name "APEX CARE Setup 1.0.5" tools/setup_wizard.py
+pyinstaller --noconfirm --onefile --windowed --icon="public\setup_icon.ico" --add-data "dist/APEX CARE Payload.exe;." --add-data "dist/APEX CARE Uninstaller.exe;." --add-data "public/eula.txt;." --add-data "public/setup_icon.ico;." --name "APEX CARE Setup 1.0.4" tools/setup_wizard.py
 
 if %errorlevel% neq 0 (
     echo [Error] Build failed!
@@ -23,5 +23,5 @@ del /q "dist\APEX CARE Uninstaller.exe"
 echo.
 echo =========================================
 echo Build complete!
-echo Output: dist\APEX CARE Setup 1.0.5.exe
+echo Output: dist\APEX CARE Setup 1.0.4.exe
 echo =========================================
