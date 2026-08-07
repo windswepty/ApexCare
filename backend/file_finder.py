@@ -3,17 +3,16 @@ import hashlib
 import concurrent.futures
 
 def scan_large_files(min_mb=500):
-    """Scan user folders for files larger than min_mb."""
-    # To be safe and fast, we scan the User profile directory
-    target_dir = os.environ.get('USERPROFILE', '')
-    if not target_dir or not os.path.exists(target_dir):
+    """Scan root drive for files larger than min_mb."""
+    target_dir = 'C:\\'
+    if not os.path.exists(target_dir):
         return []
         
     min_bytes = min_mb * 1024 * 1024
     large_files = []
     
-    # Exclude system or hidden AppData folders to prevent breaking things
-    exclude_dirs = ['AppData', 'Application Data', 'Local Settings']
+    # Exclude system folders to prevent breaking things
+    exclude_dirs = ['Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'System Volume Information', '$Recycle.Bin']
     
     for root, dirs, files in os.walk(target_dir):
         # Filter excluded dirs in place

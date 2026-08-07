@@ -6,7 +6,8 @@ import {
   ToggleLeft, 
   ToggleRight,
   ShieldCheck,
-  Cpu
+  Cpu,
+  X
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
@@ -17,6 +18,68 @@ export default function GameBooster() {
     detected_game: null,
     boost_count: 0
   });
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const gameCategories = [
+    {
+      category: "FPS & 슈팅",
+      icon: "🎯",
+      games: [
+        { name: "PUBG (배틀그라운드)", icon: "🪂" },
+        { name: "Valorant (발로란트)", icon: "🔫" },
+        { name: "Overwatch (오버워치)", icon: "⚔️" },
+        { name: "CS:GO / CS2", icon: "💣" },
+        { name: "Apex Legends", icon: "🏃" },
+        { name: "Call of Duty", icon: "🎖️" },
+        { name: "Fortnite (포트나이트)", icon: "🎪" },
+        { name: "Escape from Tarkov", icon: "🎒" },
+        { name: "The Finals", icon: "💰" },
+        { name: "Destiny 2", icon: "🌌" },
+        { name: "Helldivers 2", icon: "🚀" }
+      ]
+    },
+    {
+      category: "RPG & MMORPG",
+      icon: "🗡️",
+      games: [
+        { name: "World of Warcraft", icon: "🐲" },
+        { name: "Diablo IV", icon: "👿" },
+        { name: "Lost Ark (로스트아크)", icon: "⛵" },
+        { name: "MapleStory", icon: "🍁" },
+        { name: "Elden Ring", icon: "⚔️" },
+        { name: "Cyberpunk 2077", icon: "🤖" },
+        { name: "Genshin Impact", icon: "🌟" },
+        { name: "Honkai: Star Rail", icon: "🚂" }
+      ]
+    },
+    {
+      category: "AOS & MOBA",
+      icon: "🛡️",
+      games: [
+        { name: "League of Legends", icon: "⚔️" },
+        { name: "Dota 2", icon: "🔥" }
+      ]
+    },
+    {
+      category: "오픈월드 & 샌드박스",
+      icon: "🌍",
+      games: [
+        { name: "GTA V", icon: "🚗" },
+        { name: "Minecraft", icon: "⛏️" },
+        { name: "Roblox", icon: "🧱" },
+        { name: "Palworld (팰월드)", icon: "🦕" },
+        { name: "Rust (러스트)", icon: "⛺" }
+      ]
+    },
+    {
+      category: "스포츠 (Sports)",
+      icon: "⚽",
+      games: [
+        { name: "FC 24 (피파)", icon: "⚽" }
+      ]
+    }
+  ];
 
   useEffect(() => {
     fetchStatus();
@@ -147,14 +210,72 @@ export default function GameBooster() {
             </div>
           </div>
           
-          <div className="glass-panel p-5 bg-purple-500/5 border-purple-500/20">
-            <h4 className="font-bold text-purple-500 mb-2 text-sm">지원되는 게임 목록</h4>
-            <p className="text-xs text-black/70 dark:text-white/70 leading-relaxed font-mono">
-              PUBG(배틀그라운드), Valorant(발로란트), League of Legends(롤), Overwatch, CS:GO, CS2, Apex Legends, GTA V, Dota 2, Rainbow Six Siege, Cyberpunk 2077
-            </p>
+          <div className="glass-panel p-5 bg-purple-500/5 border-purple-500/20 flex flex-col justify-center items-center">
+            <h4 className="font-bold text-purple-500 mb-3 text-sm flex items-center gap-2">
+              <Gamepad2 className="w-4 h-4" />
+              자동 감지 엔진 가동 중
+            </h4>
+            <button
+              onClick={() => {
+                playSound('click');
+                setIsModalOpen(true);
+              }}
+              className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-purple-500/30 w-full sm:w-auto"
+            >
+              지원되는 게임목록 보기
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Supported Games Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 rounded-3xl p-6 w-full max-w-2xl shadow-2xl relative flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between mb-6 shrink-0">
+              <h3 className="text-lg font-black text-black dark:text-white flex items-center gap-2">
+                <Gamepad2 className="w-5 h-5 text-purple-500" />
+                스마트 부스터 지원 게임 목록
+              </h3>
+              <button
+                onClick={() => {
+                  playSound('toggle');
+                  setIsModalOpen(false);
+                }}
+                className="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500 dark:text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto custom-scrollbar pr-4 pb-2 space-y-6" data-lenis-prevent>
+              {gameCategories.map((cat, catIdx) => (
+                <div key={catIdx}>
+                  <h4 className="text-sm font-bold text-gray-800 dark:text-slate-300 mb-3 flex items-center gap-2">
+                    <span>{cat.icon}</span> {cat.category}
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {cat.games.map((game, idx) => (
+                      <div key={idx} className="bg-gray-50 dark:bg-slate-800/50 hover:bg-purple-50 dark:hover:bg-purple-500/10 border border-black/5 dark:border-slate-700 p-3 rounded-xl flex items-center gap-3 transition-colors cursor-default shadow-sm">
+                        <span className="text-xl">{game.icon}</span>
+                        <span className="font-semibold text-gray-800 dark:text-slate-200 text-xs truncate">
+                          {game.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-black/5 dark:border-slate-800 text-center shrink-0">
+              <p className="text-xs text-gray-500 dark:text-slate-400 font-mono">
+                이 외에도 수십 종의 글로벌 인기 게임 프로세스를 백그라운드에서 실시간 모니터링합니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

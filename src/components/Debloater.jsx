@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function Debloater() {
+export default function Debloater({ addToast }) {
   const [items, setItems] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -69,9 +69,10 @@ export default function Debloater() {
             setIsScanning(false);
             if (st.error) {
               alert("오류 발생: " + st.error);
+              if (addToast) addToast("오류 발생: " + st.error, 'error');
             } else {
               playSound('success');
-              alert("선택한 항목들의 순정화(제거)가 완료되었습니다!");
+              if (addToast) addToast("선택한 항목들의 순정화(제거)가 완료되었습니다!", 'success');
               setSelectedIds([]);
             }
           }

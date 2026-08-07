@@ -245,16 +245,56 @@ def clean_junk(category_ids):
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_SET_QUOTA = 0x0100
 
+def _enable_privilege(priv_name):
+    try:
+        advapi32 = ctypes.WinDLL('advapi32', use_last_error=True)
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        import ctypes.wintypes as wintypes
+        
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.LookupPrivilegeValueW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p]
+        advapi32.AdjustTokenPrivileges.argtypes = [wintypes.HANDLE, wintypes.BOOL, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p]
+        
+        class LUID(ctypes.Structure):
+            _fields_ = [("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG)]
+        class LUID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Luid", LUID), ("Attributes", wintypes.DWORD)]
+        class TOKEN_PRIVILEGES(ctypes.Structure):
+            _fields_ = [("PrivilegeCount", wintypes.DWORD), ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+            
+        hToken = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0020 | 0x0008, ctypes.byref(hToken)):
+            return False
+            
+        luid = LUID()
+        if not advapi32.LookupPrivilegeValueW(None, priv_name, ctypes.byref(luid)):
+            kernel32.CloseHandle(hToken)
+            return False
+            
+        tp = TOKEN_PRIVILEGES()
+        tp.PrivilegeCount = 1
+        tp.Privileges[0].Luid = luid
+        tp.Privileges[0].Attributes = 0x00000002 # SE_PRIVILEGE_ENABLED
+        
+        advapi32.AdjustTokenPrivileges(hToken, False, ctypes.byref(tp), ctypes.sizeof(tp), None, None)
+        err = ctypes.get_last_error()
+        kernel32.CloseHandle(hToken)
+        return err == 0
+    except Exception:
+        return False
+
 def purge_ram():
-    """Aggressively Free RAM by calling EmptyWorkingSet and SetProcessWorkingSetSize."""
+    """Aggressively Free RAM by emptying working sets and purging the Standby Cache List."""
     try:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         psapi = ctypes.WinDLL('psapi', use_last_error=True)
+        ntdll = ctypes.WinDLL('ntdll', use_last_error=True)
         
-        # Prototype for aggressive paging
         kernel32.SetProcessWorkingSetSize.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_size_t, ctypes.c_size_t]
         
         purged_count = 0
+        # 1. Empty working sets of all processes (dumps active memory to standby list)
         for p in psutil.process_iter(['pid']):
             try:
                 pid = p.info['pid']
@@ -262,15 +302,19 @@ def purge_ram():
                     continue
                 handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid)
                 if handle:
-                    # 1. Soft Purge
                     psapi.EmptyWorkingSet(handle)
-                    # 2. Hardcore Aggressive Paging (Swap all possible pages to disk)
                     result = kernel32.SetProcessWorkingSetSize(handle, ctypes.c_size_t(-1), ctypes.c_size_t(-1))
                     kernel32.CloseHandle(handle)
                     if result:
                         purged_count += 1
             except Exception:
                 pass
+                
+        # 2. Purge the Standby Cache List
+        _enable_privilege("SeProfileSingleProcessPrivilege")
+        command = ctypes.c_int(4) # MemoryPurgeStandbyList
+        ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
+        
         return {"success": True, "purgedProcesses": purged_count}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -501,30 +545,51 @@ def get_startup_apps():
     """Retrieve startup applications from registry (enabled and disabled)."""
     apps = []
     app_id = 1
-    try:
-        run_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-        i = 0
-        while True:
-            try:
-                name, value, _ = winreg.EnumValue(run_key, i)
-                impact = "High" if len(value) > 30 else "Normal"
-                apps.append({"id": app_id, "name": name, "publisher": value, "impact": impact, "enabled": True, "bootTimeImpact": "+1.4s" if impact == "High" else "+0.6s"})
-                app_id += 1
-                i += 1
-            except OSError:
-                break
-        winreg.CloseKey(run_key)
-    except Exception:
-        pass
+    
+    def _clean(s):
+        if isinstance(s, str): return s.replace('\x00', '').strip()
+        return s
         
+    registry_paths = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+    ]
+    
+    seen = set()
+    
+    for hkey, path in registry_paths:
+        try:
+            run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_READ)
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(run_key, i)
+                    name_clean = _clean(name)
+                    if name_clean not in seen:
+                        seen.add(name_clean)
+                        impact = "High" if len(value) > 30 else "Normal"
+                        apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": impact, "enabled": True, "bootTimeImpact": "+1.4s" if impact == "High" else "+0.6s"})
+                        app_id += 1
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(run_key)
+        except Exception:
+            pass
+            
+    # Read disabled apps backup (only HKCU for now to keep it safe)
     try:
         backup_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup", 0, winreg.KEY_READ)
         i = 0
         while True:
             try:
                 name, value, _ = winreg.EnumValue(backup_key, i)
-                apps.append({"id": app_id, "name": name, "publisher": value, "impact": "High", "enabled": False, "bootTimeImpact": "+1.4s"})
-                app_id += 1
+                name_clean = _clean(name)
+                if name_clean not in seen:
+                    seen.add(name_clean)
+                    apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": "High", "enabled": False, "bootTimeImpact": "+1.4s"})
+                    app_id += 1
                 i += 1
             except OSError:
                 break
@@ -532,6 +597,8 @@ def get_startup_apps():
     except Exception:
         pass
     
+    # Sort alphabetically
+    apps.sort(key=lambda x: x["name"].lower())
     return apps
 
 def toggle_startup_app(name, enabled):

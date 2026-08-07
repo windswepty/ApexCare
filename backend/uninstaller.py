@@ -25,21 +25,26 @@ def get_installed_apps():
                     subkey = winreg.OpenKey(key, subkey_name)
                     
                     try:
-                        display_name = winreg.QueryValueEx(subkey, "DisplayName")[0]
+                        # Helper to clean registry strings of null characters
+                        def _clean(s):
+                            if isinstance(s, str): return s.replace('\x00', '').strip()
+                            return s
+                            
+                        display_name = _clean(winreg.QueryValueEx(subkey, "DisplayName")[0])
                         if not display_name or display_name in seen:
                             continue
                         
                         try:
-                            uninstall_string = winreg.QueryValueEx(subkey, "UninstallString")[0]
+                            uninstall_string = _clean(winreg.QueryValueEx(subkey, "UninstallString")[0])
                         except FileNotFoundError:
                             continue
                             
                         publisher = ""
-                        try: publisher = winreg.QueryValueEx(subkey, "Publisher")[0]
+                        try: publisher = _clean(winreg.QueryValueEx(subkey, "Publisher")[0])
                         except: pass
                         
                         install_date = ""
-                        try: install_date = winreg.QueryValueEx(subkey, "InstallDate")[0]
+                        try: install_date = _clean(winreg.QueryValueEx(subkey, "InstallDate")[0])
                         except: pass
                         
                         estimated_size = 0
@@ -77,7 +82,7 @@ def run_uninstall(uninstall_string):
         # Many uninstall strings contain quotes or arguments
         # If it's MSIExec, we can format it
         if "msiexec" in uninstall_string.lower() and "/I" in uninstall_string.upper():
-            uninstall_string = uninstall_string.replace("/I", "/X").replace("/i", "/x") + " /qn"
+            uninstall_string = uninstall_string.replace("/I", "/X").replace("/i", "/x")
             
         # We launch it asynchronously or wait, but uninstalls usually require UI.
         # So we just launch it.

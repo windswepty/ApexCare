@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   HardDrive, 
   RotateCw, 
@@ -9,71 +9,100 @@ import {
 import confetti from 'canvas-confetti';
 import { playSound } from '../utils/audio';
 
-export default function DiskDefrag() {
-  // 100 blocks grid representation
-  // Types: 'contiguous' (cyan), 'fragmented' (rose), 'system' (purple), 'free' (slate)
-  const initialBlocks = Array.from({ length: 120 }, (_, idx) => {
-    if (idx < 15) return 'system';
-    if (idx % 7 === 0 || idx % 11 === 0) return 'fragmented';
-    if (idx > 95) return 'free';
-    return 'contiguous';
+export default function DiskDefrag({ addToast }) {
+  const [blocks, setBlocks] = useState(() => {
+    const saved = localStorage.getItem('apex_disk_defrag_state');
+    const savedTime = localStorage.getItem('apex_disk_defrag_time');
+    
+    if (saved && savedTime) {
+      try {
+        let parsedBlocks = JSON.parse(saved);
+        
+        // Time decay simulation: increase fragmentation over time
+        const daysPassed = (Date.now() - parseInt(savedTime)) / (1000 * 60 * 60 * 24);
+        if (daysPassed > 1) { // After 1 day, start fragmenting
+          const blocksToFragment = Math.min(Math.floor(daysPassed * 2), 20); // Max 20 blocks
+          let fragmentedAdded = 0;
+          for (let i = 15; i < 95; i++) {
+            if (parsedBlocks[i] === 'contiguous' && Math.random() > 0.8) {
+              parsedBlocks[i] = 'fragmented';
+              fragmentedAdded++;
+              if (fragmentedAdded >= blocksToFragment) break;
+            }
+          }
+          // Also reset 'done' status if it's too fragmented
+          if (fragmentedAdded > 5) {
+            localStorage.removeItem('apex_disk_defrag_done');
+          }
+        }
+        return parsedBlocks;
+      } catch (e) {}
+    }
+    // 100 blocks grid representation
+    // Types: 'contiguous' (cyan), 'fragmented' (rose), 'system' (purple), 'free' (slate)
+    return Array.from({ length: 120 }, (_, idx) => {
+      if (idx < 15) return 'system';
+      if (idx % 7 === 0 || idx % 11 === 0) return 'fragmented';
+      if (idx > 95) return 'free';
+      return 'contiguous';
+    });
   });
 
-  const [blocks, setBlocks] = useState(initialBlocks);
+  const [cmdOutput, setCmdOutput] = useState("");
+  const terminalRef = useRef(null);
   const [isDefragging, setIsDefragging] = useState(false);
-  const [defragProgress, setDefragProgress] = useState(0);
-  const [defragDone, setDefragDone] = useState(false);
+  const [defragDone, setDefragDone] = useState(() => localStorage.getItem('apex_disk_defrag_done') === 'true');
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [cmdOutput]);
 
   const startDefragAndTrim = async () => {
     if (isDefragging) return;
     playSound('scan');
     setIsDefragging(true);
-    setDefragProgress(0);
     setDefragDone(false);
-
-    let currentStep = 0;
-    const interval = setInterval(() => {
-      currentStep += 2;
-      if (currentStep <= 90) {
-        setDefragProgress(currentStep);
-        setBlocks(prev => {
-          const next = [...prev];
-          const fragIndex = next.findIndex(b => b === 'fragmented');
-          if (fragIndex !== -1) {
-            next[fragIndex] = 'contiguous';
-            playSound('click');
-          }
-          return next;
-        });
-      }
-    }, 150);
+    setCmdOutput("C:\\Windows\\System32> defrag.exe /C /O\n\n[APEX Engine] 윈도우 네이티브 시스템에 모든 드라이브(C:, D: 등 전체)의 최적화 및 TRIM(빈 블록 데이터 폐기) 명령을 요청합니다...\n[APEX Engine] 저장 장치 타입(NVMe, SATA SSD 등)에 따라 작업이 수 초 내외로 빠르게 완료될 수 있습니다. 대기 중...\n\n");
 
     let success = false;
+    let outputText = "";
     if (window.pywebview?.api && window.pywebview?.api.runTrim) {
       try {
         const res = await window.pywebview?.api.runTrim();
         success = res?.success;
+        outputText = res?.output || (success ? "성공적으로 완료되었습니다." : "출력 내용이 없습니다.");
       } catch (e) {
         success = false;
+        outputText = String(e);
       }
     } else {
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 2000));
       success = true;
+      outputText = "개발 모드: 가상 출력 완료.\n\n볼륨 C: 최적화 완료.\n모든 볼륨 최적화 완료.";
     }
 
-    clearInterval(interval);
     setIsDefragging(false);
+    setCmdOutput(prev => prev + outputText + "\n\n[APEX Engine] 모든 작업이 종료되었습니다.");
 
     if (success) {
-      setDefragProgress(100);
       setDefragDone(true);
+      localStorage.setItem('apex_disk_defrag_done', 'true');
+      localStorage.setItem('apex_disk_defrag_time', Date.now().toString());
       playSound('success');
-      setBlocks(prev => prev.map(b => b === 'fragmented' ? 'contiguous' : b));
+      setBlocks(prev => {
+        const next = prev.map(b => b === 'fragmented' ? 'contiguous' : b);
+        localStorage.setItem('apex_disk_defrag_state', JSON.stringify(next));
+        return next;
+      });
       try {
         confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
       } catch (e) {}
+      if (addToast) addToast('디스크 조각모음 및 TRIM 최적화가 완료되었습니다!', 'success');
     } else {
-      alert("TRIM 최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
+      alert("최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
+      if (addToast) addToast('디스크 최적화에 실패했습니다.', 'error');
     }
   };
 
@@ -118,7 +147,7 @@ export default function DiskDefrag() {
           {isDefragging ? (
             <>
               <RotateCw className="w-5 h-5 animate-spin" />
-              <span>TRIM 최적화 진행 중 ({defragProgress}%)</span>
+              <span>TRIM 최적화 진행 중...</span>
             </>
           ) : (
             <>
@@ -129,23 +158,24 @@ export default function DiskDefrag() {
         </button>
       </div>
 
-      {/* Progress & Alert */}
-      {isDefragging && (
+      {/* Progress Terminal */}
+      {(isDefragging || cmdOutput) && (
         <div className="glass-panel p-4 space-y-2">
-          <div className="flex justify-between text-xs font-mono">
-            <span className="text-emerald-300">NVMe 컨트롤러 TRIM 파티션 검사 및 맵 재정렬...</span>
-            <span className="text-gray-500 dark:text-slate-400">{defragProgress}%</span>
+          <div className="flex justify-between text-xs font-mono mb-2">
+            <span className="text-emerald-300">Windows Native CMD Console</span>
+            {isDefragging && <span className="text-emerald-400 animate-pulse">Running...</span>}
           </div>
-          <div className="w-full bg-white dark:bg-slate-900 h-2.5 rounded-full overflow-hidden">
-            <div 
-              className="bg-gradient-to-r from-emerald-400 to-cyan-400 h-full rounded-full transition-all duration-200"
-              style={{ width: `${defragProgress}%` }}
-            ></div>
+          <div 
+            ref={terminalRef}
+            className="w-full bg-black/80 dark:bg-black/90 rounded-lg p-4 font-mono text-[11px] leading-relaxed text-gray-300 overflow-y-auto max-h-[300px] border border-white/5"
+            style={{ whiteSpace: 'pre-wrap' }}
+          >
+            {cmdOutput}
           </div>
         </div>
       )}
 
-      {defragDone && (
+      {defragDone && !isDefragging && (
         <div className="glass-panel border-emerald-500/40 bg-emerald-950/20 p-4 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
@@ -161,35 +191,23 @@ export default function DiskDefrag() {
       )}
 
       {/* Disk Status Specs */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel p-4 text-center">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">드라이브 종류</span>
-          <div className="text-lg font-extrabold text-black dark:text-white mt-1">NVMe M.2 SSD</div>
-          <span className="text-[10px] text-emerald-400 font-mono">TRIM 기능 지원됨</span>
+          <div className="text-lg font-extrabold text-black dark:text-white mt-1">ALL Connected Drives</div>
+          <span className="text-[10px] text-emerald-400 font-mono">전체 드라이브 대상 최적화 지원됨</span>
         </div>
 
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">조각화 비율 (Fragmented)</span>
+          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">조각화 비율 추정 (Fragmented)</span>
           <div className={`text-lg font-extrabold font-mono mt-1 ${fragmentedCount > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
             {((fragmentedCount / blocks.length) * 100).toFixed(1)}%
           </div>
-          <span className="text-[10px] text-slate-500 font-mono">{fragmentedCount}개 파편 블록</span>
-        </div>
-
-        <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">순차 읽기 속도</span>
-          <div className="text-lg font-extrabold font-mono text-cyan-400 mt-1">7,450 MB/s</div>
-          <span className="text-[10px] text-slate-500 font-mono">PCIe Gen4 x4</span>
-        </div>
-
-        <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">순차 쓰기 속도</span>
-          <div className="text-lg font-extrabold font-mono text-purple-400 mt-1">6,900 MB/s</div>
-          <span className="text-[10px] text-slate-500 font-mono">최적 성능 상태</span>
+          <span className="text-[10px] text-slate-500 font-mono">시간 경과에 따른 가상 조각화 추정치</span>
         </div>
       </div>
 
-      {/* Detailed Status (Replacing fake cluster map) */}
+      {/* Detailed Status */}
       <div className="glass-panel p-6 space-y-4">
         <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm flex items-center gap-2">
           <Layers className="w-4 h-4 text-cyan-400" />

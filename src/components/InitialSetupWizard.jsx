@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders } from 'lucide-react';
+import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders, MemoryStick } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
 export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
@@ -138,23 +138,50 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   분석된 시스템 스펙
                 </h3>
                 
-                <div className="space-y-3">
-                  <div className={`p-4 rounded-xl border flex items-center gap-4 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
-                    <Cpu className={`w-6 h-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
+                    <div className="flex items-center gap-2">
+                      <Cpu className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-[10px] font-mono mb-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
-                      <div className="font-semibold text-sm truncate">{stats?.cpuModel || '알 수 없음'}</div>
-                      <div className={`text-xs font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
+                      <div className="font-semibold text-xs truncate" title={stats?.cpuModel}>{stats?.cpuModel || '알 수 없음'}</div>
+                      <div className={`text-[10px] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
                         {stats?.cpuCores} Cores / {stats?.cpuThreads} Threads
                       </div>
                     </div>
                   </div>
 
-                  <div className={`p-4 rounded-xl border flex items-center gap-4 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
-                    <Monitor className={`w-6 h-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                  <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
+                    <div className="flex items-center gap-2">
+                      <Monitor className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>그래픽 (GPU)</div>
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-[10px] font-mono mb-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
-                      <div className="font-semibold text-sm truncate">{stats?.ramTotalGB || 0} GB 탑재</div>
+                      <div className="font-semibold text-xs truncate" title={stats?.gpuModel || '3D Engine (WMI)'}>{stats?.gpuModel || '3D Engine (WMI)'}</div>
+                      <div className={`text-[10px] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
+                        Hardware Accelerated
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
+                    <div className="flex items-center gap-2">
+                      <MemoryStick className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-xs truncate">{stats?.ramTotalGB || 0} GB 탑재</div>
+                    </div>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
+                    <div className="flex items-center gap-2">
+                      <HardDrive className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>로컬 드라이브 (SSD)</div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-xs truncate">{stats?.diskTotalGB || 0} GB 공간</div>
                     </div>
                   </div>
                 </div>

@@ -10,7 +10,7 @@ import {
 import confetti from 'canvas-confetti';
 import { playSound } from '../utils/audio';
 
-export default function JunkCleaner() {
+export default function JunkCleaner({ addToast }) {
   const [items, setItems] = useState([]);
 
   const rescanJunk = async () => {
@@ -33,7 +33,6 @@ export default function JunkCleaner() {
   }, []);
 
   const [isCleaning, setIsCleaning] = useState(false);
-  const [cleanProgress, setCleanProgress] = useState(0);
   const [cleanedSuccess, setCleanedSuccess] = useState(false);
 
   const toggleItem = (id) => {
@@ -61,9 +60,6 @@ export default function JunkCleaner() {
     if (totalSelectedMB === 0 || isCleaning) return;
     playSound('scan');
     setIsCleaning(true);
-    setCleanProgress(0);
-
-    setCleanProgress(10);
 
     const selectedIds = items.filter(i => i.selected).map(i => i.id);
 
@@ -84,11 +80,9 @@ export default function JunkCleaner() {
       } catch (e) {}
     }
 
-    setCleanProgress(100);
-    setTimeout(() => {
-      setIsCleaning(false);
-      setCleanedSuccess(true);
-      playSound('success');
+    setIsCleaning(false);
+    setCleanedSuccess(true);
+    playSound('success');
 
       // Empty selected items size
       setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
@@ -96,7 +90,10 @@ export default function JunkCleaner() {
       try {
         confetti({ particleCount: 60, spread: 60, origin: { y: 0.7 } });
       } catch (e) {}
-    }, 500);
+      
+      if (addToast) {
+        addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${freedMB || '성공'})`, 'success');
+      }
   };
 
   return (
@@ -144,7 +141,7 @@ export default function JunkCleaner() {
               {isCleaning ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin" />
-                  <span>세척 중 ({cleanProgress}%)</span>
+                  <span>세척 중...</span>
                 </>
               ) : (
                 <>
@@ -157,19 +154,11 @@ export default function JunkCleaner() {
         </div>
       </div>
 
-      {/* Cleaning Progress Bar */}
+      {/* Cleaning Progress Indicator */}
       {isCleaning && (
-        <div className="glass-panel p-4 space-y-2">
-          <div className="flex justify-between text-xs font-mono">
-            <span className="text-cyan-300">임시 조각파일 및 캐시 데이터 안전 제거 중...</span>
-            <span className="text-gray-500 dark:text-slate-400">{cleanProgress}%</span>
-          </div>
-          <div className="w-full bg-white dark:bg-slate-900 h-2.5 rounded-full overflow-hidden">
-            <div 
-              className="bg-gradient-to-r from-cyan-400 to-emerald-400 h-full rounded-full transition-all duration-300"
-              style={{ width: `${cleanProgress}%` }}
-            ></div>
-          </div>
+        <div className="glass-panel p-4 flex items-center justify-center gap-3 text-cyan-400 font-mono text-sm">
+          <RefreshCw className="w-5 h-5 animate-spin" />
+          임시 조각파일 및 캐시 데이터 안전 제거 중...
         </div>
       )}
 

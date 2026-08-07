@@ -6,14 +6,15 @@ import {
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function StartupManager() {
+export default function StartupManager({ addToast }) {
   const [startupApps, setStartupApps] = useState([]);
 
   useEffect(() => {
     const fetchStartup = async () => {
       if (window.pywebview?.api && window.pywebview?.api.getStartupApps) {
         try {
-          const apps = await window.pywebview?.api.getStartupApps();
+          const raw_data = await window.pywebview?.api.getStartupApps();
+          const apps = typeof raw_data === 'string' ? JSON.parse(raw_data) : raw_data;
           if (apps && apps.length > 0) {
             setStartupApps(apps);
           }
@@ -40,6 +41,7 @@ export default function StartupManager() {
         if (!res?.success) {
           throw new Error('Failed to toggle');
         }
+        if (addToast) addToast(`[${appName}] 시작 프로그램 상태가 변경되었습니다.`, 'success');
       } catch (e) {
         // Revert on failure
         alert(`시작 프로그램(${appName}) 상태 변경에 실패했습니다. 권한을 확인해주세요.`);
@@ -65,17 +67,22 @@ export default function StartupManager() {
         try {
           const res = await window.pywebview?.api.toggleStartupApp(app.name, false);
           if (!res?.success) {
-            // Silently fail for bulk actions, or revert individual
-            setStartupApps(prev => prev.map(a => 
-              a.id === app.id ? { ...a, enabled: true } : a
-            ));
+            allSuccess = false;
           }
         } catch (e) {
-          setStartupApps(prev => prev.map(a => 
-            a.id === app.id ? { ...a, enabled: true } : a
-          ));
+          allSuccess = false;
         }
       }
+    }
+
+    if (!allSuccess) {
+      // Revert on failure
+      setStartupApps(prev => prev.map(app => 
+        appsToDisable.some(a => a.id === app.id) ? { ...app, enabled: true } : app
+      ));
+      if (addToast) addToast('높은 영향도의 시작 프로그램 비활성화에 실패했습니다.', 'error');
+    } else {
+      if (addToast) addToast('모든 무거운 시작 프로그램이 비활성화되었습니다!', 'success');
     }
   };
 

@@ -9,16 +9,16 @@ def _run_hidden_cmd(cmd):
         # CREATE_NO_WINDOW = 0x08000000
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=0x08000000, text=True)
         if result.returncode == 0:
-            return {"success": True, "message": "성공적으로 완료되었습니다."}
+            return {"success": True, "message": "성공적으로 완료되었습니다.", "output": result.stdout}
         else:
             return {"success": False, "message": f"작업 실패 (코드: {result.returncode})", "error": result.stderr}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def run_trim():
-    """Run disk optimization and TRIM."""
-    # /O means optimize (including TRIM for SSDs)
-    return _run_hidden_cmd(["defrag.exe", "C:", "/O"])
+    """Run disk optimization and TRIM on ALL volumes."""
+    # /C means all volumes, /O means optimize (including TRIM for SSDs)
+    return _run_hidden_cmd(["defrag.exe", "/C", "/O"])
 
 def run_sfc():
     """Run System File Checker."""

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function PerformanceModes({ currentMode, setCurrentMode }) {
+export default function PerformanceModes({ currentMode, setCurrentMode, addToast }) {
   const [isBoosterEnabled, setIsBoosterEnabled] = useState(true);
   const [activeAppId, setActiveAppId] = useState(null);
   const [runningApps, setRunningApps] = useState([]);
@@ -49,8 +49,10 @@ export default function PerformanceModes({ currentMode, setCurrentMode }) {
     if (window.pywebview?.api && window.pywebview?.api.setProcessPriority) {
       try {
         await window.pywebview?.api.setProcessPriority(pid, priority);
+        if (addToast) addToast('우선순위가 성공적으로 변경되었습니다.', 'success');
       } catch (e) {
         alert('우선순위 변경 권한이 없습니다.');
+        if (addToast) addToast('우선순위 변경에 실패했습니다.', 'error');
       }
     }
   };
@@ -107,11 +109,11 @@ export default function PerformanceModes({ currentMode, setCurrentMode }) {
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="glass-panel p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-semibold mb-1">
+      <div className="glass-panel p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative overflow-hidden">
+        <div className="space-y-1 z-10">
+          <div className="flex items-center gap-2 text-fuchsia-400 font-mono text-xs font-semibold mb-1">
             <Zap className="w-4 h-4" />
-            DYNAMIC POWER & PERFORMANCE PROFILES
+            AI OPTIMIZATION PROFILES & SMART BOOSTER
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white">성능 부스트 모드 설정</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
@@ -241,7 +243,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode }) {
                   </span>
                 </div>
 
-                <div className="space-y-2 h-48 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-2 h-48 overflow-y-auto pr-2 custom-scrollbar" data-lenis-prevent>
                   {runningApps.slice(0, 8).map((app, idx) => (
                     <button 
                       key={app.pid} 
@@ -254,9 +256,10 @@ export default function PerformanceModes({ currentMode, setCurrentMode }) {
                         <div className="font-semibold text-gray-800 dark:text-slate-200 text-[11px] truncate">{app.name}</div>
                         <div className="text-[9px] font-mono text-gray-500 dark:text-slate-400 truncate">PID: {app.pid}</div>
                       </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-bold">
+                      <div className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-bold flex items-center gap-1 shrink-0" title="프로세스 CPU 점유율 (멀티코어 사용 시 100% 초과 가능)">
+                        <Cpu className="w-3 h-3 text-amber-500/80 dark:text-amber-400/80" />
                         {app.cpuPct}
-                      </span>
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -291,11 +294,13 @@ export default function PerformanceModes({ currentMode, setCurrentMode }) {
             <div
               key={mode.id}
               onClick={() => {
-                playSound('toggle');
+                playSound('success');
                 setCurrentMode(mode.id);
+                if (addToast) addToast(`[${mode.title.split('(')[0].trim()}] 프로필이 적용되었습니다!`, 'success');
               }}
-              className={`glass-panel p-6 cursor-pointer transition-all duration-300 relative overflow-hidden flex flex-col justify-between ${
-                isActive ? `${mode.borderColor} bg-white dark:bg-slate-900/90 shadow-xl scale-[1.02]` : 'hover:border-black/10 dark:border-slate-700 opacity-85'
+              className={`relative flex-1 glass-panel text-left p-6 group cursor-pointer transition-all duration-300 ${
+                isActive
+                  ? `border-2 ${mode.borderColor} bg-white dark:bg-slate-900/90 shadow-xl scale-[1.02]` : 'hover:border-black/10 dark:border-slate-700 opacity-85'
               }`}
             >
               {/* Active Badge indicator top right */}

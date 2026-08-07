@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Lenis from 'lenis';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -27,6 +28,19 @@ export default function App() {
   const [isBackendReady, setIsBackendReady] = useState(false);
   const [showInitialWizard, setShowInitialWizard] = useState(() => localStorage.getItem('isFirstRunComplete') !== 'true');
   const [systemStats, setSystemStats] = useState(null);
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = useCallback((message, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 10000);
+  }, []);
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   useEffect(() => {
     let checkInterval = setInterval(async () => {
@@ -144,22 +158,61 @@ export default function App() {
           {/* Scrollable Content */}
           <main ref={scrollWrapperRef} className="flex-1 overflow-y-auto px-6 pb-6 flex flex-col">
             <div ref={scrollContentRef} className="flex flex-col flex-1">
-              {activeTab === 'dashboard' && (
-                <Dashboard onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
-              )}
-              {activeTab === 'cleaner' && <JunkCleaner />}
-              {activeTab === 'ram' && <RamBooster />}
-              {activeTab === 'startup' && <StartupManager />}
-              {activeTab === 'defrag' && <DiskDefrag />}
-              {activeTab === 'modes' && <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} />}
-              {activeTab === 'drivers' && <DriverUpdater />}
-              {activeTab === 'uninstaller' && <Uninstaller />}
-              {activeTab === 'fileFinder' && <FileFinder />}
-              {activeTab === 'debloater' && <Debloater />}
-              {activeTab === 'gamebooster' && <GameBooster />}
+              <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
+                <Dashboard onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'cleaner' ? 'block' : 'none', height: '100%' }}>
+                <JunkCleaner addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'ram' ? 'block' : 'none', height: '100%' }}>
+                <RamBooster addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'startup' ? 'block' : 'none', height: '100%' }}>
+                <StartupManager addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'defrag' ? 'block' : 'none', height: '100%' }}>
+                <DiskDefrag addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
+                <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'drivers' ? 'block' : 'none', height: '100%' }}>
+                <DriverUpdater addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'uninstaller' ? 'block' : 'none', height: '100%' }}>
+                <Uninstaller addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'fileFinder' ? 'block' : 'none', height: '100%' }}>
+                <FileFinder addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'debloater' ? 'block' : 'none', height: '100%' }}>
+                <Debloater addToast={addToast} />
+              </div>
+              <div style={{ display: activeTab === 'gamebooster' ? 'block' : 'none', height: '100%' }}>
+                <GameBooster addToast={addToast} />
+              </div>
             </div>
           </main>
         </div>
+      </div>
+
+      {/* Global Toast Container */}
+      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
+        {toasts.map((toast) => (
+          <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
+            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+            {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
+            {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
+                {toast.message}
+              </p>
+            </div>
+            <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

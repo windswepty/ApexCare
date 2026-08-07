@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function RamBooster() {
+export default function RamBooster({ addToast }) {
   const [ramData, setRamData] = useState({
     activeGB: 14.2,
     standbyGB: 7.8,
@@ -25,13 +25,18 @@ export default function RamBooster() {
         try {
           const stats = await window.pywebview?.api.getSystemStats();
           if (stats) {
-            const usedGB = parseFloat(stats.ramUsedGB || 14.2);
-            const totalGB = parseFloat(stats.ramTotalGB || 32.0);
-            const standbyGB = parseFloat(stats.ramStandbyGB || 2.4);
-            const freeGB = Math.max(0.5, parseFloat((totalGB - usedGB - standbyGB).toFixed(1)));
+            // psutil's ramUsedGB on Windows is (Total - Free), so it ALREADY includes Standby Cache.
+            const totalGB = parseFloat(stats.ramTotalGB ?? 32.0);
+            const usedGB = parseFloat(stats.ramUsedGB ?? 14.2);
+            const standbyGB = parseFloat(stats.ramStandbyGB ?? 2.4);
+            
+            // True Active RAM = (Used - Standby)
+            const activeGB = Math.max(0.1, usedGB - standbyGB);
+            // Free RAM = (Total - Used)
+            const freeGB = Math.max(0.1, totalGB - usedGB);
 
             setRamData({
-              activeGB: usedGB,
+              activeGB: activeGB,
               standbyGB: standbyGB,
               freeGB: freeGB,
               totalGB: totalGB,
@@ -82,8 +87,10 @@ export default function RamBooster() {
     if (success) {
       setPurgedSuccess(true);
       playSound('success');
+      if (addToast) addToast('대기 메모리(Standby Cache)가 성공적으로 최적화되었습니다!', 'success');
     } else {
       alert("RAM 최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
+      if (addToast) addToast('RAM 최적화에 실패했습니다.', 'error');
     }
   };
 
@@ -99,8 +106,10 @@ export default function RamBooster() {
         if (!res?.success) {
           throw new Error('Failed to kill');
         }
+        if (addToast) addToast('프로세스가 성공적으로 종료되었습니다.', 'success');
       } catch (e) {
         alert("프로세스 종료에 실패했습니다. (액세스 거부됨)");
+        if (addToast) addToast('프로세스 종료에 실패했습니다.', 'error');
         if (processToRemove) {
           setProcesses(prev => [...prev, processToRemove]);
         }

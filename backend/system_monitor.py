@@ -7,10 +7,67 @@ import platform
 import os
 import ctypes
 import ctypes.wintypes
+import ctypes.wintypes
 import time
+import threading
 
 # Cache CPU model info once at import time (WMI is heavy, only call once)
 _cpu_model_cache = None
+
+# CPU, GPU, and RAM Cache
+_cpu_usage = 0
+_gpu_usage = 0
+_standby_gb = 0
+
+def _cpu_poller():
+    global _cpu_usage
+    while True:
+        try:
+            _cpu_usage = psutil.cpu_percent(interval=1)
+        except Exception:
+            _cpu_usage = 0
+
+# Start CPU poller
+_cpu_thread = threading.Thread(target=_cpu_poller, daemon=True)
+_cpu_thread.start()
+
+def _gpu_poller():
+    global _gpu_usage
+    global _standby_gb
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+        import win32com.client
+        wmi = win32com.client.GetObject('winmgmts:')
+    except Exception as e:
+        with open("wmi_error.txt", "a") as f:
+            f.write(f"WMI Init Error: {e}\n")
+        return
+        
+    while True:
+        try:
+            # Removed heavy GPU utilization WMI query that caused CPU spikes (2.6s query time).
+            _gpu_usage = 0
+            
+            # Query Standby Memory
+            try:
+                mem_perf = wmi.InstancesOf('Win32_PerfFormattedData_PerfOS_Memory')
+                if mem_perf:
+                    p = mem_perf[0]
+                    normal = int(getattr(p, 'StandbyCacheNormalPriorityBytes', 0))
+                    core = int(getattr(p, 'StandbyCacheCoreBytes', 0))
+                    reserve = int(getattr(p, 'StandbyCacheReserveBytes', 0))
+                    _standby_gb = round((normal + core + reserve) / (1024**3), 1)
+            except Exception:
+                pass
+                
+        except Exception:
+            _gpu_usage = 0
+        time.sleep(1)
+
+# Start GPU poller automatically
+_gpu_thread = threading.Thread(target=_gpu_poller, daemon=True)
+_gpu_thread.start()
 
 def _get_cpu_model():
     """Get CPU brand string via registry."""
@@ -29,11 +86,30 @@ def _get_cpu_model():
         _cpu_model_cache = platform.processor() or "Unknown CPU"
     return _cpu_model_cache
 
+_gpu_model_cache = None
+def _get_gpu_model():
+    global _gpu_model_cache
+    if _gpu_model_cache is not None:
+        return _gpu_model_cache
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+        import win32com.client
+        wmi = win32com.client.GetObject('winmgmts:')
+        controllers = wmi.InstancesOf('Win32_VideoController')
+        for c in controllers:
+            _gpu_model_cache = c.Name
+            break
+        if not _gpu_model_cache:
+            _gpu_model_cache = "Unknown GPU"
+    except Exception:
+        _gpu_model_cache = "Unknown GPU"
+    return _gpu_model_cache
 
 def get_system_stats():
-    """Get system stats using only psutil."""
+    """Get system stats using only psutil and WMI for GPU."""
     try:
-        cpu_usage = psutil.cpu_percent(interval=0)
+        cpu_usage = _cpu_usage
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage('C:\\')
         
@@ -41,10 +117,8 @@ def get_system_stats():
         cpu_cores = psutil.cpu_count(logical=False) or 0
         cpu_threads = psutil.cpu_count(logical=True) or 0
         
-        # Standby memory estimation
-        standby_gb = 0
-        if hasattr(mem, 'free'):
-            standby_gb = round((mem.total - mem.used - mem.free) / (1024**3), 1)
+        # Standby memory estimation via WMI Poller
+        standby_gb = _standby_gb
             
         return {
             'cpuModel': cpu_model,
@@ -58,9 +132,11 @@ def get_system_stats():
             'diskUsedGB': round(disk.used / (1024**3)),
             'diskTotalGB': round(disk.total / (1024**3)),
             'diskPct': round(disk.percent),
-            'cpuTemp': 0,
+            'gpuUsage': _gpu_usage,
+            'gpuModel': _get_gpu_model(),
+            'cpuTemp': 0, # Not easily available without admin + WMI classes or external tools
             'osInfo': f"{platform.system()} {platform.release()} ({platform.machine()})",
-            'uptimeSec': round(time.time() - psutil.boot_time())
+            'uptimeSec': int(time.time() - psutil.boot_time())
         }
     except Exception as e:
         with open("error_log.txt", "a") as f:
@@ -80,12 +156,15 @@ def get_processes():
                     continue
                 mem_mb = mem_info.rss / (1024 * 1024)
                 if mem_mb > 10:  # Only show processes using > 10MB
+                    raw_cpu = p.info.get('cpu_percent', 0) or 0
+                    num_cores = psutil.cpu_count(logical=True) or 1
+                    normalized_cpu = raw_cpu / num_cores
                     procs.append({
                         'id': p.info['pid'],
                         'pid': p.info['pid'],
                         'name': p.info['name'] or 'unknown',
                         'memoryMB': round(mem_mb),
-                        'cpuPct': f"{p.info.get('cpu_percent', 0) or 0:.1f}%",
+                        'cpuPct': f"{normalized_cpu:.1f}%",
                         'priority': 'Normal',
                         'status': 'Running'
                     })

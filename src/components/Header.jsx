@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun } from 'lucide-react';
+import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun, Thermometer } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
 export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsDarkMode }) {
@@ -60,17 +60,6 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
         if (min >= 60) { min = 0; hr += 1; }
         return { hours: hr, minutes: min, seconds: sec };
       });
-      
-      // Simulate CPU temp fluctuation if hardware sensor is blocked (shows as 0)
-      setCpuTemp(prev => {
-        if (prev === 0 || prev > 150) {
-          return 42 + Math.floor(Math.random() * 5); // Base simulated temp
-        }
-        // Small fluctuation for real or already simulated temp
-        const delta = (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 3);
-        const newTemp = prev + delta;
-        return newTemp > 85 ? 85 : (newTemp < 35 ? 35 : newTemp);
-      });
     }, 1000);
 
     // Refresh real temp every 10 seconds (overrides simulation if successful)
@@ -109,8 +98,8 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             <span className="truncate max-w-[200px]">{cpuLabel}</span>
             <span className="text-gray-300 dark:text-gray-600">•</span>
             <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
-              <Flame className="w-3.5 h-3.5 text-gray-500 dark:text-slate-400" />
-              {cpuTemp > 0 ? `${cpuTemp}°C` : '--°C'}
+              <Thermometer className={`w-4 h-4 ${cpuTemp > 80 ? 'text-rose-400' : 'text-blue-400'} drop-shadow-md`} />
+              {cpuTemp > 0 ? `${cpuTemp}°C` : 'N/A'}
             </span>
           </p>
         </div>
@@ -124,15 +113,6 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
           <div>
             <div className="text-[10px] text-gray-500 dark:text-gray-400 font-sans">시스템 가동시간</div>
             <div className="font-bold">{uptime.hours}h {uptime.minutes}m {uptime.seconds}s</div>
-          </div>
-        </div>
-
-        {/* Security Shield */}
-        <div className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300">
-          <ShieldCheck className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-          <div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 font-sans">실시간 보호</div>
-            <div className="font-bold">원활함 (Active)</div>
           </div>
         </div>
 

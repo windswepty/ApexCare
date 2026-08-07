@@ -6,6 +6,7 @@ from backend import uninstaller
 from backend import file_finder
 from backend import debloater
 from backend import game_booster
+import json
 
 class Api:
     def __init__(self, window):
@@ -62,7 +63,10 @@ class Api:
         return system_repair.run_dism()
 
     def getStartupApps(self):
-        return optimizer.get_startup_apps()
+        try:
+            return json.dumps(optimizer.get_startup_apps())
+        except Exception as e:
+            return json.dumps([])
 
     def toggleStartupApp(self, name, enabled):
         return optimizer.toggle_startup_app(name, enabled)
@@ -87,7 +91,10 @@ class Api:
 
     # --- Uninstaller Features ---
     def getUninstallerApps(self):
-        return uninstaller.get_installed_apps()
+        try:
+            return json.dumps(uninstaller.get_installed_apps())
+        except Exception:
+            return json.dumps([])
 
     def uninstallApp(self, uninstall_string):
         return uninstaller.run_uninstall(uninstall_string)
@@ -98,12 +105,12 @@ class Api:
     def cleanAppLeftovers(self, paths):
         return uninstaller.clean_leftovers(paths)
 
-    # === File Finder API ===
-    def startFileScan(self, path):
-        return file_finder.start_scan(path)
+    # --- File Finder Features ---
+    def findLargeFiles(self, min_mb=500):
+        return file_finder.scan_large_files(min_mb)
 
-    def getFileScanStatus(self):
-        return file_finder.get_scan_status()
+    def findDuplicateFiles(self):
+        return file_finder.scan_duplicates()
 
     def deleteFiles(self, paths):
         return file_finder.delete_files(paths)

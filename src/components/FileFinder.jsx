@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Search, HardDrive, Files, Trash2, CheckSquare, Square, Loader2, AlertTriangle } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function FileFinder() {
+export default function FileFinder({ addToast }) {
   const [activeTab, setActiveTab] = useState('large'); // 'large' or 'duplicates'
   const [loading, setLoading] = useState(false);
   const [largeFiles, setLargeFiles] = useState([]);
@@ -17,8 +17,10 @@ export default function FileFinder() {
       try {
         const data = await window.pywebview.api.findLargeFiles(500); // 500MB+
         setLargeFiles(data);
+        if (addToast) addToast(`대용량 파일 스캔이 완료되었습니다. (${data.length}개 발견)`, 'success');
       } catch (e) {
         console.error(e);
+        if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
       }
     }
     setLoading(false);
@@ -31,8 +33,10 @@ export default function FileFinder() {
       try {
         const data = await window.pywebview.api.findDuplicateFiles();
         setDuplicates(data);
+        if (addToast) addToast(`중복 파일 스캔이 완료되었습니다. (${data.length}개 발견)`, 'success');
       } catch (e) {
         console.error(e);
+        if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
       }
     }
     setLoading(false);
@@ -96,7 +100,7 @@ export default function FileFinder() {
     
     if (result.success) {
       playSound('success');
-      alert(`성공적으로 삭제되었습니다. 확보된 용량: ${result.freedMB}MB`);
+      if (addToast) addToast(`성공적으로 삭제되었습니다. 확보된 용량: ${result.freedMB}MB`, 'success');
       // Rescan
       if (activeTab === 'large') handleScanLarge();
       else handleScanDuplicates();
