@@ -30,5 +30,5 @@ call build_setup.bat
 echo.
 echo =========================================
 echo ALL BUILDS COMPLETED SUCCESSFULLY!
-echo Final Setup File: dist\APEX CARE Setup 1.0.4.exe
+echo Final Setup File: dist\APEX CARE Setup 1.0.5.exe
 echo =========================================
