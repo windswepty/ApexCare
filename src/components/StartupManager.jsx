@@ -21,7 +21,14 @@ export default function StartupManager({ addToast }) {
         } catch (e) {}
       }
     };
-    fetchStartup();
+    };
+
+    if (window.pywebview?.api) {
+      fetchStartup();
+    } else {
+      window.addEventListener('pywebviewready', fetchStartup);
+      return () => window.removeEventListener('pywebviewready', fetchStartup);
+    }
   }, []);
 
   const toggleApp = async (id, appName) => {

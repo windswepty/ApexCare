@@ -12,7 +12,12 @@ export default function Uninstaller({ addToast }) {
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
 
   useEffect(() => {
-    fetchApps();
+    if (window.pywebview?.api) {
+      fetchApps();
+    } else {
+      window.addEventListener('pywebviewready', fetchApps);
+      return () => window.removeEventListener('pywebviewready', fetchApps);
+    }
   }, []);
 
   const fetchApps = async () => {

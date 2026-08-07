@@ -29,7 +29,12 @@ export default function JunkCleaner({ addToast }) {
   };
 
   useEffect(() => {
-    rescanJunk();
+    if (window.pywebview?.api) {
+      rescanJunk();
+    } else {
+      window.addEventListener('pywebviewready', rescanJunk);
+      return () => window.removeEventListener('pywebviewready', rescanJunk);
+    }
   }, []);
 
   const [isCleaning, setIsCleaning] = useState(false);

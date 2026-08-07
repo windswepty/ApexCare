@@ -16,7 +16,12 @@ export default function Debloater({ addToast }) {
   const [status, setStatus] = useState({ running: false, progress_pct: 0, current_task: '' });
 
   useEffect(() => {
-    fetchItems();
+    if (window.pywebview?.api) {
+      fetchItems();
+    } else {
+      window.addEventListener('pywebviewready', fetchItems);
+      return () => window.removeEventListener('pywebviewready', fetchItems);
+    }
   }, []);
 
   const fetchItems = async () => {
