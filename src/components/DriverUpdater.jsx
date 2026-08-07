@@ -12,8 +12,8 @@ import {
 import { playSound } from '../utils/audio';
 
 export default function SystemRepair({ addToast }) {
-  // Removed fake progress states
-
+  const [sfcStatus, setSfcStatus] = useState('idle');
+  const [dismStatus, setDismStatus] = useState('idle');
   const runSfc = async () => {
     playSound('scan');
     setSfcStatus('running');

@@ -10,6 +10,8 @@ export default function Uninstaller({ addToast }) {
   const [isCleaning, setIsCleaning] = useState(false);
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
+
+  useEffect(() => {
     fetchApps();
   }, []);
 
