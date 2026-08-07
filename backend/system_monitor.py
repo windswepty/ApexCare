@@ -33,10 +33,31 @@ _cpu_thread.start()
 
 def _gpu_poller():
     global _gpu_usage
-    # Removed WMI polling entirely to fix severe memory leaks caused by win32com COM objects.
+    try:
+        import win32pdh
+        hq = win32pdh.OpenQuery()
+        hc = win32pdh.AddCounter(hq, '\\GPU Engine(*)\\Utilization Percentage')
+        win32pdh.CollectQueryData(hq)
+    except Exception as e:
+        print("[GPU Poller] PDH Init error:", e)
+        while True:
+            _gpu_usage = 0
+            time.sleep(1)
+
     while True:
-        _gpu_usage = 0
-        time.sleep(1)
+        try:
+            time.sleep(1)
+            win32pdh.CollectQueryData(hq)
+            arr = win32pdh.GetFormattedCounterArray(hc, win32pdh.PDH_FMT_DOUBLE)
+            usage = 0.0
+            if isinstance(arr, dict):
+                for k, v in arr.items():
+                    if 'engtype_3D' in k:
+                        usage += v
+            _gpu_usage = round(usage)
+        except Exception as e:
+            _gpu_usage = 0
+            time.sleep(1)
 
 # Start GPU poller automatically
 _gpu_thread = threading.Thread(target=_gpu_poller, daemon=True)

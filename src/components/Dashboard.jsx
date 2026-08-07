@@ -461,7 +461,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
             </div>
           </div>
           <div className="flex justify-between items-end mb-2">
-            <span className="text-3xl font-black font-mono text-black dark:text-white">{gpuUsage > 0 ? `${gpuUsage}%` : 'N/A'}</span>
+            <span className="text-3xl font-black font-mono text-black dark:text-white">{gpuUsage}%</span>
             <span className="text-xs text-gray-500 dark:text-slate-400 font-mono mb-1">Utilization</span>
           </div>
         </div>

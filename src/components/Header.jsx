@@ -4,7 +4,6 @@ import { playSound } from '../utils/audio';
 
 export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsDarkMode }) {
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
-  const [cpuTemp, setCpuTemp] = useState(0);
   const [osLabel, setOsLabel] = useState('Windows');
   const [cpuLabel, setCpuLabel] = useState('Loading...');
 
@@ -19,8 +18,7 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             if (stats.osInfo) setOsLabel(stats.osInfo);
             // CPU Info
             if (stats.cpuModel) setCpuLabel(stats.cpuModel);
-            // CPU Temp
-            if (stats.cpuTemp) setCpuTemp(Math.round(stats.cpuTemp));
+            // OS Info
             // Uptime from OS
             if (stats.uptimeSec) {
               const totalSec = stats.uptimeSec;
@@ -62,21 +60,8 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
       });
     }, 1000);
 
-    // Refresh real temp every 10 seconds (overrides simulation if successful)
-    const tempTimer = setInterval(async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getSystemStats) {
-        try {
-          const stats = await window.pywebview?.api.getSystemStats();
-          if (stats && stats.cpuTemp > 0 && stats.cpuTemp < 150) {
-            setCpuTemp(Math.round(stats.cpuTemp));
-          }
-        } catch (e) {}
-      }
-    }, 10000);
-
     return () => {
       clearInterval(timer);
-      clearInterval(tempTimer);
     };
   }, []);
 
@@ -96,11 +81,6 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-3 mt-1 font-mono transition-colors duration-300">
             <span className="truncate max-w-[200px]">{cpuLabel}</span>
-            <span className="text-gray-300 dark:text-gray-600">•</span>
-            <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
-              <Thermometer className={`w-4 h-4 ${cpuTemp > 80 ? 'text-rose-400' : 'text-blue-400'} drop-shadow-md`} />
-              {cpuTemp > 0 ? `${cpuTemp}°C` : 'N/A'}
-            </span>
           </p>
         </div>
       </div>
