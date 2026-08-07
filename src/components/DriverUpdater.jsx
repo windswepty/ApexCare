@@ -13,7 +13,47 @@ import { playSound } from '../utils/audio';
 
 export default function SystemRepair({ addToast }) {
   const [sfcStatus, setSfcStatus] = useState('idle');
+  const [sfcProgress, setSfcProgress] = useState(0);
+  const [sfcEta, setSfcEta] = useState(240); // 4 minutes
+  
   const [dismStatus, setDismStatus] = useState('idle');
+  const [dismProgress, setDismProgress] = useState(0);
+  const [dismEta, setDismEta] = useState(480); // 8 minutes
+
+  useEffect(() => {
+    let interval;
+    if (sfcStatus === 'running') {
+      interval = setInterval(() => {
+        setSfcProgress(p => (p < 99 ? p + 0.5 : 99));
+        setSfcEta(e => (e > 0 ? e - 1 : 0));
+      }, 1000);
+    } else if (sfcStatus === 'success') {
+      setSfcProgress(100);
+      setSfcEta(0);
+    } else {
+      setSfcProgress(0);
+      setSfcEta(240);
+    }
+    return () => clearInterval(interval);
+  }, [sfcStatus]);
+
+  useEffect(() => {
+    let interval;
+    if (dismStatus === 'running') {
+      interval = setInterval(() => {
+        setDismProgress(p => (p < 99 ? p + 0.2 : 99));
+        setDismEta(e => (e > 0 ? e - 1 : 0));
+      }, 1000);
+    } else if (dismStatus === 'success') {
+      setDismProgress(100);
+      setDismEta(0);
+    } else {
+      setDismProgress(0);
+      setDismEta(480);
+    }
+    return () => clearInterval(interval);
+  }, [dismStatus]);
+
   const runSfc = async () => {
     playSound('scan');
     setSfcStatus('running');
@@ -125,9 +165,20 @@ export default function SystemRepair({ addToast }) {
 
         {/* SFC Progress Indicator */}
         {sfcStatus === 'running' && (
-          <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex items-center justify-center gap-3 text-cyan-500 dark:text-cyan-400 font-mono text-sm">
-            <RotateCw className="w-5 h-5 animate-spin" />
-            시스템 무결성 스캔 및 원본 파일 복원 중...
+          <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
+            <div className="flex items-center justify-between text-cyan-500 dark:text-cyan-400 font-mono text-sm">
+              <div className="flex items-center gap-2">
+                <RotateCw className="w-5 h-5 animate-spin" />
+                <span>시스템 무결성 스캔 및 원본 파일 복원 중...</span>
+              </div>
+              <div className="text-right">
+                <span className="font-bold">{Math.floor(sfcProgress)}%</span>
+                <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {Math.floor(sfcEta / 60)}분 {sfcEta % 60}초</span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div className="bg-cyan-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${sfcProgress}%` }}></div>
+            </div>
           </div>
         )}
       </div>
@@ -183,9 +234,20 @@ export default function SystemRepair({ addToast }) {
 
         {/* DISM Progress Indicator */}
         {dismStatus === 'running' && (
-          <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex items-center justify-center gap-3 text-purple-500 dark:text-purple-400 font-mono text-sm">
-            <RotateCw className="w-5 h-5 animate-spin" />
-            서버 연결 및 Windows 배포 이미지 원본 다운로드 및 복원 중...
+          <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
+            <div className="flex items-center justify-between text-purple-500 dark:text-purple-400 font-mono text-sm">
+              <div className="flex items-center gap-2">
+                <RotateCw className="w-5 h-5 animate-spin" />
+                <span>서버 연결 및 Windows 배포 이미지 원본 다운로드 및 복원 중...</span>
+              </div>
+              <div className="text-right">
+                <span className="font-bold">{Math.floor(dismProgress)}%</span>
+                <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {Math.floor(dismEta / 60)}분 {dismEta % 60}초</span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-500 to-indigo-600 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${dismProgress}%` }}></div>
+            </div>
           </div>
         )}
       </div>

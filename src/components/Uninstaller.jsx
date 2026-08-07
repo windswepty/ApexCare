@@ -11,6 +11,23 @@ export default function Uninstaller({ addToast }) {
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
 
+  const [cleanProgress, setCleanProgress] = useState(0);
+  const [cleanEta, setCleanEta] = useState(3);
+
+  useEffect(() => {
+    let interval;
+    if (isCleaning) {
+      interval = setInterval(() => {
+        setCleanProgress(p => (p < 99 ? p + 33 : 99));
+        setCleanEta(e => (e > 0 ? e - 1 : 0));
+      }, 1000);
+    } else {
+      setCleanProgress(0);
+      setCleanEta(3);
+    }
+    return () => clearInterval(interval);
+  }, [isCleaning]);
+
   useEffect(() => {
     if (window.pywebview?.api) {
       fetchApps();
@@ -192,15 +209,28 @@ export default function Uninstaller({ addToast }) {
       {step === 'leftovers' && (
         <div className="flex-1 flex flex-col items-center justify-center bg-white dark:bg-slate-900/30 rounded-xl border border-black/10 dark:border-slate-700/30 p-8 text-center">
           {isCleaning ? (
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center w-full max-w-md mx-auto">
               <div className="relative mb-6">
                 <div className="absolute inset-0 border-4 border-rose-500/20 rounded-full animate-ping"></div>
                 <Loader2 className="w-16 h-16 text-rose-500 animate-spin relative z-10" />
               </div>
-              <h3 className="text-xl font-bold text-black dark:text-white mb-2">잔여 파일 스캔 중...</h3>
-              <p className="text-gray-500 dark:text-slate-400">
+              <h3 className="text-xl font-bold text-black dark:text-white mb-2">잔여 파일 스캔/제거 중...</h3>
+              <p className="text-gray-500 dark:text-slate-400 mb-6">
                 {activeApp?.name} 프로그램의 찌꺼기를 추적하고 있습니다. (언인스톨러 창이 떴다면 먼저 삭제를 진행해주세요)
               </p>
+              
+              <div className="w-full bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 rounded-xl p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between text-rose-500 dark:text-rose-400 font-mono text-sm">
+                  <span>작업 진행률</span>
+                  <div className="text-right">
+                    <span className="font-bold">{Math.floor(cleanProgress)}%</span>
+                    <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {cleanEta}초</span>
+                  </div>
+                </div>
+                <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-rose-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${cleanProgress}%` }}></div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="w-full max-w-2xl text-left">

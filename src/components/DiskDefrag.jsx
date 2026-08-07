@@ -52,6 +52,22 @@ export default function DiskDefrag({ addToast }) {
   const terminalRef = useRef(null);
   const [isDefragging, setIsDefragging] = useState(false);
   const [defragDone, setDefragDone] = useState(() => localStorage.getItem('apex_disk_defrag_done') === 'true');
+  const [trimProgress, setTrimProgress] = useState(0);
+  const [trimEta, setTrimEta] = useState(30);
+
+  useEffect(() => {
+    let interval;
+    if (isDefragging) {
+      interval = setInterval(() => {
+        setTrimProgress(p => (p < 99 ? p + 3.3 : 99));
+        setTrimEta(e => (e > 0 ? e - 1 : 0));
+      }, 1000);
+    } else {
+      setTrimProgress(0);
+      setTrimEta(30);
+    }
+    return () => clearInterval(interval);
+  }, [isDefragging]);
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -160,18 +176,35 @@ export default function DiskDefrag({ addToast }) {
 
       {/* Progress Terminal */}
       {(isDefragging || cmdOutput) && (
-        <div className="glass-panel p-4 space-y-2">
-          <div className="flex justify-between text-xs font-mono mb-2">
+        <div className="glass-panel p-4 space-y-4">
+          <div className="flex justify-between text-xs font-mono">
             <span className="text-emerald-300">Windows Native CMD Console</span>
-            {isDefragging && <span className="text-emerald-400 animate-pulse">Running...</span>}
+            <span className="text-gray-500">Administrator Privileges Required</span>
           </div>
-          <div 
-            ref={terminalRef}
-            className="w-full bg-black/80 dark:bg-black/90 rounded-lg p-4 font-mono text-[11px] leading-relaxed text-gray-300 overflow-y-auto max-h-[300px] border border-white/5"
-            style={{ whiteSpace: 'pre-wrap' }}
-          >
-            {cmdOutput}
+          
+          <div className="bg-black/50 dark:bg-black/80 rounded-xl p-4 font-mono text-sm text-gray-300 overflow-x-auto border border-black/20 dark:border-white/5 relative">
+            <div className="whitespace-pre-wrap">{cmdOutput}</div>
+            {isDefragging && <span className="animate-pulse absolute bottom-4 left-4 text-emerald-500">_</span>}
           </div>
+
+          {/* Progress Bar added here */}
+          {isDefragging && (
+            <div className="p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
+              <div className="flex items-center justify-between text-emerald-500 dark:text-emerald-400 font-mono text-sm">
+                <div className="flex items-center gap-2">
+                  <RotateCw className="w-5 h-5 animate-spin" />
+                  <span>TRIM 및 클러스터 최적화 진행 중...</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold">{Math.floor(trimProgress)}%</span>
+                  <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {Math.floor(trimEta / 60)}분 {trimEta % 60}초</span>
+                </div>
+              </div>
+              <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div className="bg-emerald-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${trimProgress}%` }}></div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

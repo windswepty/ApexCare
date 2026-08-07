@@ -40,6 +40,26 @@ export default function JunkCleaner({ addToast }) {
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanedSuccess, setCleanedSuccess] = useState(false);
 
+  const [cleanProgress, setCleanProgress] = useState(0);
+  const [cleanEta, setCleanEta] = useState(5);
+
+  useEffect(() => {
+    let interval;
+    if (isCleaning) {
+      interval = setInterval(() => {
+        setCleanProgress(p => (p < 99 ? p + 20 : 99));
+        setCleanEta(e => (e > 0 ? e - 1 : 0));
+      }, 1000);
+    } else if (cleanedSuccess) {
+      setCleanProgress(100);
+      setCleanEta(0);
+    } else {
+      setCleanProgress(0);
+      setCleanEta(5);
+    }
+    return () => clearInterval(interval);
+  }, [isCleaning, cleanedSuccess]);
+
   const toggleItem = (id) => {
     playSound('toggle');
     setItems(items.map(item => item.id === id ? { ...item, selected: !item.selected } : item));
@@ -161,9 +181,20 @@ export default function JunkCleaner({ addToast }) {
 
       {/* Cleaning Progress Indicator */}
       {isCleaning && (
-        <div className="glass-panel p-4 flex items-center justify-center gap-3 text-cyan-400 font-mono text-sm">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          임시 조각파일 및 캐시 데이터 안전 제거 중...
+        <div className="glass-panel p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between text-cyan-400 font-mono text-sm">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>임시 조각파일 및 캐시 데이터 안전 제거 중...</span>
+            </div>
+            <div className="text-right">
+              <span className="font-bold">{Math.floor(cleanProgress)}%</span>
+              <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {cleanEta}초</span>
+            </div>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div className="bg-cyan-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${cleanProgress}%` }}></div>
+          </div>
         </div>
       )}
 
