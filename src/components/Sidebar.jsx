@@ -70,7 +70,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
             <h1 className="font-extrabold text-lg tracking-tight text-black dark:text-white flex items-center gap-1.5 transition-colors duration-300">
               APEX <span className="text-gray-500 dark:text-gray-400">CARE</span>
             </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono transition-colors duration-300">v1.0.3</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono transition-colors duration-300">v1.0.4</p>
           </div>
         </div>
 
