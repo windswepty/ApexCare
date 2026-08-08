@@ -179,12 +179,31 @@ def scan_junk_background():
         _junk_scan_state["progress"] = 75
         soft_dist_size = _get_dir_size_mb(soft_dist, _junk_scan_state, max_files=1000)
         prefetch_size = _get_dir_size_mb(prefetch, _junk_scan_state, max_files=500)
+        
+        # 휴지통 크기 계산 (ctypes)
+        recycle_size = 0.0
+        try:
+            import ctypes
+            from ctypes import wintypes
+            class SHQUERYRBINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD),
+                            ("i64Size", ctypes.c_int64),
+                            ("i64NumItems", ctypes.c_int64)]
+            shell32 = ctypes.windll.shell32
+            info = SHQUERYRBINFO()
+            info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
+            res = shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
+            if res == 0:
+                recycle_size = round(info.i64Size / (1024 * 1024), 2)
+        except Exception:
+            pass
 
         _junk_scan_state["data"] = [
             {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
             {"id": 2, "name": "웹 브라우저 캐시 및 쿠키 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지, 스크립트 캐시 데이터"},
             {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
+            {"id": 5, "name": "휴지통 비우기", "sizeMB": recycle_size, "category": "System", "selected": True, "description": "휴지통에 버려진 파일들을 완전히 삭제합니다"},
         ]
         _junk_scan_state["progress"] = 100
         _junk_scan_state["eta_seconds"] = 0
@@ -306,13 +325,32 @@ def clean_junk_background(category_ids, cancel_event):
         if 4 in category_ids:
             target_dirs.append(prefetch)
 
+        import shutil
+        start_free = shutil.disk_usage('C:\\').free
+
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
                 break
             _clean_dir(d, max_files=2000)
 
-        _junk_clean_state["freed_mb"] = round(total_freed_bytes / (1024 * 1024), 2)
-        print(f"[JunkPurger] 최종 확보 용량: {_junk_clean_state['freed_mb']} MB")
+        if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
+            try:
+                import ctypes
+                # 1 = SHERB_NOCONFIRMATION, 2 = SHERB_NOPROGRESSUI, 4 = SHERB_NOSOUND
+                ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
+                print("[DELETED] Recycle Bin emptied via ctypes.")
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"[ERROR] Failed to empty recycle bin: {e}")
+                sys.stdout.flush()
+
+        end_free = shutil.disk_usage('C:\\').free
+        # 물리적 여유 공간 차이로 실제 확보된 용량 계산
+        actual_freed_bytes = max(0, end_free - start_free)
+
+        _junk_clean_state["freed_mb"] = round(actual_freed_bytes / (1024 * 1024), 2)
+        print(f"[JunkPurger] 삭제 루프 내부 측정 용량: {total_freed_bytes} bytes")
+        print(f"[JunkPurger] 최종 확보 용량 (물리적 차이): {_junk_clean_state['freed_mb']} MB")
         sys.stdout.flush()
         
         if cancel_event and cancel_event.is_set():
