@@ -17,13 +17,19 @@ export default function JunkCleaner() {
   } = useJunk();
 
   useEffect(() => {
-    if (!hasScannedOnce && window.pywebview?.api) {
-      rescanJunk();
+    const checkAndScan = () => {
+      if (!hasScannedOnce && window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
+        rescanJunk();
+      }
+    };
+
+    if (!hasScannedOnce && window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
+      checkAndScan();
     } else if (!hasScannedOnce) {
-      window.addEventListener('pywebviewready', rescanJunk);
-      return () => window.removeEventListener('pywebviewready', rescanJunk);
+      window.addEventListener('pywebviewready', checkAndScan);
+      return () => window.removeEventListener('pywebviewready', checkAndScan);
     }
-  }, [hasScannedOnce]);
+  }, [hasScannedOnce, rescanJunk]);
 
   const totalSelectedMB = items
     .filter(i => i.selected)

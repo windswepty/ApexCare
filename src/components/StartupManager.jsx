@@ -11,17 +11,22 @@ export default function StartupManager({ addToast }) {
 
   useEffect(() => {
     const fetchStartup = async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getStartupApps) {
-        try {
-          const apps = await window.pywebview?.api.getStartupApps();
+      try {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getStartupApps === 'function') {
+          const apps = await window.pywebview.api.getStartupApps();
           if (apps && Array.isArray(apps)) {
             setStartupApps(apps);
+          } else {
+            setStartupApps([]);
           }
-        } catch (e) {}
+        }
+      } catch (e) {
+        console.error('Error fetching startup apps:', e);
+        setStartupApps([]);
       }
     };
 
-    if (window.pywebview?.api) {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getStartupApps === 'function') {
       fetchStartup();
     } else {
       window.addEventListener('pywebviewready', fetchStartup);
@@ -40,9 +45,9 @@ export default function StartupManager({ addToast }) {
       a.id === id ? { ...a, enabled: newEnabled } : a
     ));
 
-    if (window.pywebview?.api && window.pywebview?.api.toggleStartupApp) {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function') {
       try {
-        const res = await window.pywebview?.api.toggleStartupApp(appName, newEnabled);
+        const res = await window.pywebview.api.toggleStartupApp(appName, newEnabled);
         if (!res?.success) {
           throw new Error('Failed to toggle');
         }
@@ -54,6 +59,11 @@ export default function StartupManager({ addToast }) {
           a.id === id ? { ...a, enabled: !newEnabled } : a
         ));
       }
+    } else {
+      if (addToast) addToast("API가 준비되지 않았습니다.", "error");
+      setStartupApps(startupApps.map(a => 
+        a.id === id ? { ...a, enabled: !newEnabled } : a
+      ));
     }
   };
 
@@ -67,16 +77,19 @@ export default function StartupManager({ addToast }) {
       app.impact === 'High' ? { ...app, enabled: false } : app
     ));
 
+    let allSuccess = true;
     for (const app of appsToDisable) {
-      if (window.pywebview?.api && window.pywebview?.api.toggleStartupApp) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function') {
         try {
-          const res = await window.pywebview?.api.toggleStartupApp(app.name, false);
+          const res = await window.pywebview.api.toggleStartupApp(app.name, false);
           if (!res?.success) {
             allSuccess = false;
           }
         } catch (e) {
           allSuccess = false;
         }
+      } else {
+        allSuccess = false;
       }
     }
 

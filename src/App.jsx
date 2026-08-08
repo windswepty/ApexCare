@@ -18,6 +18,7 @@ import GameBooster from './components/GameBooster';
 import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import { JunkProvider } from './context/JunkContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -111,34 +112,35 @@ export default function App() {
       lenis.destroy();
     };
   }, []);
-
   return (
-    <div className="h-screen w-screen bg-white dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
-      
-      {showInitialWizard ? (
-        <InitialSetupWizard 
-          stats={systemStats} 
-          isDarkMode={isDarkMode} 
-          onComplete={(selectedMode) => {
-            setCurrentMode(selectedMode);
-            localStorage.setItem('isFirstRunComplete', 'true');
-            setShowInitialWizard(false);
-          }} 
-        />
-      ) : showLoading ? (
-        <LoadingScreen 
-          isAppReady={isBackendReady} 
-          onComplete={() => setShowLoading(false)} 
-          isDarkMode={isDarkMode}
-        />
-      ) : null}
+    <ErrorBoundary>
+      <JunkProvider addToast={addToast}>
+        <div className="h-screen w-screen bg-white dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
+          
+          {showInitialWizard ? (
+            <InitialSetupWizard 
+              stats={systemStats} 
+              isDarkMode={isDarkMode} 
+              onComplete={(selectedMode) => {
+                setCurrentMode(selectedMode);
+                localStorage.setItem('isFirstRunComplete', 'true');
+                setShowInitialWizard(false);
+              }} 
+            />
+          ) : showLoading ? (
+            <LoadingScreen 
+              isAppReady={isBackendReady} 
+              onComplete={() => setShowLoading(false)} 
+              isDarkMode={isDarkMode}
+            />
+          ) : null}
 
-      {/* Desktop Native TitleBar */}
-      <div className="relative z-20 flex-shrink-0">
-        <TitleBar />
-      </div>
+          {/* Desktop Native TitleBar */}
+          <div className="relative z-20 flex-shrink-0">
+            <TitleBar />
+          </div>
 
-      {/* Main Desktop Window Body */}
+          {/* Main Desktop Window Body */}
       <div className="flex flex-1 min-h-0">
         {/* Left Sidebar */}
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} isDarkMode={isDarkMode} />
@@ -197,25 +199,27 @@ export default function App() {
         </div>
       </div>
 
-      <JunkProvider addToast={addToast}>
-        <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
-          {toasts.map((toast) => (
-            <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
-              {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
-              {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
-              {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
-                  {toast.message}
-                </p>
-              </div>
-              <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
-                <X className="w-3 h-3" />
-              </button>
+      {/* Global Toast Container */}
+      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
+        {toasts.map((toast) => (
+          <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
+            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+            {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
+            {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
+                {toast.message}
+              </p>
             </div>
-          ))}
-        </div>
-      </JunkProvider>
+            <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+      
     </div>
+    </JunkProvider>
+    </ErrorBoundary>
   );
 }

@@ -16,22 +16,35 @@ export default function Debloater({ addToast }) {
   const [status, setStatus] = useState({ running: false, progress_pct: 0, current_task: '' });
 
   useEffect(() => {
-    if (window.pywebview?.api) {
-      fetchItems();
+    const fetchDebloat = () => {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDebloatList === 'function') {
+        fetchItems();
+      }
+    };
+
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDebloatList === 'function') {
+      fetchDebloat();
     } else {
-      window.addEventListener('pywebviewready', fetchItems);
-      return () => window.removeEventListener('pywebviewready', fetchItems);
+      window.addEventListener('pywebviewready', fetchDebloat);
+      return () => window.removeEventListener('pywebviewready', fetchDebloat);
     }
   }, []);
 
   const fetchItems = async () => {
-    if (window.pywebview?.api?.getDebloatList) {
-      const list = await window.pywebview.api.getDebloatList();
-      if (Array.isArray(list)) {
-        setItems(list);
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDebloatList === 'function') {
+        const list = await window.pywebview.api.getDebloatList();
+        if (Array.isArray(list)) {
+          setItems(list);
+        } else {
+          setItems([]);
+        }
       } else {
         setItems([]);
       }
+    } catch (e) {
+      console.error('Error fetching debloat list:', e);
+      setItems([]);
     }
   };
 
@@ -61,32 +74,47 @@ export default function Debloater({ addToast }) {
     playSound('scan');
     setIsScanning(true);
     
-    if (window.pywebview?.api?.startDebloater) {
-      const res = await window.pywebview.api.startDebloater(selectedIds);
-      if (!res.success) {
-        alert(res.message);
-        setIsScanning(false);
-        return;
-      }
-      
-      const poll = setInterval(async () => {
-        const st = await window.pywebview.api.getDebloatStatus();
-        if (st) {
-          setStatus(st);
-          if (!st.running) {
-            clearInterval(poll);
-            setIsScanning(false);
-            if (st.error) {
-              alert("오류 발생: " + st.error);
-              if (addToast) addToast("오류 발생: " + st.error, 'error');
-            } else {
-              playSound('success');
-              if (addToast) addToast("선택한 항목들의 순정화(제거)가 완료되었습니다!", 'success');
-              setSelectedIds([]);
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.startDebloater === 'function') {
+        const res = await window.pywebview.api.startDebloater(selectedIds);
+        if (!res.success) {
+          alert(res.message);
+          setIsScanning(false);
+          return;
+        }
+        
+        const poll = setInterval(async () => {
+          if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDebloatStatus === 'function') {
+            try {
+              const st = await window.pywebview.api.getDebloatStatus();
+              if (st) {
+                setStatus(st);
+                if (!st.running) {
+                  clearInterval(poll);
+                  setIsScanning(false);
+                  if (st.error) {
+                    alert("오류 발생: " + st.error);
+                    if (addToast) addToast("오류 발생: " + st.error, 'error');
+                  } else {
+                    playSound('success');
+                    if (addToast) addToast("선택한 항목들의 순정화(제거)가 완료되었습니다!", 'success');
+                    setSelectedIds([]);
+                  }
+                }
+              }
+            } catch (e) {
+              clearInterval(poll);
+              setIsScanning(false);
             }
           }
-        }
-      }, 500);
+        }, 500);
+      } else {
+        if (addToast) addToast("API가 준비되지 않았습니다.", 'error');
+        setIsScanning(false);
+      }
+    } catch (e) {
+      console.error('Error starting debloater:', e);
+      setIsScanning(false);
     }
   };
 

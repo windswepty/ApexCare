@@ -29,33 +29,47 @@ export default function Uninstaller({ addToast }) {
   }, [isCleaning]);
 
   useEffect(() => {
-    if (window.pywebview?.api) {
-      fetchApps();
+    const checkAndFetch = () => {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getUninstallerApps === 'function') {
+        fetchApps();
+      }
+    };
+
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getUninstallerApps === 'function') {
+      checkAndFetch();
     } else {
-      window.addEventListener('pywebviewready', fetchApps);
-      return () => window.removeEventListener('pywebviewready', fetchApps);
+      window.addEventListener('pywebviewready', checkAndFetch);
+      return () => window.removeEventListener('pywebviewready', checkAndFetch);
     }
   }, []);
 
   const fetchApps = async () => {
     setLoading(true);
-    if (window.pywebview?.api) {
-      try {
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getUninstallerApps === 'function') {
         const data = await window.pywebview.api.getUninstallerApps();
         if (Array.isArray(data)) {
           setApps(data);
         } else {
           setApps([]);
         }
-      } catch (e) {
-        console.error(e);
+      } else {
+        console.warn('PyWebView API getUninstallerApps is not available yet.');
+        setApps([]);
       }
+    } catch (e) {
+      console.error('Error fetching uninstaller apps:', e);
+      setApps([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleUninstall = async (app) => {
-    if (!window.pywebview?.api) return;
+    if (!window.pywebview?.api || typeof window.pywebview.api.uninstallApp !== 'function') {
+      if (addToast) addToast("언인스톨러 API가 준비되지 않았습니다.", "error");
+      return;
+    }
     playSound('click');
     
     // Launch standard uninstaller
@@ -67,7 +81,7 @@ export default function Uninstaller({ addToast }) {
   };
 
   const handleScanLeftovers = async () => {
-    if (!window.pywebview?.api || !activeApp) return;
+    if (!window.pywebview?.api || typeof window.pywebview.api.findAppLeftovers !== 'function' || !activeApp) return;
     playSound('scan');
     setIsCleaning(true);
     setStep('leftovers');
@@ -78,7 +92,7 @@ export default function Uninstaller({ addToast }) {
   };
 
   const handleCleanLeftovers = async () => {
-    if (!window.pywebview?.api) return;
+    if (!window.pywebview?.api || typeof window.pywebview.api.cleanAppLeftovers !== 'function') return;
     playSound('success');
     setIsCleaning(true);
     

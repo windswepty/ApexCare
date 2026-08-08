@@ -85,13 +85,15 @@ export function JunkProvider({ children, addToast }) {
     setCleanedSuccess(false);
     setFreedMB(0);
     setIsScanning(true);
-    if (window.pywebview?.api?.scanJunk) {
-      try {
+    
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
         await window.pywebview.api.scanJunk();
-      } catch (e) {
+      } else {
         setIsScanning(false);
       }
-    } else {
+    } catch (e) {
+      console.error('Error starting junk scan:', e);
       setIsScanning(false);
     }
   };
@@ -103,13 +105,14 @@ export function JunkProvider({ children, addToast }) {
     setCleanEta(5);
     setCleanedSuccess(false);
     
-    if (window.pywebview?.api?.cleanJunk) {
-      try {
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.cleanJunk === 'function') {
         await window.pywebview.api.cleanJunk(selectedIds);
-      } catch (e) {
+      } else {
         setIsCleaning(false);
       }
-    } else {
+    } catch (e) {
+      console.error('Error starting junk clean:', e);
       setIsCleaning(false);
     }
   };
