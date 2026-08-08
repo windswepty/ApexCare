@@ -163,8 +163,6 @@ class Api:
             self._window.hide()
             
     def quitApplication(self):
-        if self._window:
-            self._window.destroy()
         import os
         os._exit(0)
 
