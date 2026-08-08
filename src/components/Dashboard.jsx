@@ -443,7 +443,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white">{cpuUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{cpuUsage}%</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
@@ -471,9 +471,9 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Hardware Acceleration</p>
             </div>
           </div>
-          <div className="flex justify-between items-end mb-2">
+          <div className="flex items-baseline gap-1.5 shrink-0">
             <span className="text-3xl font-black font-mono text-black dark:text-white">{gpuUsage}%</span>
-            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono mb-1">Utilization</span>
+            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">Utilization</span>
           </div>
         </div>
 
@@ -502,7 +502,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.ramTotalGB} GB</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white">{ramUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{ramUsage}%</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
@@ -530,7 +530,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.diskTotalGB} GB</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white">{diskUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{diskUsage}%</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
