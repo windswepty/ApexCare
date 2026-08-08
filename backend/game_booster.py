@@ -591,6 +591,12 @@ def toggle_booster(enabled):
     global _monitor_thread, _stop_event
     _booster_state["enabled"] = enabled
     
+    try:
+        from backend import config_manager
+        config_manager.set_booster_state(enabled)
+    except Exception:
+        pass
+    
     if enabled and (_monitor_thread is None or not _monitor_thread.is_alive()):
         _stop_event.clear()
         _monitor_thread = threading.Thread(target=_booster_loop, daemon=True)
@@ -600,3 +606,14 @@ def toggle_booster(enabled):
     if not enabled:
         log.info("✓ Game Booster DISABLED - delegating teardown to background thread...")
     return {"success": True, "enabled": enabled}
+
+def init_booster():
+    """Auto-start booster on application launch if saved state is enabled."""
+    try:
+        from backend import config_manager
+        saved_state = config_manager.get_booster_state()
+        if saved_state:
+            toggle_booster(True)
+    except Exception as e:
+        log.warning(f"Failed to auto-init booster: {e}")
+

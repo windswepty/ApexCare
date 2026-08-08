@@ -407,9 +407,10 @@ def purge_ram():
         standby_purged = False
         if available_pct < 15:
             _enable_privilege("SeProfileSingleProcessPrivilege")
+            _enable_privilege("SeDebugPrivilege")
             command = ctypes.c_int(4)  # MemoryPurgeStandbyList
-            ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
-            standby_purged = True
+            status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
+            standby_purged = (status == 0)
         
         return {
             "success": True, 
@@ -622,6 +623,12 @@ def set_optimization_mode(mode):
     MMCSS, USB latency, and GPU scheduling parameters.
     """
     try:
+        try:
+            from backend import config_manager
+            config_manager.set_optimization_mode(mode)
+        except Exception:
+            pass
+
         # [공통 최적화] 모든 모드에 적용 (온도 감소 및 기본 성능 확보)
         purge_ram()
         _stop_service("DiagTrack") # 윈도우 원격 분석(텔레메트리) 중지하여 백그라운드 CPU 사용량/온도 감소
@@ -657,6 +664,16 @@ def set_optimization_mode(mode):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+def init_optimization_mode():
+    """Enforce user's saved optimization mode on app launch."""
+    try:
+        from backend import config_manager
+        saved_mode = config_manager.get_optimization_mode()
+        if saved_mode:
+            set_optimization_mode(saved_mode)
+    except Exception as e:
+        log.warning(f"Failed to init optimization mode: {e}")
 
 
 def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
@@ -827,32 +844,50 @@ def get_startup_apps():
     return apps
 
 def toggle_startup_app(name, enabled):
-    """Enable or disable a startup app by moving it between Run and APEXCARE\\DisabledStartup."""
+    """Enable or disable a startup app by moving it between Run keys and APEXCARE\\DisabledStartup."""
+    registry_locations = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+    ]
+    
     try:
-        run_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
         try:
             backup_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup")
         except Exception:
             backup_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup", 0, winreg.KEY_ALL_ACCESS)
             
         if not enabled:
-            # Move from Run to DisabledStartup
-            try:
-                val, _ = winreg.QueryValueEx(run_key, name)
-                winreg.SetValueEx(backup_key, name, 0, winreg.REG_SZ, val)
-                winreg.DeleteValue(run_key, name)
-            except Exception:
-                pass
+            # Look in all Run registry paths to disable
+            found = False
+            for hkey, path in registry_locations:
+                try:
+                    run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_ALL_ACCESS)
+                    try:
+                        val, vtype = winreg.QueryValueEx(run_key, name)
+                        # Save value in backup_key
+                        winreg.SetValueEx(backup_key, name, 0, vtype, val)
+                        # Delete from original Run key
+                        winreg.DeleteValue(run_key, name)
+                        found = True
+                    except FileNotFoundError:
+                        pass
+                    finally:
+                        winreg.CloseKey(run_key)
+                    if found: break
+                except Exception:
+                    pass
         else:
-            # Move from DisabledStartup to Run
+            # Move back from DisabledStartup to HKCU Run key
             try:
-                val, _ = winreg.QueryValueEx(backup_key, name)
-                winreg.SetValueEx(run_key, name, 0, winreg.REG_SZ, val)
+                val, vtype = winreg.QueryValueEx(backup_key, name)
+                run_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+                winreg.SetValueEx(run_key, name, 0, vtype, val)
+                winreg.CloseKey(run_key)
                 winreg.DeleteValue(backup_key, name)
             except Exception:
                 pass
         
-        winreg.CloseKey(run_key)
         winreg.CloseKey(backup_key)
         return {"success": True}
     except Exception as e:

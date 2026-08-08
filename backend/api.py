@@ -12,6 +12,11 @@ import json
 class Api:
     def __init__(self, window):
         self._window = window
+        try:
+            game_booster.init_booster()
+            optimizer.init_optimization_mode()
+        except Exception as e:
+            print(f"[Api] Initialization error: {e}")
 
     def getSystemStats(self):
         stats = system_monitor.get_system_stats()
