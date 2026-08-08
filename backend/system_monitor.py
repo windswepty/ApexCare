@@ -9,6 +9,7 @@ import ctypes
 import ctypes.wintypes
 import time
 import threading
+import subprocess
 
 # Cache CPU model info once at import time (WMI is heavy, only call once)
 _cpu_model_cache = None

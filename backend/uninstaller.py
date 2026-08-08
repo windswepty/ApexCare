@@ -140,21 +140,52 @@ def find_leftovers(app_name):
     return leftovers
 
 def clean_leftovers(paths):
-    """Delete leftover folders."""
+    """Delete leftover folders safely with strict boundary protection."""
     deleted_mb = 0
     failed = 0
+    
+    # Allowed root directories for leftover deletion
+    allowed_roots = [
+        os.environ.get('APPDATA', '').lower(),
+        os.environ.get('LOCALAPPDATA', '').lower(),
+        os.environ.get('ProgramFiles', '').lower(),
+        os.environ.get('ProgramFiles(x86)', '').lower(),
+        os.environ.get('ProgramData', '').lower()
+    ]
+    allowed_roots = [r for r in allowed_roots if r]
+    
     for p in paths:
-        if os.path.exists(p) and os.path.isdir(p):
-            # Safe guard: never delete root paths
-            if len(p) <= 15: continue
+        if not os.path.exists(p) or not os.path.isdir(p):
+            failed += 1
+            continue
             
-            try:
-                # Calculate size before deletion
-                size = sum(os.path.getsize(os.path.join(dirpath, f)) for dirpath, _, fns in os.walk(p) for f in fns)
-                shutil.rmtree(p, ignore_errors=True)
-                if not os.path.exists(p):
-                    deleted_mb += (size / (1024*1024))
-            except Exception:
+        p_lower = p.lower()
+        
+        # Security Guard 1: Must be inside one of the allowed roots
+        if not any(p_lower.startswith(r) for r in allowed_roots):
+            failed += 1
+            continue
+            
+        # Security Guard 2: Must not BE the root itself
+        if p_lower in allowed_roots or len(p_lower) <= 15:
+            failed += 1
+            continue
+            
+        # Security Guard 3: Prevent deleting critical subfolders
+        forbidden_subfolders = ["\\microsoft", "\\windows", "\\google", "\\intel", "\\amd", "\\nvidia"]
+        if any(f in p_lower for f in forbidden_subfolders):
+            failed += 1
+            continue
+            
+        try:
+            # Calculate size before deletion
+            size = sum(os.path.getsize(os.path.join(dirpath, f)) for dirpath, _, fns in os.walk(p) for f in fns)
+            shutil.rmtree(p, ignore_errors=True)
+            if not os.path.exists(p):
+                deleted_mb += (size / (1024*1024))
+            else:
                 failed += 1
+        except Exception:
+            failed += 1
                 
     return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}

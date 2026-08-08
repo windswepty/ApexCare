@@ -120,16 +120,35 @@ def scan_duplicates():
     return duplicates
 
 def delete_files(paths):
-    """Delete multiple files safely."""
+    """Delete multiple files safely with strict system folder protection."""
     deleted_mb = 0
     failed = 0
+    
+    # Critical system paths that should NEVER be touched
+    protected_roots = [
+        os.environ.get('WINDIR', 'C:\\Windows').lower(),
+        os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
+        os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
+        os.environ.get('PROGRAMDATA', 'C:\\ProgramData').lower()
+    ]
+    
     for p in paths:
-        if os.path.exists(p) and os.path.isfile(p):
-            try:
-                size = os.path.getsize(p)
-                os.unlink(p)
-                deleted_mb += (size / (1024*1024))
-            except Exception:
-                failed += 1
+        if not os.path.exists(p) or not os.path.isfile(p):
+            failed += 1
+            continue
+            
+        # Security check: prevent deletion if path is inside protected roots
+        p_lower = p.lower()
+        is_protected = any(p_lower.startswith(pr) for pr in protected_roots)
+        if is_protected:
+            failed += 1
+            continue
+            
+        try:
+            size = os.path.getsize(p)
+            os.unlink(p)
+            deleted_mb += (size / (1024*1024))
+        except Exception:
+            failed += 1
                 
     return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}
