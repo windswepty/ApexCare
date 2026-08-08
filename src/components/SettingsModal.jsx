@@ -55,7 +55,7 @@ export default function SettingsModal({ isOpen, onClose, addToast }) {
           <div className="mb-6">
             <label className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">
               <Key className="w-4 h-4 text-indigo-500" />
-              OpenAI API Key
+              Gemini API Key
             </label>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
               AI 문제 해결사(AI Problem Solver) 기능을 사용하기 위해 필요한 키입니다. 키는 로컬 환경에만 안전하게 저장됩니다.

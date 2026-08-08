@@ -103,7 +103,7 @@ export default function AIProblemSolverModal({ isOpen, onClose, errorLog, system
               {apiKeyMissing && (
                 <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700/50 rounded-lg">
                   <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    <strong>API 키가 필요합니다!</strong> 우측 상단의 톱니바퀴 아이콘(설정)을 클릭하여 OpenAI API 키를 입력해 주세요.
+                    <strong>API 키가 필요합니다!</strong> 우측 상단의 톱니바퀴 아이콘(설정)을 클릭하여 Gemini API 키를 입력해 주세요.
                   </p>
                 </div>
               )}

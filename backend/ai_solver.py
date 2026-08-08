@@ -1,6 +1,4 @@
-import json
-import urllib.request
-import urllib.error
+import google.generativeai as genai
 from backend.config_manager import get_ai_api_key
 
 SYSTEM_PROMPT = """당신은 'APEX CARE'라는 윈도우 PC 최적화 프로그램에 내장된 'AI 문제 해결사(AI Problem Solver)'이자, 세계 최고 수준의 Windows OS 및 PC 하드웨어 최적화 전문가입니다.
@@ -16,45 +14,22 @@ SYSTEM_PROMPT = """당신은 'APEX CARE'라는 윈도우 PC 최적화 프로그�
 def analyze_error_with_ai(error_log, system_state, user_message=""):
     api_key = get_ai_api_key()
     if not api_key:
-        return {"success": False, "error": "AI API 키가 설정되지 않았습니다. 설정에서 OpenAI API 키를 입력해주세요."}
+        return {"success": False, "error": "API 키가 설정되지 않았습니다. 설정에서 Gemini API 키를 입력해주세요."}
 
-    url = "https://api.openai.com/v1/chat/completions"
+    genai.configure(api_key=api_key)
     
     # Prompt 구성
     content = f"**[시스템 상태 정보]**\n{system_state}\n\n**[발생한 에러/로그]**\n{error_log}\n\n"
     if user_message:
         content += f"**[사용자 메시지]**\n{user_message}"
         
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": content}
-        ],
-        "temperature": 0.3
-    }
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-    
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            answer = result['choices'][0]['message']['content']
-            return {"success": True, "answer": answer}
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=SYSTEM_PROMPT
+        )
+        response = model.generate_content(content)
+        return {"success": True, "answer": response.text}
             
-    except urllib.error.HTTPError as e:
-        error_msg = e.read().decode('utf-8')
-        try:
-            parsed = json.loads(error_msg)
-            message = parsed.get("error", {}).get("message", error_msg)
-        except:
-            message = error_msg
-        return {"success": False, "error": f"API 호출 오류 (HTTP {e.code}): {message}"}
     except Exception as e:
-        return {"success": False, "error": f"네트워크 또는 알 수 없는 오류: {str(e)}"}
+        return {"success": False, "error": f"API 호출 또는 네트워크 오류: {str(e)}"}
