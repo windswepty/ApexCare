@@ -326,7 +326,21 @@ def clean_junk_background(category_ids, cancel_event):
             target_dirs.append(prefetch)
 
         import shutil
-        start_free = shutil.disk_usage('C:\\').free
+        import psutil
+        
+        drives = []
+        for p in psutil.disk_partitions(all=False):
+            if p.fstype and 'cdrom' not in p.opts:
+                drives.append(p.mountpoint)
+        if not drives:
+            drives = ['C:\\']
+            
+        start_free = {}
+        for drv in drives:
+            try:
+                start_free[drv] = shutil.disk_usage(drv).free
+            except Exception:
+                pass
 
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
@@ -344,13 +358,27 @@ def clean_junk_background(category_ids, cancel_event):
                 print(f"[ERROR] Failed to empty recycle bin: {e}")
                 sys.stdout.flush()
 
-        end_free = shutil.disk_usage('C:\\').free
-        # 물리적 여유 공간 차이로 실제 확보된 용량 계산
-        actual_freed_bytes = max(0, end_free - start_free)
+        details = {}
+        total_actual_freed = 0
+        for drv in drives:
+            if drv in start_free:
+                try:
+                    end_val = shutil.disk_usage(drv).free
+                    freed = max(0, end_val - start_free[drv])
+                    freed_mb = round(freed / (1024 * 1024), 2)
+                    if freed_mb > 0:
+                        drv_letter = drv.replace('\\', '')
+                        details[drv_letter] = freed_mb
+                    total_actual_freed += freed
+                except Exception:
+                    pass
 
-        _junk_clean_state["freed_mb"] = round(actual_freed_bytes / (1024 * 1024), 2)
+        _junk_clean_state["freed_mb"] = round(total_actual_freed / (1024 * 1024), 2)
+        _junk_clean_state["details"] = details
+        
         print(f"[JunkPurger] 삭제 루프 내부 측정 용량: {total_freed_bytes} bytes")
         print(f"[JunkPurger] 최종 확보 용량 (물리적 차이): {_junk_clean_state['freed_mb']} MB")
+        print(f"[JunkPurger] 상세 내역: {details}")
         sys.stdout.flush()
         
         if cancel_event and cancel_event.is_set():

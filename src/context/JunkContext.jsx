@@ -17,6 +17,7 @@ export function JunkProvider({ children, addToast }) {
   const [scanEta, setScanEta] = useState(0);
   const [cleanedSuccess, setCleanedSuccess] = useState(false);
   const [freedMB, setFreedMB] = useState(0);
+  const [cleanDetails, setCleanDetails] = useState({});
   
   const [hasScannedOnce, setHasScannedOnce] = useState(false);
 
@@ -71,13 +72,23 @@ export function JunkProvider({ children, addToast }) {
                 setIsCleaning(false);
                 if (state.status === 'success') {
                   setFreedMB(state.freed_mb || 0);
+                  setCleanDetails(state.details || {});
                   setCleanedSuccess(true);
                   // Empty selected items size
                   setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
                   
                   if (addToast) {
                     const mb = state.freed_mb || 0;
-                    addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB'})`, 'success');
+                    const totalStr = mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB';
+                    let detailsStr = '';
+                    if (state.details && Object.keys(state.details).length > 0) {
+                      const detailParts = Object.entries(state.details).map(([drv, size]) => {
+                         const sizeStr = size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size + ' MB';
+                         return `${drv} ${sizeStr}`;
+                      });
+                      detailsStr = ` (${detailParts.join(' / ')})`;
+                    }
+                    addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${totalStr}${detailsStr})`, 'success');
                   }
                 } else {
                   if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (state.error || ""), "error");
@@ -147,7 +158,7 @@ export function JunkProvider({ children, addToast }) {
   return (
     <JunkContext.Provider value={{
       items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
-      cleanedSuccess, freedMB, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
+      cleanedSuccess, freedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
       setCleanedSuccess
     }}>
       {children}

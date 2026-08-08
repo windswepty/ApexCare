@@ -12,7 +12,7 @@ import { useJunk } from '../context/JunkContext';
 export default function JunkCleaner() {
   const {
     items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
-    cleanedSuccess, freedMB, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
+    cleanedSuccess, freedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
     setCleanedSuccess
   } = useJunk();
 
@@ -39,6 +39,14 @@ export default function JunkCleaner() {
     if (totalSelectedMB === 0 || isCleaning) return;
     const selectedIds = items.filter(i => i.selected).map(i => i.id);
     startClean(selectedIds);
+  };
+  
+  const getDetailsString = () => {
+    if (!cleanDetails || Object.keys(cleanDetails).length === 0) return '';
+    const parts = Object.entries(cleanDetails).map(([drv, size]) => {
+      return `${drv} ${size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size + ' MB'}`;
+    });
+    return ` (${parts.join(' / ')})`;
   };
 
   return (
@@ -143,7 +151,7 @@ export default function JunkCleaner() {
             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
             <div>
               <h4 className="font-bold text-emerald-300 text-sm">
-                정크 파일 세척 완료! 총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 공간이 성공적으로 확보되었습니다!
+                정크 파일 세척 완료! 총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 공간이 성공적으로 확보되었습니다! <span className="text-emerald-200 font-mono text-xs">{getDetailsString()}</span>
               </h4>
               <p className="text-xs text-gray-700 dark:text-slate-300">
                 실제 비활성 임시 파일이 디스크에서 안전하게 제거되었습니다.
