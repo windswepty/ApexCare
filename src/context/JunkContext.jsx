@@ -13,7 +13,9 @@ export function JunkProvider({ children, addToast }) {
   
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanProgress, setCleanProgress] = useState(0);
-  const [cleanEta, setCleanEta] = useState(5);
+  const [cleanEta, setCleanEta] = useState(0);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanEta, setScanEta] = useState(0);
   const [cleanedSuccess, setCleanedSuccess] = useState(false);
   const [freedMB, setFreedMB] = useState(0);
   
@@ -27,15 +29,20 @@ export function JunkProvider({ children, addToast }) {
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getJunkScanStatus === 'function') {
           try {
             const state = await window.pywebview.api.getJunkScanStatus();
-            if (state && state.status !== 'running' && state.status !== 'idle') {
-              setIsScanning(false);
-              setHasScannedOnce(true);
-              if (state.status === 'success') {
-                if (Array.isArray(state.data) && state.data.length > 0) {
-                  setItems(state.data);
+            if (state) {
+              if (state.progress !== undefined) setScanProgress(state.progress);
+              if (state.eta_seconds !== undefined) setScanEta(state.eta_seconds);
+              
+              if (state.status !== 'running' && state.status !== 'idle') {
+                setIsScanning(false);
+                setHasScannedOnce(true);
+                if (state.status === 'success') {
+                  if (Array.isArray(state.data) && state.data.length > 0) {
+                    setItems(state.data);
+                  }
+                } else {
+                  if (addToast) addToast("정크 파일 스캔 중 에러가 발생했습니다.", "error");
                 }
-              } else {
-                if (addToast) addToast("정크 파일 스캔 중 에러가 발생했습니다.", "error");
               }
             }
           } catch (e) {
@@ -52,27 +59,29 @@ export function JunkProvider({ children, addToast }) {
     let interval;
     if (isCleaning) {
       interval = setInterval(async () => {
-        setCleanProgress(p => (p < 99 ? p + 20 : 99));
-        setCleanEta(e => (e > 0 ? e - 1 : 0));
-        
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getJunkCleanStatus === 'function') {
           try {
             const state = await window.pywebview.api.getJunkCleanStatus();
-            if (state && state.status !== 'running' && state.status !== 'idle') {
-              setIsCleaning(false);
-              if (state.status === 'success') {
-                setFreedMB(state.freedMB || 0);
-                setCleanedSuccess(true);
-                playSound('success');
-                // Empty selected items size
-                setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
-                
-                if (addToast) {
-                  const mb = state.freedMB || 0;
-                  addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB'})`, 'success');
+            if (state) {
+              if (state.progress !== undefined) setCleanProgress(state.progress);
+              if (state.eta_seconds !== undefined) setCleanEta(state.eta_seconds);
+              
+              if (state.status !== 'running' && state.status !== 'idle') {
+                setIsCleaning(false);
+                if (state.status === 'success') {
+                  setFreedMB(state.freedMB || 0);
+                  setCleanedSuccess(true);
+                  playSound('success');
+                  // Empty selected items size
+                  setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
+                  
+                  if (addToast) {
+                    const mb = state.freedMB || 0;
+                    addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB'})`, 'success');
+                  }
+                } else {
+                  if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (state.error || ""), "error");
                 }
-              } else {
-                if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (state.error || ""), "error");
               }
             }
           } catch (e) {
@@ -88,6 +97,8 @@ export function JunkProvider({ children, addToast }) {
     playSound('scan');
     setCleanedSuccess(false);
     setFreedMB(0);
+    setScanProgress(0);
+    setScanEta(0);
     setIsScanning(true);
     
     try {
@@ -138,7 +149,7 @@ export function JunkProvider({ children, addToast }) {
 
   return (
     <JunkContext.Provider value={{
-      items, isScanning, isCleaning, cleanProgress, cleanEta, hasScannedOnce,
+      items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
       cleanedSuccess, freedMB, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
       setCleanedSuccess
     }}>

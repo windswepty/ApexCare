@@ -100,9 +100,12 @@ def cancel_deep_optimization():
 # Junk Scan (Sequential Execution)
 # ─────────────────────────────────────────────
 
-def _get_dir_size_mb(dir_path):
+def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
     """Walk directory and sum file sizes. Sequential, safe."""
     total = 0
+    file_count = 0
+    start_time = time.time()
+
     if not os.path.exists(dir_path):
         return 0
     try:
@@ -112,6 +115,17 @@ def _get_dir_size_mb(dir_path):
                 try:
                     if not os.path.islink(fp):
                         total += os.path.getsize(fp)
+                        file_count += 1
+                        
+                        if state_obj and file_count % 50 == 0:
+                            elapsed = time.time() - start_time
+                            rate = file_count / elapsed if elapsed > 0 else 1
+                            # 임의의 프로그레스 시뮬레이션
+                            prog = min(99, int((file_count / max_files) * 100))
+                            eta = int((max_files - file_count) / rate) if rate > 0 else 0
+                            state_obj["progress"] = prog
+                            state_obj["eta_seconds"] = max(0, eta)
+                            
                 except (OSError, PermissionError):
                     pass
     except (OSError, PermissionError):
@@ -119,7 +133,7 @@ def _get_dir_size_mb(dir_path):
     return round(total / (1024 * 1024))
 
 
-_junk_scan_state = {"status": "idle", "data": []}
+_junk_scan_state = {"status": "idle", "data": [], "progress": 0, "eta_seconds": 0}
 _junk_scan_thread = None
 
 def get_junk_scan_status():
@@ -128,6 +142,8 @@ def get_junk_scan_status():
 def scan_junk_background():
     global _junk_scan_state
     _junk_scan_state["status"] = "running"
+    _junk_scan_state["progress"] = 0
+    _junk_scan_state["eta_seconds"] = 15
     try:
         user_temp = os.environ.get('TEMP', '')
         system_temp = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
@@ -135,10 +151,14 @@ def scan_junk_background():
         soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
         chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
 
-        temp_size = _get_dir_size_mb(user_temp) + _get_dir_size_mb(system_temp)
-        cache_size = _get_dir_size_mb(chrome_cache)
-        soft_dist_size = _get_dir_size_mb(soft_dist)
-        prefetch_size = _get_dir_size_mb(prefetch)
+        temp_size = _get_dir_size_mb(user_temp, _junk_scan_state, max_files=2000)
+        _junk_scan_state["progress"] = 25
+        temp_size += _get_dir_size_mb(system_temp, _junk_scan_state, max_files=2000)
+        _junk_scan_state["progress"] = 50
+        cache_size = _get_dir_size_mb(chrome_cache, _junk_scan_state, max_files=3000)
+        _junk_scan_state["progress"] = 75
+        soft_dist_size = _get_dir_size_mb(soft_dist, _junk_scan_state, max_files=1000)
+        prefetch_size = _get_dir_size_mb(prefetch, _junk_scan_state, max_files=500)
 
         _junk_scan_state["data"] = [
             {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
@@ -146,6 +166,8 @@ def scan_junk_background():
             {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
         ]
+        _junk_scan_state["progress"] = 100
+        _junk_scan_state["eta_seconds"] = 0
         _junk_scan_state["status"] = "success"
     except Exception as e:
         import traceback
@@ -166,7 +188,7 @@ def scan_junk():
 # Junk Clean (Background Execution)
 # ─────────────────────────────────────────────
 
-_junk_clean_state = {"status": "idle", "freedMB": 0, "error": None}
+_junk_clean_state = {"status": "idle", "freedMB": 0, "error": None, "progress": 0, "eta_seconds": 0}
 _junk_clean_thread = None
 
 def get_junk_clean_status():
@@ -177,6 +199,8 @@ def clean_junk_background(category_ids, cancel_event):
     _junk_clean_state["status"] = "running"
     _junk_clean_state["freedMB"] = 0
     _junk_clean_state["error"] = None
+    _junk_clean_state["progress"] = 0
+    _junk_clean_state["eta_seconds"] = 10
     try:
         freed_bytes = 0
         user_temp = os.environ.get('TEMP', '')
@@ -185,8 +209,10 @@ def clean_junk_background(category_ids, cancel_event):
         soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
         chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
 
-        def _clean_dir(path):
+        def _clean_dir(path, max_files=1000):
             local_freed = 0
+            file_count = 0
+            start_time = time.time()
             if not os.path.exists(path):
                 return 0
             try:
@@ -198,8 +224,19 @@ def clean_junk_background(category_ids, cancel_event):
                             sz = entry.stat().st_size
                             os.remove(entry.path)
                             local_freed += sz
+                            file_count += 1
                         elif entry.is_dir() and not entry.is_symlink():
                             shutil.rmtree(entry.path, ignore_errors=True)
+                            file_count += 5 # 디렉토리는 좀 더 비중을 둠
+                            
+                        if file_count % 30 == 0:
+                            elapsed = time.time() - start_time
+                            rate = file_count / elapsed if elapsed > 0 else 1
+                            prog = min(99, int((file_count / max_files) * 100))
+                            eta = int((max_files - file_count) / rate) if rate > 0 else 0
+                            _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4)) # 임의 분배
+                            _junk_clean_state["eta_seconds"] = max(0, eta)
+                            
                     except (OSError, PermissionError):
                         continue
             except (OSError, PermissionError):
@@ -219,10 +256,17 @@ def clean_junk_background(category_ids, cancel_event):
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
                 break
-            freed_bytes += _clean_dir(d)
+            freed_bytes += _clean_dir(d, max_files=2000)
 
         _junk_clean_state["freedMB"] = round(freed_bytes / (1024 * 1024))
-        _junk_clean_state["status"] = "success"
+        if cancel_event and cancel_event.is_set():
+            _junk_clean_state["status"] = "cancelled"
+            _junk_clean_state["progress"] = 0
+            _junk_clean_state["eta_seconds"] = 0
+        else:
+            _junk_clean_state["status"] = "success"
+            _junk_clean_state["progress"] = 100
+            _junk_clean_state["eta_seconds"] = 0
     except Exception as e:
         _junk_clean_state["status"] = "error"
         _junk_clean_state["error"] = str(e)

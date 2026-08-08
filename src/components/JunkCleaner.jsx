@@ -11,7 +11,7 @@ import { useJunk } from '../context/JunkContext';
 
 export default function JunkCleaner() {
   const {
-    items, isScanning, isCleaning, cleanProgress, cleanEta, hasScannedOnce,
+    items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
     cleanedSuccess, freedMB, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
     setCleanedSuccess
   } = useJunk();
@@ -100,7 +100,7 @@ export default function JunkCleaner() {
 
       {/* Cleaning Progress Indicator */}
       {isCleaning && (
-        <div className="glass-panel p-4 flex flex-col gap-3">
+        <div className="glass-panel p-4 flex flex-col gap-3 border-cyan-500/30 bg-cyan-950/10">
           <div className="flex items-center justify-between text-cyan-400 font-mono text-sm">
             <div className="flex items-center gap-2">
               <RefreshCw className="w-5 h-5 animate-spin" />
@@ -112,7 +112,26 @@ export default function JunkCleaner() {
             </div>
           </div>
           <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            <div className="bg-cyan-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${cleanProgress}%` }}></div>
+            <div className="bg-cyan-400 h-1.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${cleanProgress}%` }}></div>
+          </div>
+        </div>
+      )}
+
+      {/* Scanning Progress Indicator */}
+      {isScanning && (
+        <div className="glass-panel p-4 flex flex-col gap-3 border-indigo-500/30 bg-indigo-950/10">
+          <div className="flex items-center justify-between text-indigo-400 font-mono text-sm">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>디스크 심층 스캔 중...</span>
+            </div>
+            <div className="text-right">
+              <span className="font-bold">{Math.floor(scanProgress)}%</span>
+              <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {scanEta}초</span>
+            </div>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div className="bg-indigo-400 h-1.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${scanProgress}%` }}></div>
           </div>
         </div>
       )}
