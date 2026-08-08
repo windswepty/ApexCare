@@ -1,4 +1,5 @@
-import google.generativeai as genai
+import json
+import urllib.request
 from backend.config_manager import get_ai_api_key
 
 SYSTEM_PROMPT = """당신은 'APEX CARE'라는 윈도우 PC 최적화 프로그램에 내장된 'AI 문제 해결사(AI Problem Solver)'이자, 세계 최고 수준의 Windows OS 및 PC 하드웨어 최적화 전문가입니다.
@@ -16,44 +17,42 @@ def analyze_error_with_ai(error_log, system_state, user_message=""):
     if not api_key:
         return {"success": False, "error": "API 키가 설정되지 않았습니다. 설정에서 Gemini API 키를 입력해주세요."}
 
-    genai.configure(api_key=api_key)
-    
-    # Prompt 구성
     content = f"**[시스템 상태 정보]**\n{system_state}\n\n**[발생한 에러/로그]**\n{error_log}\n\n"
     if user_message:
         content += f"**[사용자 메시지]**\n{user_message}"
         
+    combined_prompt = f"[{SYSTEM_PROMPT}]\n위 역할을 수행하라.\n\n{content}"
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": combined_prompt}
+                ]
+            }
+        ]
+    }
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
     try:
-        # 1차 시도: 최신 Flash 모델
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
-            system_instruction=SYSTEM_PROMPT
-        )
-        response = model.generate_content(content)
-        return {"success": True, "answer": response.text}
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode('utf-8'))
             
-    except Exception as e1:
-        # 2차 시도: 가장 안정적인 범용 모델 gemini-pro
-        try:
-            fallback_model = genai.GenerativeModel(
-                model_name="gemini-pro",
-                # gemini-pro는 system_instruction 파라미터를 미지원하는 경우가 있으므로 안전하게 프롬프트와 결합
-            )
-            combined_content = f"{SYSTEM_PROMPT}\n\n{content}"
-            response = fallback_model.generate_content(combined_content)
-            return {"success": True, "answer": response.text}
+            # 파싱 로직 (Gemini JSON 구조)
+            answer_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
             
-        except Exception as e2:
-            # 3차 시도 (마지막 수단): 극단적 호환 모드 (PaLM Legacy 또는 gemini-1.0-pro)
-            try:
-                # gemini-1.0-pro-latest 또는 text-bison 
-                final_model = genai.GenerativeModel("gemini-1.0-pro-latest")
-                combined_content = f"[{SYSTEM_PROMPT}]\n위 역할을 수행하라.\n\n{content}"
-                response = final_model.generate_content(combined_content)
-                return {"success": True, "answer": f"**(호환 모드로 작성됨)**\n\n{response.text}"}
+            if answer_text:
+                return {"success": True, "answer": answer_text}
+            else:
+                return {"success": False, "error": "응답 JSON에서 텍스트를 찾을 수 없습니다."}
                 
-            except Exception as e3:
-                return {
-                    "success": False, 
-                    "error": f"API 호출 3중 방어 실패 (모든 모델 호환 불가):\n1차(flash): {str(e1)}\n2차(pro): {str(e2)}\n3차(legacy): {str(e3)}\n\nAPI 키의 권한이나 라이브러리 버전을 확인해 주세요."
-                }
+    except Exception as e:
+        return {"success": False, "error": f"REST API 직접 호출 오류 (SDK 사용 안함): {str(e)}"}
