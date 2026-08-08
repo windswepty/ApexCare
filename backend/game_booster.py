@@ -506,86 +506,90 @@ def _booster_loop():
     last_tamable_pids = []
     
     while not _stop_event.is_set():
-        if not _booster_state["enabled"]:
-            if _booster_state["active"]:
-                _restore_processes(last_tamable_pids)
-                _restore_processes(_booster_state["boosted_pids"])
-                _exit_boost_mode()
-                _booster_state["active"] = False
-                _booster_state["detected_game"] = None
-                _booster_state["boosted_pids"] = []
-                last_tamable_pids = []
-            time.sleep(2)
-            continue
+        try:
+            if not _booster_state["enabled"]:
+                if _booster_state["active"]:
+                    _restore_processes(last_tamable_pids)
+                    _restore_processes(_booster_state["boosted_pids"])
+                    _exit_boost_mode()
+                    _booster_state["active"] = False
+                    _booster_state["detected_game"] = None
+                    _booster_state["boosted_pids"] = []
+                    last_tamable_pids = []
+                time.sleep(2)
+                continue
+                
+            # Single pass scan for games and tamable apps
+            found_games = []
+            current_game_pids = []
+            current_tamable_pids = []
             
-        # Single pass scan for games and tamable apps
-        found_games = []
-        current_game_pids = []
-        current_tamable_pids = []
-        
-        for proc in psutil.process_iter(['name']):
-            try:
-                name = proc.info.get('name')
-                if not name: continue
-                name = name.lower()
+            for proc in psutil.process_iter(['name']):
+                try:
+                    name = proc.info.get('name')
+                    if not name: continue
+                    name = name.lower()
+                    
+                    if name in GAMES_LIST:
+                        found_games.append(name)
+                        current_game_pids.append(proc.pid)
+                    elif name in APPS_TO_TAME:
+                        current_tamable_pids.append(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+                    
+            if found_games:
+                found_games.sort(key=lambda x: GAMES_LIST.index(x))
+                game_found = found_games[0]
                 
-                if name in GAMES_LIST:
-                    found_games.append(name)
-                    current_game_pids.append(proc.pid)
-                elif name in APPS_TO_TAME:
-                    current_tamable_pids.append(proc.pid)
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-                
-        if found_games:
-            found_games.sort(key=lambda x: GAMES_LIST.index(x))
-            game_found = found_games[0]
-            
-            if not _booster_state["active"]:
-                # Just entered boost mode
-                _booster_state["active"] = True
-                _booster_state["detected_game"] = game_found
-                _booster_state["boosted_pids"] = current_game_pids
-                _booster_state["boost_count"] += 1
-                
-                log.info(f"🎮 Game detected: {game_found} (PIDs: {current_game_pids})")
-                
-                # Apply all system-wide boosts
-                _enter_boost_mode()
-                _boost_game_processes(current_game_pids)
-                _tame_processes(current_tamable_pids)
-                
-            elif _booster_state["detected_game"] != game_found:
-                # Game changed
-                log.info(f"🎮 Game switched to: {game_found}")
-                _restore_processes(_booster_state["boosted_pids"])
-                _booster_state["detected_game"] = game_found
-                _booster_state["boosted_pids"] = current_game_pids
-                _boost_game_processes(current_game_pids)
-                _tame_processes(current_tamable_pids)
+                if not _booster_state["active"]:
+                    # Just entered boost mode
+                    _booster_state["active"] = True
+                    _booster_state["detected_game"] = game_found
+                    _booster_state["boosted_pids"] = current_game_pids
+                    _booster_state["boost_count"] += 1
+                    
+                    log.info(f"🎮 Game detected: {game_found} (PIDs: {current_game_pids})")
+                    
+                    # Apply all system-wide boosts
+                    _enter_boost_mode()
+                    _boost_game_processes(current_game_pids)
+                    _tame_processes(current_tamable_pids)
+                    
+                elif _booster_state["detected_game"] != game_found:
+                    # Game changed
+                    log.info(f"🎮 Game switched to: {game_found}")
+                    _restore_processes(_booster_state["boosted_pids"])
+                    _booster_state["detected_game"] = game_found
+                    _booster_state["boosted_pids"] = current_game_pids
+                    _boost_game_processes(current_game_pids)
+                    _tame_processes(current_tamable_pids)
+                else:
+                    # Still running, update PIDs in case the game spawned new processes
+                    new_game_pids = list(set(current_game_pids) - set(_booster_state["boosted_pids"]))
+                    if new_game_pids:
+                        _boost_game_processes(new_game_pids)
+                        _booster_state["boosted_pids"].extend(new_game_pids)
+                    _tame_processes(current_tamable_pids)
+                    
+                last_tamable_pids = current_tamable_pids
+                time.sleep(5)
             else:
-                # Still running, update PIDs in case the game spawned new processes
-                new_game_pids = list(set(current_game_pids) - set(_booster_state["boosted_pids"]))
-                if new_game_pids:
-                    _boost_game_processes(new_game_pids)
-                    _booster_state["boosted_pids"].extend(new_game_pids)
-                _tame_processes(current_tamable_pids)
-                
-            last_tamable_pids = current_tamable_pids
+                if _booster_state["active"]:
+                    # Game exited — restore everything
+                    log.info("🎮 Game exited - restoring all processes")
+                    _restore_processes(last_tamable_pids)
+                    _restore_processes(_booster_state["boosted_pids"])
+                    _exit_boost_mode()
+                    _booster_state["active"] = False
+                    _booster_state["detected_game"] = None
+                    _booster_state["boosted_pids"] = []
+                    last_tamable_pids = []
+                    
+                time.sleep(3)
+        except Exception as e:
+            log.error(f"Booster loop crash: {e}")
             time.sleep(5)
-        else:
-            if _booster_state["active"]:
-                # Game exited — restore everything
-                log.info("🎮 Game exited - restoring all processes")
-                _restore_processes(last_tamable_pids)
-                _restore_processes(_booster_state["boosted_pids"])
-                _exit_boost_mode()
-                _booster_state["active"] = False
-                _booster_state["detected_game"] = None
-                _booster_state["boosted_pids"] = []
-                last_tamable_pids = []
-                
-            time.sleep(3)
 
 def toggle_booster(enabled):
     global _monitor_thread, _stop_event

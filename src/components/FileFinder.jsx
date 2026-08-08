@@ -90,17 +90,25 @@ export default function FileFinder({ addToast }) {
     if (selectedPaths.size === 0 || !window.pywebview?.api) return;
     setDeleting(true);
     
-    const pathsArray = Array.from(selectedPaths);
-    const result = await window.pywebview.api.deleteFiles(pathsArray);
-    
-    setDeleting(false);
-    setSelectedPaths(new Set());
-    
-    if (result.success) {
-      if (addToast) addToast(`성공적으로 삭제되었습니다. 확보된 용량: ${result.freedMB}MB`, 'success');
-      // Rescan
-      if (activeTab === 'large') handleScanLarge();
-      else handleScanDuplicates();
+    try {
+      const pathsArray = Array.from(selectedPaths);
+      const result = await window.pywebview.api.deleteFiles(pathsArray);
+      
+      setSelectedPaths(new Set());
+      
+      if (result && result.success) {
+        if (addToast) addToast(`성공적으로 삭제되었습니다. 확보된 용량: ${result.freedMB}MB`, 'success');
+        // Rescan
+        if (activeTab === 'large') handleScanLarge();
+        else handleScanDuplicates();
+      } else {
+        if (addToast) addToast(result?.error || '삭제를 완료하지 못했습니다.', 'error');
+      }
+    } catch (e) {
+      console.error('IPC Error deleting files:', e);
+      if (addToast) addToast('삭제 중 시스템 오류가 발생했습니다.', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 

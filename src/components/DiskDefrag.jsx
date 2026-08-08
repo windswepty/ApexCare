@@ -89,6 +89,8 @@ export default function DiskDefrag({ addToast }) {
             }
           } catch (e) {
             console.error('Error polling trim status:', e);
+            setIsDefragging(false);
+            if (addToast) addToast("디스크 최적화 상태 확인 중 오류가 발생했습니다.", "error");
           }
         }
       }, 1000);

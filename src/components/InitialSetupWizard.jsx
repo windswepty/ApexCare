@@ -42,13 +42,16 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
         await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB);
       } catch (e) {
         console.error("Failed to apply hardware tuning:", e);
+      } finally {
+        setTimeout(() => {
+          onComplete('standard'); // Return to standard mode as base for dashboard
+        }, 1500);
       }
+    } else {
+      setTimeout(() => {
+        onComplete('standard'); // Return to standard mode as base for dashboard
+      }, 1500);
     }
-    
-    // Briefly show applying animation before complete
-    setTimeout(() => {
-      onComplete('standard'); // Return to standard mode as base for dashboard
-    }, 1500);
   };
 
   const getTuningInfo = (tier) => {

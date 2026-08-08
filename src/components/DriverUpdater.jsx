@@ -36,6 +36,8 @@ export default function SystemRepair({ addToast }) {
             }
           } catch (e) {
             console.error('Error polling sfc status:', e);
+            setSfcStatus('error');
+            if (addToast) addToast("SFC 상태 확인 중 시스템 오류가 발생했습니다.", "error");
           }
         }
       }, 1000);
@@ -66,6 +68,8 @@ export default function SystemRepair({ addToast }) {
             }
           } catch (e) {
             console.error('Error polling dism status:', e);
+            setDismStatus('error');
+            if (addToast) addToast("DISM 상태 확인 중 시스템 오류가 발생했습니다.", "error");
           }
         }
       }, 1000);

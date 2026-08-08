@@ -70,12 +70,21 @@ export default function Uninstaller({ addToast }) {
       return;
     }
     
-    // Launch standard uninstaller
-    await window.pywebview.api.uninstallApp(app.uninstallString);
-    
-    // Show alert and transition to waiting for user to finish
-    setActiveApp(app);
-    setStep('wait_uninstall');
+    try {
+      // Launch standard uninstaller
+      const res = await window.pywebview.api.uninstallApp(app.uninstallString);
+      if (res && res.success === false) {
+          if (addToast) addToast(res.error || "언인스톨러 실행 실패", "error");
+          return;
+      }
+      
+      // Show alert and transition to waiting for user to finish
+      setActiveApp(app);
+      setStep('wait_uninstall');
+    } catch (e) {
+      console.error('IPC Error launching uninstaller:', e);
+      if (addToast) addToast("언인스톨러 실행 중 시스템 오류가 발생했습니다.", "error");
+    }
   };
 
   const handleScanLeftovers = async () => {
@@ -83,24 +92,41 @@ export default function Uninstaller({ addToast }) {
     setIsCleaning(true);
     setStep('leftovers');
     
-    const leftoverData = await window.pywebview.api.findAppLeftovers(activeApp.name);
-    setLeftovers(leftoverData);
-    setIsCleaning(false);
+    try {
+      const leftoverData = await window.pywebview.api.findAppLeftovers(activeApp.name);
+      setLeftovers(Array.isArray(leftoverData) ? leftoverData : []);
+    } catch (e) {
+      console.error('IPC Error scanning leftovers:', e);
+      setLeftovers([]);
+      if (addToast) addToast("찌꺼기 스캔 중 시스템 오류가 발생했습니다.", "error");
+    } finally {
+      setIsCleaning(false);
+    }
   };
 
   const handleCleanLeftovers = async () => {
     if (!window.pywebview?.api || typeof window.pywebview.api.cleanAppLeftovers !== 'function') return;
     setIsCleaning(true);
     
-    const paths = leftovers.map(l => l.path);
-    const res = await window.pywebview.api.cleanAppLeftovers(paths);
-    
-    setIsCleaning(false);
-    setStep('list');
-    setActiveApp(null);
-    setLeftovers([]);
-    fetchApps(); // refresh list
-    if (addToast) addToast(`[${activeApp.name}] 완벽 삭제 및 잔여 파일 정리가 완료되었습니다!`, 'success');
+    try {
+      const paths = leftovers.map(l => l.path);
+      const res = await window.pywebview.api.cleanAppLeftovers(paths);
+      
+      if (res && res.success === false) {
+          if (addToast) addToast(res.error || "삭제에 실패했습니다.", "error");
+      } else {
+          if (addToast) addToast(`[${activeApp.name}] 완벽 삭제 및 잔여 파일 정리가 완료되었습니다!`, 'success');
+      }
+    } catch (e) {
+      console.error('IPC Error cleaning leftovers:', e);
+      if (addToast) addToast("잔여 파일 삭제 중 시스템 오류가 발생했습니다.", "error");
+    } finally {
+      setIsCleaning(false);
+      setStep('list');
+      setActiveApp(null);
+      setLeftovers([]);
+      fetchApps(); // refresh list
+    }
   };
 
   const skipLeftovers = () => {

@@ -46,6 +46,8 @@ export function JunkProvider({ children, addToast }) {
             }
           } catch (e) {
             console.error('Error polling junk scan status:', e);
+            setIsScanning(false);
+            if (addToast) addToast("정크 파일 스캔 상태 확인 중 오류가 발생했습니다.", "error");
           }
         }
       }, 1000);
@@ -84,6 +86,8 @@ export function JunkProvider({ children, addToast }) {
             }
           } catch (e) {
             console.error('Error polling junk clean status:', e);
+            setIsCleaning(false);
+            if (addToast) addToast("정크 파일 삭제 상태 확인 중 오류가 발생했습니다.", "error");
           }
         }
       }, 1000);

@@ -199,6 +199,9 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               }
             } catch (err) {
               console.error('Error polling optimization status:', err);
+              clearInterval(optPollInterval.current);
+              setIsScanning(false);
+              setModalMessage({ title: '오류 발생', text: '최적화 상태 확인 중 시스템 오류가 발생했습니다.', isError: true });
             }
           }
         }, 1000);

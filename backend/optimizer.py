@@ -686,8 +686,12 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
         CREATE_NO_WINDOW = 0x08000000
         if cpu_cores <= 4 or ram_gb < 8:
             # 저사양: 백그라운드 강제 억제 및 가용 리소스 확보 (영구적)
-            subprocess.run('sc config SysMain start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
-            subprocess.run('sc config WSearch start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
+            try:
+                subprocess.run('sc config SysMain start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+                subprocess.run('sc config WSearch start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+            except Exception as e:
+                log.warning(f"Failed to config services: {e}")
+                
             _stop_service("SysMain")  # 즉시 중지
             _stop_service("WSearch")
             purge_ram() # 강력한 램 클리어 즉시 실행
@@ -699,9 +703,13 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
             tier = "LowEnd"
         else:
             # 중/고사양: 최대 성능 유지 및 캐시 활용 (영구적)
-            subprocess.run('sc config SysMain start= auto', shell=True, creationflags=CREATE_NO_WINDOW)
-            subprocess.run('sc config WSearch start= auto', shell=True, creationflags=CREATE_NO_WINDOW)
-            subprocess.run('sc config DiagTrack start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
+            try:
+                subprocess.run('sc config SysMain start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+                subprocess.run('sc config WSearch start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+                subprocess.run('sc config DiagTrack start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+            except Exception as e:
+                log.warning(f"Failed to config services: {e}")
+                
             _start_service("SysMain") # 즉시 시작
             _start_service("WSearch")
             _stop_service("DiagTrack")
