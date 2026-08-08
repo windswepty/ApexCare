@@ -120,20 +120,20 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                 fp = os.path.join(root, f)
                 try:
                     if not os.path.islink(fp):
-                        try:
-                            with open(fp, 'ab'):
-                                pass
-                        except (OSError, PermissionError) as e:
+                        # Pre-Check 강화: 쓰기 권한 테스트
+                        if not os.access(fp, os.W_OK):
                             import stat
                             try:
                                 os.chmod(fp, stat.S_IWRITE)
-                                with open(fp, 'ab'):
-                                    pass
                             except (OSError, PermissionError):
-                                print(f"[SCAN_SKIP] locked file: {fp}")
-                                sys.stdout.flush()
                                 continue
-                                
+                        
+                        # 완벽한 Locked 확인
+                        try:
+                            open(fp, 'a').close()
+                        except (OSError, PermissionError):
+                            continue
+                        
                         total += os.path.getsize(fp)
                         file_count += 1
                         
