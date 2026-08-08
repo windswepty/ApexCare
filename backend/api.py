@@ -160,7 +160,13 @@ class Api:
 
     def closeWindow(self):
         if self._window:
+            self._window.hide()
+            
+    def quitApplication(self):
+        if self._window:
             self._window.destroy()
+        import sys
+        sys.exit(0)
 
     def minimizeWindow(self):
         if self._window:
