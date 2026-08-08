@@ -39,3 +39,11 @@ def set_eula_accepted(state):
     config = load_config()
     config["eula_accepted"] = bool(state)
     save_config(config)
+
+def get_ai_api_key():
+    return load_config().get("ai_api_key", "")
+
+def set_ai_api_key(key):
+    config = load_config()
+    config["ai_api_key"] = str(key)
+    save_config(config)

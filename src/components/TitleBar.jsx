@@ -1,8 +1,8 @@
 import React from 'react';
-import { Minus, Square, X, Sparkles } from 'lucide-react';
+import { Minus, Square, X, Settings } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
-export default function TitleBar() {
+export default function TitleBar({ onOpenSettings }) {
   const handleMinimize = () => {
     playSound('click');
     if (window.pywebview?.api) window.pywebview?.api.minimizeWindow();
@@ -31,6 +31,13 @@ export default function TitleBar() {
 
       {/* Window Controls */}
       <div className="flex items-center" style={{ WebkitAppRegion: 'no-drag' }}>
+        <button
+          onClick={onOpenSettings}
+          className="w-10 h-9 hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-black dark:text-white flex items-center justify-center transition-colors duration-300"
+          title="환경 설정"
+        >
+          <Settings className="w-3.5 h-3.5" />
+        </button>
         <button
           onClick={handleMinimize}
           className="w-10 h-9 hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-black dark:text-white flex items-center justify-center transition-colors duration-300"

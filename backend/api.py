@@ -6,6 +6,8 @@ from backend import uninstaller
 from backend import file_finder
 from backend import debloater
 from backend import game_booster
+from backend import ai_solver
+from backend import config_manager
 import json
 
 class Api:
@@ -156,6 +158,16 @@ class Api:
     def toggleGameBooster(self, enabled):
         return game_booster.toggle_booster(enabled)
 
+    # === AI Solver API ===
+    def getAiApiKey(self):
+        return config_manager.get_ai_api_key()
+        
+    def setAiApiKey(self, key):
+        config_manager.set_ai_api_key(key)
+        return {"success": True}
+        
+    def askAiSolver(self, error_log, system_state, user_message=""):
+        return ai_solver.analyze_error_with_ai(error_log, system_state, user_message)
 
     def closeWindow(self):
         if self._window:

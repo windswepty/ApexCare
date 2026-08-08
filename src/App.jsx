@@ -19,6 +19,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import { JunkProvider } from './context/JunkContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import SettingsModal from './components/SettingsModal';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -31,6 +32,7 @@ export default function App() {
   const [showInitialWizard, setShowInitialWizard] = useState(() => localStorage.getItem('isFirstRunComplete') !== 'true');
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -141,8 +143,15 @@ export default function App() {
 
           {/* Desktop Native TitleBar */}
           <div className="relative z-20 flex-shrink-0">
-            <TitleBar />
+            <TitleBar onOpenSettings={() => setIsSettingsOpen(true)} />
           </div>
+
+          {/* Settings Modal */}
+          <SettingsModal 
+            isOpen={isSettingsOpen} 
+            onClose={() => setIsSettingsOpen(false)} 
+            addToast={addToast} 
+          />
 
           {/* Main Desktop Window Body */}
       <div className="flex flex-1 min-h-0">
