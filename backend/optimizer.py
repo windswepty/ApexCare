@@ -755,11 +755,24 @@ def set_optimization_mode(mode):
         purge_ram()
         _stop_service("DiagTrack") # 윈도우 원격 분석(텔레메트리) 중지하여 백그라운드 CPU 사용량/온도 감소
 
+        from backend import game_booster
+
         target_guid = POWER_PLAN_BALANCED
         if mode == 'gaming':
-            target_guid = POWER_PLAN_HIGH_PERF
+            # Check for Ultimate Performance plan
+            CREATE_NO_WINDOW = 0x08000000
+            res = subprocess.run('powercfg /l', shell=True, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+            if 'e9a42b02-d5df-448d-aa00-03f14749eb61' in res.stdout:
+                target_guid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
+            else:
+                target_guid = POWER_PLAN_HIGH_PERF
+                
             _set_power_plan(target_guid)
             _stop_service("wuauserv") # 게임 중 윈도우 업데이트 중지
+            
+            # Boost foreground app immediately
+            game_booster.boost_foreground_app()
+            
         elif mode == 'eco':
             target_guid = POWER_PLAN_POWER_SAVER
             _set_power_plan(target_guid)
@@ -768,12 +781,14 @@ def set_optimization_mode(mode):
             target_guid = POWER_PLAN_BALANCED
             _set_power_plan(target_guid)
             _start_service("wuauserv") # 표준 모드에서는 업데이트 허용
+            
+            # Rollback foreground app boost
+            game_booster.restore_foreground_app()
 
         # Apply detailed sub-parameters (CPU state, core parking, MMCSS, etc.)
         _tune_power_params(mode)
         
         # Manage Eco background suppression loop
-        from backend import game_booster
         if mode == 'eco':
             game_booster.start_eco_suppression_loop()
         else:

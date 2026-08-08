@@ -707,3 +707,23 @@ def restore_background_apps():
         log.info("Restoring priority for Eco-tamed background apps...")
         _restore_processes(list(_eco_tamed_pids))
         _eco_tamed_pids.clear()
+
+# ─────────────────────────────────────────────
+# Foreground App Boosting (Gaming Ultra Mode)
+# ─────────────────────────────────────────────
+_fg_boosted_pid = None
+
+def boost_foreground_app():
+    global _fg_boosted_pid
+    pid = _get_foreground_pid()
+    if pid:
+        _boost_game_processes([pid])
+        _fg_boosted_pid = pid
+        log.info(f"Foreground app (PID: {pid}) boosted to HIGH priority for Gaming Ultra Mode.")
+
+def restore_foreground_app():
+    global _fg_boosted_pid
+    if _fg_boosted_pid:
+        _restore_processes([_fg_boosted_pid])
+        log.info(f"Foreground app (PID: {_fg_boosted_pid}) restored to NORMAL priority.")
+        _fg_boosted_pid = None
