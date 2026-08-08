@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Lenis from 'lenis';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, X, Bot } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -20,6 +20,7 @@ import InitialSetupWizard from './components/InitialSetupWizard';
 import { JunkProvider } from './context/JunkContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
+import AIProblemSolverModal from './components/AIProblemSolverModal';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -33,6 +34,7 @@ export default function App() {
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAiSolverOpen, setIsAiSolverOpen] = useState(false);
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -231,6 +233,27 @@ export default function App() {
         ))}
       </div>
       
+      {/* Global AI Smart Diagnostic FAB (Floating Action Button) */}
+      <button 
+        onClick={() => setIsAiSolverOpen(true)}
+        className="fixed bottom-6 right-6 z-40 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-full p-4 shadow-lg shadow-indigo-500/30 transition-transform transform hover:scale-105 group"
+        title="AI 스마트 진단"
+      >
+        <Bot className="w-7 h-7" />
+        <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-black dark:bg-white text-white dark:text-black text-xs font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+          ✨ AI 스마트 진단
+        </span>
+      </button>
+
+      {/* Global AI Solver Modal */}
+      <AIProblemSolverModal 
+        isOpen={isAiSolverOpen} 
+        onClose={() => setIsAiSolverOpen(false)} 
+        errorLog="[요청 타입: 일반 종합 진단] (특정 치명적 에러 없음)"
+        systemState={systemStats ? JSON.stringify(systemStats, null, 2) : "로딩 중..."}
+        userMessage="현재 내 PC의 상태 데이터를 바탕으로 전반적인 최적화 조언을 부탁해."
+      />
+
     </div>
     </JunkProvider>
     </ErrorBoundary>
