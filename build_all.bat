@@ -8,7 +8,7 @@ echo.
 echo =========================================
 echo 2. Building Main Application (PyInstaller)...
 echo =========================================
-pyinstaller --noconfirm --onefile --windowed --uac-admin --icon="public\icon.ico" --add-data "dist_react;dist_react" --name "APEX CARE Payload" main.py
+pyinstaller --noconfirm --onefile --windowed --uac-admin --icon="public\icon.ico" --add-data "dist_react;dist_react" --hidden-import backend.uninstaller --hidden-import backend.optimizer --hidden-import backend.system_repair --hidden-import backend.system_monitor --hidden-import backend.file_finder --hidden-import backend.debloater --hidden-import backend.game_booster --hidden-import backend.config_manager --hidden-import backend.api --name "APEX CARE Payload" main.py
 
 if %errorlevel% neq 0 (
     echo [Error] Main App Build failed!

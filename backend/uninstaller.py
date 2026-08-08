@@ -68,6 +68,8 @@ def get_installed_apps():
                         log.debug(f"Failed to read subkey info: {e}")
                     finally:
                         winreg.CloseKey(subkey)
+                except Exception as e:
+                    log.debug(f"Failed to open or read subkey: {e}")
             winreg.CloseKey(key)
         except Exception as e:
             log.warning(f"Failed to read registry key {path}: {e}")
