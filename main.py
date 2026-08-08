@@ -41,4 +41,4 @@ if __name__ == '__main__':
     app_data_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'APEX_CARE_DATA')
     os.makedirs(app_data_path, exist_ok=True)
     
-    webview.start(debug=True, private_mode=False, storage_path=app_data_path)
+    webview.start(debug=False, private_mode=False, storage_path=app_data_path)
