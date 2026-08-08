@@ -17,6 +17,7 @@ import Debloater from './components/Debloater';
 import GameBooster from './components/GameBooster';
 import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
+import { JunkProvider } from './context/JunkContext';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -196,24 +197,25 @@ export default function App() {
         </div>
       </div>
 
-      {/* Global Toast Container */}
-      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
-        {toasts.map((toast) => (
-          <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
-            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
-            {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
-            {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
-                {toast.message}
-              </p>
+      <JunkProvider addToast={addToast}>
+        <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
+          {toasts.map((toast) => (
+            <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
+              {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+              {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
+              {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
+                  {toast.message}
+                </p>
+              </div>
+              <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
+                <X className="w-3 h-3" />
+              </button>
             </div>
-            <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </JunkProvider>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { 
   Trash2, 
   CheckSquare, 
@@ -7,138 +7,32 @@ import {
   Sparkles, 
   CheckCircle2 
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
-import { playSound } from '../utils/audio';
+import { useJunk } from '../context/JunkContext';
 
-export default function JunkCleaner({ addToast }) {
-  const [items, setItems] = useState([]);
-
-  const rescanJunk = async () => {
-    playSound('scan');
-    setCleanedSuccess(false);
-    setFreedMB(0);
-    if (window.pywebview?.api && window.pywebview?.api.scanJunk) {
-      try {
-        let realItems = await window.pywebview?.api.scanJunk();
-        if (typeof realItems === 'string') {
-          try { realItems = JSON.parse(realItems); } catch(e) {}
-        }
-        if (Array.isArray(realItems) && realItems.length > 0) {
-          setItems(realItems);
-          return;
-        } else if (Array.isArray(realItems)) {
-          setItems([]);
-        }
-      } catch (e) {
-        if (addToast) addToast("정크 파일 스캔 중 에러가 발생했습니다.", "error");
-      }
-    }
-  };
+export default function JunkCleaner() {
+  const {
+    items, isScanning, isCleaning, cleanProgress, cleanEta, hasScannedOnce,
+    cleanedSuccess, freedMB, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
+    setCleanedSuccess
+  } = useJunk();
 
   useEffect(() => {
-    if (window.pywebview?.api) {
+    if (!hasScannedOnce && window.pywebview?.api) {
       rescanJunk();
-    } else {
+    } else if (!hasScannedOnce) {
       window.addEventListener('pywebviewready', rescanJunk);
       return () => window.removeEventListener('pywebviewready', rescanJunk);
     }
-  }, []);
-
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [cleanedSuccess, setCleanedSuccess] = useState(false);
-
-  const [cleanProgress, setCleanProgress] = useState(0);
-  const [cleanEta, setCleanEta] = useState(5);
-
-  useEffect(() => {
-    let interval;
-    if (isCleaning) {
-      interval = setInterval(() => {
-        setCleanProgress(p => (p < 99 ? p + 20 : 99));
-        setCleanEta(e => (e > 0 ? e - 1 : 0));
-      }, 1000);
-    } else if (cleanedSuccess) {
-      setCleanProgress(100);
-      setCleanEta(0);
-    } else {
-      setCleanProgress(0);
-      setCleanEta(5);
-    }
-    return () => clearInterval(interval);
-  }, [isCleaning, cleanedSuccess]);
-
-  const toggleItem = (id) => {
-    playSound('toggle');
-    setItems(items.map(item => item.id === id ? { ...item, selected: !item.selected } : item));
-  };
-
-  const selectAll = () => {
-    playSound('click');
-    setItems(items.map(item => ({ ...item, selected: true })));
-  };
-
-  const deselectAll = () => {
-    playSound('click');
-    setItems(items.map(item => ({ ...item, selected: false })));
-  };
+  }, [hasScannedOnce]);
 
   const totalSelectedMB = items
     .filter(i => i.selected)
     .reduce((acc, i) => acc + i.sizeMB, 0);
 
-  const [freedMB, setFreedMB] = useState(0);
-
-  const handleClean = async () => {
+  const handleClean = () => {
     if (totalSelectedMB === 0 || isCleaning) return;
-    playSound('scan');
-    setIsCleaning(true);
-
     const selectedIds = items.filter(i => i.selected).map(i => i.id);
-
-    // Call real API
-    let success = false;
-    let actualFreedMB = 0;
-    if (window.pywebview?.api && window.pywebview?.api.cleanJunk) {
-      try {
-        const result = await window.pywebview?.api.cleanJunk(selectedIds);
-        if (result && result.success) {
-          success = true;
-          actualFreedMB = result.freedMB || 0;
-          setFreedMB(actualFreedMB);
-        } else if (result && !result.success) {
-          if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (result.error || ""), "error");
-        }
-      } catch (e) {
-        if (addToast) addToast("정크 파일 삭제 API 통신 오류", "error");
-      }
-    } else if (window.pywebview?.api && window.pywebview?.api.cleanTempFiles) {
-      try {
-        const result = await window.pywebview?.api.cleanTempFiles();
-        if (result && result.success) {
-          success = true;
-          actualFreedMB = result.freedMB || 0;
-          setFreedMB(actualFreedMB);
-        }
-      } catch (e) {}
-    }
-
-    setIsCleaning(false);
-    
-    if (success) {
-      setCleanedSuccess(true);
-      playSound('success');
-
-      // Empty selected items size
-      setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
-
-      try {
-        confetti({ particleCount: 60, spread: 60, origin: { y: 0.7 } });
-      } catch (e) {}
-      
-      if (addToast) {
-        addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${actualFreedMB >= 1024 ? (actualFreedMB/1024).toFixed(2) + ' GB' : actualFreedMB + ' MB'})`, 'success');
-      }
-    }
+    startClean(selectedIds);
   };
 
   return (
@@ -151,20 +45,18 @@ export default function JunkCleaner({ addToast }) {
             DEEP JUNK FILE PURGER
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white">정크 및 임시 파일 세척</h2>
-          <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-            불필요한 임시 데이터와 캐시를 제거하여 디스크 공간을 확보하고 I/O 속도를 향상시킵니다.
+          <p className="text-sm text-gray-700 dark:text-slate-300 mt-2">
+            시스템 구석에 쌓인 불필요한 캐시, 찌꺼기 파일들을 완벽하게 제거합니다.
           </p>
         </div>
-
-        <div className="flex items-center gap-3">
+        
+        <div className="flex flex-col items-end gap-2 w-full sm:w-auto mt-4 sm:mt-0">
           <div className="text-right">
-            <div className="text-xs text-gray-500 dark:text-slate-400">
-              {freedMB > 0 ? '확보 완료된 용량' : '선택한 확보 가능 용량'}
-            </div>
-            <div className={`text-2xl font-black font-mono ${freedMB > 0 ? 'text-emerald-400' : 'text-cyan-400'}`}>
-              {freedMB > 0
-                ? (freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`)
-                : (totalSelectedMB >= 1024 ? `${(totalSelectedMB / 1024).toFixed(2)} GB` : `${totalSelectedMB} MB`)
+            <div className="text-xs text-gray-500 dark:text-slate-400 mb-1">정리 가능 용량</div>
+            <div className="text-3xl font-black text-cyan-400 font-mono">
+              {totalSelectedMB >= 1024 
+                ? (totalSelectedMB / 1024).toFixed(2) + ' GB'
+                : totalSelectedMB + ' MB'
               }
             </div>
           </div>
@@ -172,16 +64,17 @@ export default function JunkCleaner({ addToast }) {
           {freedMB > 0 ? (
             <button
               onClick={rescanJunk}
-              className="btn-secondary px-5 py-3 text-xs flex items-center gap-2"
+              disabled={isScanning}
+              className={`btn-secondary px-5 py-3 text-xs flex items-center gap-2 ${isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <RefreshCw className="w-4 h-4 text-cyan-400" />
-              <span>시스템 다시 스캔</span>
+              <RefreshCw className={`w-4 h-4 text-cyan-400 ${isScanning ? 'animate-spin' : ''}`} />
+              <span>{isScanning ? '스캔 중...' : '시스템 다시 스캔'}</span>
             </button>
           ) : (
             <button
               onClick={handleClean}
-              disabled={isCleaning || totalSelectedMB === 0}
-              className={`btn-primary px-6 py-3 ${isCleaning || totalSelectedMB === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isCleaning || totalSelectedMB === 0 || isScanning}
+              className={`btn-primary px-6 py-3 ${isCleaning || totalSelectedMB === 0 || isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isCleaning ? (
                 <>
@@ -228,7 +121,7 @@ export default function JunkCleaner({ addToast }) {
                 정크 파일 세척 완료! 총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 공간이 성공적으로 확보되었습니다!
               </h4>
               <p className="text-xs text-gray-700 dark:text-slate-300">
-                실제 %TEMP% 및 C:\Windows\Temp 디렉터리의 비활성 임시 파일이 디스크에서 안전하게 제거되었습니다.
+                실제 비활성 임시 파일이 디스크에서 안전하게 제거되었습니다.
               </p>
             </div>
           </div>
@@ -248,7 +141,9 @@ export default function JunkCleaner({ addToast }) {
           <span className="text-slate-600">|</span>
           <button onClick={deselectAll} className="text-gray-500 dark:text-slate-400 hover:underline">전체 해제</button>
         </div>
-        <span className="text-gray-500 dark:text-slate-400">총 {items.length}개 정크 카테고리 감지됨</span>
+        <span className="text-gray-500 dark:text-slate-400">
+          {isScanning ? '스캔 중...' : `총 ${items.length}개 정크 카테고리 감지됨`}
+        </span>
       </div>
 
       {/* Items List */}
@@ -266,12 +161,11 @@ export default function JunkCleaner({ addToast }) {
             <div className="flex items-center gap-3.5">
               <button className="text-cyan-400 focus:outline-none">
                 {item.selected ? (
-                  <CheckSquare className="w-5 h-5 text-cyan-400 fill-cyan-950" />
+                  <CheckSquare className="w-5 h-5" />
                 ) : (
-                  <Square className="w-5 h-5 text-slate-500" />
+                  <Square className="w-5 h-5 text-gray-400 dark:text-slate-600" />
                 )}
               </button>
-
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-gray-900 dark:text-slate-100 text-sm">{item.name}</span>

@@ -118,8 +118,15 @@ def _get_dir_size_mb(dir_path):
     return round(total / (1024 * 1024))
 
 
-def scan_junk():
-    """Scan junk files sequentially to avoid PyInstaller threading crashes."""
+_junk_scan_state = {"status": "idle", "data": []}
+_junk_scan_thread = None
+
+def get_junk_scan_status():
+    return _junk_scan_state
+
+def scan_junk_background():
+    global _junk_scan_state
+    _junk_scan_state["status"] = "running"
     try:
         user_temp = os.environ.get('TEMP', '')
         system_temp = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
@@ -132,27 +139,43 @@ def scan_junk():
         soft_dist_size = _get_dir_size_mb(soft_dist)
         prefetch_size = _get_dir_size_mb(prefetch)
 
-        return [
+        _junk_scan_state["data"] = [
             {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
             {"id": 2, "name": "웹 브라우저 캐시 및 쿠키 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지, 스크립트 캐시 데이터"},
             {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
         ]
+        _junk_scan_state["status"] = "success"
     except Exception as e:
         import traceback
-        return [
+        _junk_scan_state["data"] = [
             {"id": 999, "name": f"에러 발생: {str(e)}", "sizeMB": 0, "category": "Error", "selected": False, "description": traceback.format_exc()}
         ]
+        _junk_scan_state["status"] = "error"
 
+def scan_junk():
+    global _junk_scan_thread
+    if _junk_scan_state["status"] == "running":
+        return {"success": False, "message": "이미 스캔 중입니다."}
+    _junk_scan_thread = threading.Thread(target=scan_junk_background, daemon=True)
+    _junk_scan_thread.start()
+    return {"success": True}
 
 # ─────────────────────────────────────────────
-# Junk Clean (Sequential Execution)
+# Junk Clean (Background Execution)
 # ─────────────────────────────────────────────
 
-def clean_junk(category_ids, cancel_event=None):
-    """Clean junk files sequentially for maximum stability with instant cancellation."""
-    if not category_ids:
-        return {"freedMB": 0}
+_junk_clean_state = {"status": "idle", "freedMB": 0, "error": None}
+_junk_clean_thread = None
+
+def get_junk_clean_status():
+    return _junk_clean_state
+
+def clean_junk_background(category_ids, cancel_event):
+    global _junk_clean_state
+    _junk_clean_state["status"] = "running"
+    _junk_clean_state["freedMB"] = 0
+    _junk_clean_state["error"] = None
     try:
         freed_bytes = 0
         user_temp = os.environ.get('TEMP', '')
@@ -198,9 +221,24 @@ def clean_junk(category_ids, cancel_event=None):
                 break
             freed_bytes += _clean_dir(d)
 
-        return {"success": True, "freedMB": round(freed_bytes / (1024 * 1024))}
+        _junk_clean_state["freedMB"] = round(freed_bytes / (1024 * 1024))
+        _junk_clean_state["status"] = "success"
     except Exception as e:
-        return {"success": False, "freedMB": 0, "error": str(e)}
+        _junk_clean_state["status"] = "error"
+        _junk_clean_state["error"] = str(e)
+
+def clean_junk(category_ids, cancel_event=None):
+    global _junk_clean_thread, _junk_clean_state
+    if not category_ids:
+        _junk_clean_state["status"] = "success"
+        _junk_clean_state["freedMB"] = 0
+        return {"success": True}
+    if _junk_clean_state["status"] == "running":
+        return {"success": False, "message": "이미 정리 중입니다."}
+        
+    _junk_clean_thread = threading.Thread(target=clean_junk_background, args=(category_ids, cancel_event), daemon=True)
+    _junk_clean_thread.start()
+    return {"success": True}
 
 
 # ─────────────────────────────────────────────

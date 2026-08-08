@@ -32,11 +32,17 @@ class Api:
     def getDeepOptimizationStatus(self):
         return optimizer.get_deep_optimization_status()
 
+    def getJunkScanStatus(self):
+        return optimizer.get_junk_scan_status()
+
     def scanJunk(self):
         return optimizer.scan_junk()
+        
+    def getJunkCleanStatus(self):
+        return optimizer.get_junk_clean_status()
 
     def cleanJunk(self, selectedIds):
-        return optimizer.clean_junk(selectedIds)
+        return optimizer.clean_junk(selectedIds, optimizer._cancel_event)
 
     def cleanTempFiles(self):
         # 1번 항목(Temp) 정리 호출
