@@ -120,6 +120,20 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                 fp = os.path.join(root, f)
                 try:
                     if not os.path.islink(fp):
+                        try:
+                            with open(fp, 'ab'):
+                                pass
+                        except (OSError, PermissionError) as e:
+                            import stat
+                            try:
+                                os.chmod(fp, stat.S_IWRITE)
+                                with open(fp, 'ab'):
+                                    pass
+                            except (OSError, PermissionError):
+                                print(f"[SCAN_SKIP] locked file: {fp}")
+                                sys.stdout.flush()
+                                continue
+                                
                         total += os.path.getsize(fp)
                         file_count += 1
                         
@@ -136,7 +150,7 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                     pass
     except (OSError, PermissionError):
         pass
-    return round(total / (1024 * 1024))
+    return round(total / (1024 * 1024), 2)
 
 
 _junk_scan_state = {"status": "idle", "data": [], "progress": 0, "eta_seconds": 0}
@@ -254,7 +268,7 @@ def clean_junk_background(category_ids, cancel_event):
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
-                        print(f"[SUCCESS] deleted: {file_path} ({sz} bytes)")
+                        print(f"[DELETED] {file_path} ({sz} bytes)")
                         sys.stdout.flush()
                         
                         if file_count % 50 == 0:

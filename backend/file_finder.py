@@ -1,3 +1,4 @@
+import sys
 import os
 import hashlib
 import concurrent.futures
@@ -24,12 +25,18 @@ def scan_large_files(min_mb=500):
                 if not os.path.islink(full_path):
                     size = os.path.getsize(full_path)
                     if size >= min_bytes:
-                        large_files.append({
-                            "path": full_path,
-                            "name": file,
-                            "sizeMB": round(size / (1024*1024), 2),
-                            "modified": os.path.getmtime(full_path)
-                        })
+                        try:
+                            with open(full_path, 'ab'):
+                                pass
+                            large_files.append({
+                                "path": full_path,
+                                "name": file,
+                                "sizeMB": round(size / (1024*1024), 2),
+                                "modified": os.path.getmtime(full_path)
+                            })
+                        except (OSError, PermissionError) as e:
+                            print(f"[SCAN_SKIP] locked file: {full_path}")
+                            sys.stdout.flush()
             except (OSError, PermissionError):
                 pass
                 
@@ -70,9 +77,15 @@ def scan_duplicates():
                         size = os.path.getsize(full_path)
                         # Only consider files > 10MB to save time
                         if size > 10 * 1024 * 1024:
-                            if size not in size_map:
-                                size_map[size] = []
-                            size_map[size].append(full_path)
+                            try:
+                                with open(full_path, 'ab'):
+                                    pass
+                                if size not in size_map:
+                                    size_map[size] = []
+                                size_map[size].append(full_path)
+                            except (OSError, PermissionError) as e:
+                                print(f"[SCAN_SKIP] locked file: {full_path}")
+                                sys.stdout.flush()
                 except (OSError, PermissionError):
                     pass
 
