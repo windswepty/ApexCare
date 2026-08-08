@@ -25,11 +25,20 @@ def analyze_error_with_ai(error_log, system_state, user_message=""):
         
     try:
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-1.5-flash-latest",
             system_instruction=SYSTEM_PROMPT
         )
         response = model.generate_content(content)
         return {"success": True, "answer": response.text}
             
     except Exception as e:
-        return {"success": False, "error": f"API 호출 또는 네트워크 오류: {str(e)}"}
+        # Fallback to gemini-1.5-pro or older stable if 404 or other errors occur
+        try:
+            fallback_model = genai.GenerativeModel(
+                model_name="gemini-1.5-pro",
+                system_instruction=SYSTEM_PROMPT
+            )
+            response = fallback_model.generate_content(content)
+            return {"success": True, "answer": response.text}
+        except Exception as fallback_e:
+            return {"success": False, "error": f"API 호출 또는 네트워크 오류 (Fallback 실패): 기본 에러({str(e)}), Fallback 에러({str(fallback_e)})"}
