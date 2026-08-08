@@ -242,13 +242,20 @@ def clean_junk_background(category_ids, cancel_event):
                         try:
                             os.remove(file_path)
                         except (OSError, PermissionError):
-                            os.chmod(file_path, stat.S_IWRITE)
-                            os.remove(file_path)
+                            try:
+                                os.chmod(file_path, stat.S_IWRITE)
+                                os.remove(file_path)
+                            except (OSError, PermissionError) as e:
+                                print(f"[LOCKED/SKIPPED] {file_path} - {e}")
+                                sys.stdout.flush()
+                                continue
                             
                         local_freed += sz
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
+                        print(f"[SUCCESS] deleted: {file_path} ({sz} bytes)")
+                        sys.stdout.flush()
                         
                         if file_count % 50 == 0:
                             elapsed = time.time() - start_time
@@ -259,7 +266,9 @@ def clean_junk_background(category_ids, cancel_event):
                             _junk_clean_state["eta_seconds"] = max(0, eta)
                             print(f"[JunkPurger] 삭제 시도 파일 수: {total_attempt_count}, 성공: {total_success_count}, 누적 확보 용량: {total_freed_bytes} bytes")
                             sys.stdout.flush()
-                    except (OSError, PermissionError):
+                    except (OSError, PermissionError) as e:
+                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
+                        sys.stdout.flush()
                         continue
                         
                 for name in dirs:
