@@ -13,7 +13,17 @@ import pystray
 from PIL import Image, ImageDraw
 
 def create_image():
-    # Create a simple icon image for the system tray
+    # Load actual program icon
+    try:
+        icon_path = os.path.join(os.path.dirname(__file__), 'public', 'icon.ico')
+        if hasattr(sys, '_MEIPASS'):
+            icon_path = os.path.join(sys._MEIPASS, 'public', 'icon.ico')
+        if os.path.exists(icon_path):
+            return Image.open(icon_path)
+    except Exception as e:
+        pass
+
+    # Fallback if image not found
     image = Image.new('RGB', (64, 64), color = (8, 12, 20))
     dc = ImageDraw.Draw(image)
     dc.rectangle(
@@ -28,22 +38,24 @@ def setup_tray(window, api):
     global tray_icon
     
     def on_show(icon, item):
-        window.show()
+        threading.Thread(target=window.show, daemon=True).start()
 
     def on_quit(icon, item):
         icon.stop()
-        api.quitApplication()
+        threading.Thread(target=api.quitApplication, daemon=True).start()
 
     def toggle_game_booster(icon, item):
-        current = api.getGameBoosterStatus()
-        api.toggleGameBooster(not current)
+        def _toggle():
+            current = api.getGameBoosterStatus()
+            api.toggleGameBooster(not current)
+        threading.Thread(target=_toggle, daemon=True).start()
 
     def is_game_booster_on(item):
         return api.getGameBoosterStatus()
 
     def set_opt_mode(mode):
         def handler(icon, item):
-            api.setOptimizationMode(mode)
+            threading.Thread(target=api.setOptimizationMode, args=(mode,), daemon=True).start()
         return handler
 
     def is_opt_mode(mode):
