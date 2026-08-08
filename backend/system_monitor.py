@@ -11,7 +11,7 @@ import time
 import threading
 import subprocess
 import logging
-
+import gc
 log = logging.getLogger('SystemMonitor')
 
 # Cache CPU model info once at import time (WMI is heavy, only call once)
@@ -30,6 +30,8 @@ def _cpu_poller():
         except Exception as e:
             log.debug(f"CPU poller error: {e}")
             _cpu_usage = 0
+            
+        gc.collect()
 
 # Start CPU poller
 _cpu_thread = threading.Thread(target=_cpu_poller, daemon=True)
@@ -63,6 +65,8 @@ def _gpu_poller():
             log.debug(f"GPU poller error: {e}")
             _gpu_usage = 0
             time.sleep(1)
+            
+        gc.collect()
 
 # Start GPU poller automatically
 _gpu_thread = threading.Thread(target=_gpu_poller, daemon=True)

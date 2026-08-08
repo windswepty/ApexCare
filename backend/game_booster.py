@@ -13,6 +13,7 @@ import threading
 import time
 import ctypes
 import ctypes.wintypes
+import gc
 import os
 import subprocess
 import logging
@@ -577,6 +578,11 @@ def _booster_loop():
                     _tame_processes(current_tamable_pids)
                     
                 last_tamable_pids = current_tamable_pids
+                
+                found_games.clear()
+                current_game_pids.clear()
+                current_tamable_pids.clear()
+                gc.collect()
                 time.sleep(5)
             else:
                 if _booster_state["active"]:
@@ -588,8 +594,10 @@ def _booster_loop():
                     _booster_state["active"] = False
                     _booster_state["detected_game"] = None
                     _booster_state["boosted_pids"] = []
+                    _booster_state["boosted_pids"] = []
                     last_tamable_pids = []
                     
+                gc.collect()
                 time.sleep(3)
         except Exception as e:
             log.error(f"Booster loop crash: {e}")
@@ -684,6 +692,10 @@ def _eco_suppression_thread_func():
                 
             # Clean up dead ones
             _eco_tamed_pids.intersection_update(current_heavy_pids)
+            current_heavy_pids.clear()
+            
+            gc.collect()
+            
             
         except Exception as e:
             log.warning(f"Eco suppression loop error: {e}")

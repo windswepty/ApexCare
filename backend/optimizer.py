@@ -328,43 +328,56 @@ def clean_junk_background(category_ids, cancel_event):
         import shutil
         import psutil
         
+        drives = []
+        for p in psutil.disk_partitions(all=False):
+            if p.fstype and 'cdrom' not in p.opts:
+                drives.append(p.mountpoint)
+        if not drives:
+            drives = ['C:\\']
+            
+        start_free = {}
+        for drv in drives:
+            try:
+                start_free[drv] = shutil.disk_usage(drv).free
+            except Exception as e:
+                log.debug(f"Failed to get start free space for {drv}: {e}")
+
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
                 break
             _clean_dir(d, max_files=2000)
 
-        recycle_freed_bytes = 0
         if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
             try:
                 import ctypes
-                from ctypes import wintypes
-                class SHQUERYRBINFO(ctypes.Structure):
-                    _fields_ = [("cbSize", wintypes.DWORD),
-                                ("i64Size", ctypes.c_int64),
-                                ("i64NumItems", ctypes.c_int64)]
-                shell32 = ctypes.windll.shell32
-                info = SHQUERYRBINFO()
-                info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
-                res = shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
-                if res == 0:
-                    recycle_freed_bytes = info.i64Size
-
                 # 1 = SHERB_NOCONFIRMATION, 2 = SHERB_NOPROGRESSUI, 4 = SHERB_NOSOUND
                 empty_res = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
                 if empty_res == 0:
-                    print(f"[DELETED] Recycle Bin emptied via ctypes ({recycle_freed_bytes} bytes).")
-                else:
-                    recycle_freed_bytes = 0
+                    print("[DELETED] Recycle Bin emptied via ctypes.")
                 sys.stdout.flush()
             except Exception as e:
                 log.warning(f"Failed to empty recycle bin: {e}")
                 sys.stdout.flush()
 
-        total_freed_bytes += recycle_freed_bytes
-        _junk_clean_state["freed_mb"] = round(total_freed_bytes / (1024 * 1024), 2)
-        _junk_clean_state["details"] = {"Total": _junk_clean_state["freed_mb"]}
+        details = {}
+        total_actual_freed = 0
+        for drv in drives:
+            if drv in start_free:
+                try:
+                    end_val = shutil.disk_usage(drv).free
+                    freed = max(0, end_val - start_free[drv])
+                    freed_mb = round(freed / (1024 * 1024), 2)
+                    if freed_mb > 0:
+                        drv_letter = drv.replace('\\', '')
+                        details[drv_letter] = freed_mb
+                    total_actual_freed += freed
+                except Exception as e:
+                    log.debug(f"Failed to get end free space for {drv}: {e}")
+
+        _junk_clean_state["freed_mb"] = round(total_actual_freed / (1024 * 1024), 2)
+        _junk_clean_state["details"] = details
         
-        print(f"[JunkPurger] 최종 확보 용량 (정밀 파일 누적): {_junk_clean_state['freed_mb']} MB")
+        print(f"[JunkPurger] 최종 확보 용량 (물리적 차이): {_junk_clean_state['freed_mb']} MB")
         sys.stdout.flush()
         
         if cancel_event and cancel_event.is_set():
