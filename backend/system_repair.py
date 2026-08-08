@@ -162,6 +162,7 @@ def _run_network_optimization_internal():
             winreg.CloseKey(base_key)
             results.append(("Nagle Disabled", True))
         except Exception as e:
+            log.warning(f"[Network Opt] Failed to disable Nagle: {e}")
             results.append(("Nagle Disabled", False))
         
         # 5. Disable Network Throttling Index
@@ -175,7 +176,8 @@ def _run_network_optimization_internal():
             winreg.SetValueEx(key, "NetworkThrottlingIndex", 0, winreg.REG_DWORD, 0xFFFFFFFF)
             winreg.CloseKey(key)
             results.append(("Network Throttling Disabled", True))
-        except Exception:
+        except Exception as e:
+            log.warning(f"[Network Opt] Failed to disable Network Throttling: {e}")
             results.append(("Network Throttling Disabled", False))
         
         success_count = sum(1 for _, s in results if s)

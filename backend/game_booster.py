@@ -105,7 +105,8 @@ def _is_admin():
         return _is_admin_cached
     try:
         _is_admin_cached = ctypes.windll.shell32.IsUserAnAdmin() != 0
-    except Exception:
+    except Exception as e:
+        log.debug(f"IsAdmin check failed: {e}")
         _is_admin_cached = False
     _admin_checked = True
     if not _is_admin_cached:
@@ -221,7 +222,8 @@ def _suspend_process_via_win32(pid):
         result = ntdll.NtSuspendProcess(handle)
         kernel32.CloseHandle(handle)
         return result == 0
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suspend process failed for PID {pid}: {e}")
         return False
 
 
@@ -236,7 +238,8 @@ def _resume_process_via_win32(pid):
         result = ntdll.NtResumeProcess(handle)
         kernel32.CloseHandle(handle)
         return result == 0
-    except Exception:
+    except Exception as e:
+        log.debug(f"Resume process failed for PID {pid}: {e}")
         return False
 
 
@@ -304,7 +307,8 @@ def _set_process_power_throttling(pid, throttle):
         )
         kernel32.CloseHandle(handle)
         return True
-    except Exception:
+    except Exception as e:
+        log.debug(f"Power throttling error for PID {pid}: {e}")
         return False
 
 
@@ -598,8 +602,8 @@ def toggle_booster(enabled):
     try:
         from backend import config_manager
         config_manager.set_booster_state(enabled)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Failed to save booster state: {e}")
     
     if enabled and (_monitor_thread is None or not _monitor_thread.is_alive()):
         _stop_event.clear()
@@ -636,8 +640,8 @@ def _get_foreground_pid():
             pid = ctypes.wintypes.DWORD()
             ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             return pid.value
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Failed to get foreground PID: {e}")
     return None
 
 def _eco_suppression_thread_func():

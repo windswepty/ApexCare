@@ -10,6 +10,9 @@ import ctypes.wintypes
 import time
 import threading
 import subprocess
+import logging
+
+log = logging.getLogger('SystemMonitor')
 
 # Cache CPU model info once at import time (WMI is heavy, only call once)
 _cpu_model_cache = None
@@ -24,7 +27,8 @@ def _cpu_poller():
     while True:
         try:
             _cpu_usage = psutil.cpu_percent(interval=1)
-        except Exception:
+        except Exception as e:
+            log.debug(f"CPU poller error: {e}")
             _cpu_usage = 0
 
 # Start CPU poller
@@ -38,8 +42,9 @@ def _gpu_poller():
         hq = win32pdh.OpenQuery()
         hc = win32pdh.AddCounter(hq, '\\GPU Engine(*)\\Utilization Percentage')
         win32pdh.CollectQueryData(hq)
-    except Exception:
+    except Exception as e:
         # GPU monitoring not available — exit thread silently
+        log.debug(f"GPU pdh init error: {e}")
         _gpu_usage = 0
         return
 
@@ -54,7 +59,8 @@ def _gpu_poller():
                     if 'engtype_3D' in k:
                         usage += v
             _gpu_usage = round(usage)
-        except Exception:
+        except Exception as e:
+            log.debug(f"GPU poller error: {e}")
             _gpu_usage = 0
             time.sleep(1)
 
@@ -75,7 +81,8 @@ def _get_cpu_model():
         )
         _cpu_model_cache = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
         winreg.CloseKey(key)
-    except Exception:
+    except Exception as e:
+        log.debug(f"Failed to get CPU model: {e}")
         _cpu_model_cache = platform.processor() or "Unknown CPU"
     return _cpu_model_cache
 
@@ -95,7 +102,8 @@ def _get_gpu_model():
             break
         if not _gpu_model_cache:
             _gpu_model_cache = "Unknown GPU"
-    except Exception:
+    except Exception as e:
+        log.debug(f"Failed to get GPU model: {e}")
         _gpu_model_cache = "Unknown GPU"
     return _gpu_model_cache
 
@@ -189,8 +197,8 @@ def kill_process(pid):
                     ctypes.windll.kernel32.TerminateProcess(handle, 1)
                     ctypes.windll.kernel32.CloseHandle(handle)
                     return {"success": True}
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Win32 terminate fallback failed: {e}")
             
             # Fallback 2: taskkill /F /PID
             try:

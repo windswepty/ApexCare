@@ -5,6 +5,9 @@ from backend import system_repair
 from backend import uninstaller
 from backend import file_finder
 from backend import debloater
+import logging
+
+log = logging.getLogger('API')
 from backend import game_booster
 from backend import config_manager
 import json
@@ -89,7 +92,8 @@ class Api:
     def getStartupApps(self):
         try:
             return optimizer.get_startup_apps()
-        except Exception:
+        except Exception as e:
+            log.warning(f"Error getting startup apps: {e}")
             return []
 
     def toggleStartupApp(self, name, enabled):
@@ -117,7 +121,8 @@ class Api:
     def getUninstallerApps(self):
         try:
             return uninstaller.get_installed_apps()
-        except Exception:
+        except Exception as e:
+            log.warning(f"Error getting uninstaller apps: {e}")
             return []
 
     def uninstallApp(self, uninstall_string):

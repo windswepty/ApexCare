@@ -64,13 +64,13 @@ def get_installed_apps():
                         })
                     except FileNotFoundError:
                         pass
+                    except Exception as e:
+                        log.debug(f"Failed to read subkey info: {e}")
                     finally:
                         winreg.CloseKey(subkey)
-                except Exception:
-                    pass
             winreg.CloseKey(key)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Failed to read registry key {path}: {e}")
             
     # Sort alphabetically
     apps.sort(key=lambda x: x["name"].lower())
@@ -129,13 +129,14 @@ def find_leftovers(app_name):
                                     fp = os.path.join(dirpath, f)
                                     if not os.path.islink(fp):
                                         size += os.path.getsize(fp)
-                        except Exception: pass
+                        except Exception as e:
+                            log.debug(f"Error calculating size for {full_path}: {e}")
                         leftovers.append({
                             "path": full_path,
                             "sizeMB": round(size / (1024*1024), 2)
                         })
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Error searching base dir {base_dir}: {e}")
             
     return leftovers
 
@@ -185,7 +186,8 @@ def clean_leftovers(paths):
                 deleted_mb += (size / (1024*1024))
             else:
                 failed += 1
-        except Exception:
+        except Exception as e:
+            log.warning(f"Error removing leftover {p}: {e}")
             failed += 1
                 
     return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}

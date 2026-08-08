@@ -328,57 +328,43 @@ def clean_junk_background(category_ids, cancel_event):
         import shutil
         import psutil
         
-        drives = []
-        for p in psutil.disk_partitions(all=False):
-            if p.fstype and 'cdrom' not in p.opts:
-                drives.append(p.mountpoint)
-        if not drives:
-            drives = ['C:\\']
-            
-        start_free = {}
-        for drv in drives:
-            try:
-                start_free[drv] = shutil.disk_usage(drv).free
-            except Exception:
-                pass
-
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
                 break
             _clean_dir(d, max_files=2000)
 
+        recycle_freed_bytes = 0
         if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
             try:
                 import ctypes
+                from ctypes import wintypes
+                class SHQUERYRBINFO(ctypes.Structure):
+                    _fields_ = [("cbSize", wintypes.DWORD),
+                                ("i64Size", ctypes.c_int64),
+                                ("i64NumItems", ctypes.c_int64)]
+                shell32 = ctypes.windll.shell32
+                info = SHQUERYRBINFO()
+                info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
+                res = shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
+                if res == 0:
+                    recycle_freed_bytes = info.i64Size
+
                 # 1 = SHERB_NOCONFIRMATION, 2 = SHERB_NOPROGRESSUI, 4 = SHERB_NOSOUND
-                ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
-                print("[DELETED] Recycle Bin emptied via ctypes.")
+                empty_res = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
+                if empty_res == 0:
+                    print(f"[DELETED] Recycle Bin emptied via ctypes ({recycle_freed_bytes} bytes).")
+                else:
+                    recycle_freed_bytes = 0
                 sys.stdout.flush()
             except Exception as e:
-                print(f"[ERROR] Failed to empty recycle bin: {e}")
+                log.warning(f"Failed to empty recycle bin: {e}")
                 sys.stdout.flush()
 
-        details = {}
-        total_actual_freed = 0
-        for drv in drives:
-            if drv in start_free:
-                try:
-                    end_val = shutil.disk_usage(drv).free
-                    freed = max(0, end_val - start_free[drv])
-                    freed_mb = round(freed / (1024 * 1024), 2)
-                    if freed_mb > 0:
-                        drv_letter = drv.replace('\\', '')
-                        details[drv_letter] = freed_mb
-                    total_actual_freed += freed
-                except Exception:
-                    pass
-
-        _junk_clean_state["freed_mb"] = round(total_actual_freed / (1024 * 1024), 2)
-        _junk_clean_state["details"] = details
+        total_freed_bytes += recycle_freed_bytes
+        _junk_clean_state["freed_mb"] = round(total_freed_bytes / (1024 * 1024), 2)
+        _junk_clean_state["details"] = {"Total": _junk_clean_state["freed_mb"]}
         
-        print(f"[JunkPurger] 삭제 루프 내부 측정 용량: {total_freed_bytes} bytes")
-        print(f"[JunkPurger] 최종 확보 용량 (물리적 차이): {_junk_clean_state['freed_mb']} MB")
-        print(f"[JunkPurger] 상세 내역: {details}")
+        print(f"[JunkPurger] 최종 확보 용량 (정밀 파일 누적): {_junk_clean_state['freed_mb']} MB")
         sys.stdout.flush()
         
         if cancel_event and cancel_event.is_set():
@@ -515,11 +501,18 @@ def purge_ram():
                 
                 handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid)
                 if handle:
-                    psapi.EmptyWorkingSet(handle)
-                    kernel32.CloseHandle(handle)
-                    purged_count += 1
-            except Exception:
-                pass
+                    try:
+                        psapi.EmptyWorkingSet(handle)
+                        purged_count += 1
+                    except Exception as handle_e:
+                        log.debug(f"[RAM Purge] Failed to EmptyWorkingSet for PID {pid}: {handle_e}")
+                    finally:
+                        kernel32.CloseHandle(handle)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+            except Exception as e:
+                log.warning(f"[RAM Purge] Error iterating process {p.info.get('pid', 'unknown')}: {e}")
+                continue
                 
         # 2. Conditional Standby Cache Purge: only when available RAM is critically low
         mem = psutil.virtual_memory()

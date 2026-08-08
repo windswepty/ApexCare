@@ -2,6 +2,9 @@ import sys
 import os
 import hashlib
 import concurrent.futures
+import logging
+
+log = logging.getLogger('FileFinder')
 
 def get_local_drives():
     import psutil
@@ -61,7 +64,8 @@ def _hash_file(filepath, chunk_size=8192):
             while chunk := f.read(chunk_size):
                 hasher.update(chunk)
         return hasher.hexdigest()
-    except Exception:
+    except Exception as e:
+        log.debug(f"Hash error {filepath}: {e}")
         return None
 
 def scan_duplicates():
@@ -124,8 +128,8 @@ def scan_duplicates():
                         if h not in hashes:
                             hashes[h] = []
                         hashes[h].append(file_info)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Future hash error: {e}")
         # Add to duplicates if still > 1
         for h, group in hashes.items():
             if len(group) > 1:
@@ -168,7 +172,8 @@ def delete_files(paths):
             size = os.path.getsize(p)
             os.unlink(p)
             deleted_mb += (size / (1024*1024))
-        except Exception:
+        except Exception as e:
+            log.warning(f"Failed to delete {p}: {e}")
             failed += 1
                 
     return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}
