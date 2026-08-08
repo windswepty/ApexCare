@@ -96,7 +96,7 @@ def cancel_deep_optimization():
     return {"success": False, "message": "실행 중인 최적화가 없습니다."}
 
 # ─────────────────────────────────────────────
-# Junk Scan (Multi-threaded Parallel Execution)
+# Junk Scan (Sequential Execution)
 # ─────────────────────────────────────────────
 
 def _get_dir_size_mb(dir_path):
@@ -119,7 +119,7 @@ def _get_dir_size_mb(dir_path):
 
 
 def scan_junk():
-    """Scan junk files in PARALLEL using ThreadPoolExecutor."""
+    """Scan junk files sequentially to avoid PyInstaller threading crashes."""
     try:
         user_temp = os.environ.get('TEMP', '')
         system_temp = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
@@ -127,17 +127,10 @@ def scan_junk():
         soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
         chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            fut_temp = executor.submit(_get_dir_size_mb, user_temp)
-            fut_system_temp = executor.submit(_get_dir_size_mb, system_temp)
-            fut_cache = executor.submit(_get_dir_size_mb, chrome_cache)
-            fut_soft = executor.submit(_get_dir_size_mb, soft_dist)
-            fut_prefetch = executor.submit(_get_dir_size_mb, prefetch)
-
-            temp_size = fut_temp.result() + fut_system_temp.result()
-            cache_size = fut_cache.result()
-            soft_dist_size = fut_soft.result()
-            prefetch_size = fut_prefetch.result()
+        temp_size = _get_dir_size_mb(user_temp) + _get_dir_size_mb(system_temp)
+        cache_size = _get_dir_size_mb(chrome_cache)
+        soft_dist_size = _get_dir_size_mb(soft_dist)
+        prefetch_size = _get_dir_size_mb(prefetch)
 
         return [
             {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
@@ -146,16 +139,18 @@ def scan_junk():
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
         ]
     except Exception as e:
-        print(f"[Optimizer] Scan error: {e}")
-        return []
+        import traceback
+        return [
+            {"id": 999, "name": f"에러 발생: {str(e)}", "sizeMB": 0, "category": "Error", "selected": False, "description": traceback.format_exc()}
+        ]
 
 
 # ─────────────────────────────────────────────
-# Junk Clean (Parallel Executor)
+# Junk Clean (Sequential Execution)
 # ─────────────────────────────────────────────
 
 def clean_junk(category_ids, cancel_event=None):
-    """Clean junk files using ultra-fast ThreadPoolExecutor with instant cancellation."""
+    """Clean junk files sequentially for maximum stability with instant cancellation."""
     if not category_ids:
         return {"freedMB": 0}
     try:
@@ -175,48 +170,37 @@ def clean_junk(category_ids, cancel_event=None):
                     if cancel_event and cancel_event.is_set():
                         break
                     try:
-                        if entry.is_file(follow_symlinks=False):
-                            size = entry.stat().st_size
-                            os.unlink(entry.path)
-                            local_freed += size
-                        elif entry.is_dir(follow_symlinks=False):
-                            for dp, _, fns in os.walk(entry.path):
-                                if cancel_event and cancel_event.is_set():
-                                    break
-                                for fn in fns:
-                                    if cancel_event and cancel_event.is_set():
-                                        break
-                                    try:
-                                        local_freed += os.path.getsize(os.path.join(dp, fn))
-                                    except OSError:
-                                        pass
+                        if entry.is_file() and not entry.is_symlink():
+                            sz = entry.stat().st_size
+                            os.remove(entry.path)
+                            local_freed += sz
+                        elif entry.is_dir() and not entry.is_symlink():
+                            import shutil
                             shutil.rmtree(entry.path, ignore_errors=True)
                     except (OSError, PermissionError):
-                        pass
+                        continue
             except (OSError, PermissionError):
                 pass
             return local_freed
 
-        # Parallel cleaning
-        futures = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            if 1 in category_ids:
-                futures.append(executor.submit(_clean_dir, user_temp))
-                futures.append(executor.submit(_clean_dir, system_temp))
-            if 2 in category_ids:
-                futures.append(executor.submit(_clean_dir, chrome_cache))
-            if 3 in category_ids:
-                futures.append(executor.submit(_clean_dir, soft_dist))
-            if 4 in category_ids:
-                futures.append(executor.submit(_clean_dir, prefetch))
+        target_dirs = []
+        if 1 in category_ids:
+            target_dirs.extend([user_temp, system_temp])
+        if 2 in category_ids:
+            target_dirs.append(chrome_cache)
+        if 3 in category_ids:
+            target_dirs.append(soft_dist)
+        if 4 in category_ids:
+            target_dirs.append(prefetch)
 
-        for f in concurrent.futures.as_completed(futures):
-            freed_bytes += f.result()
+        for d in target_dirs:
+            if cancel_event and cancel_event.is_set():
+                break
+            freed_bytes += _clean_dir(d)
 
-        return {"freedMB": round(freed_bytes / (1024 * 1024))}
+        return {"success": True, "freedMB": round(freed_bytes / (1024 * 1024))}
     except Exception as e:
-        print(f"[Optimizer] Clean error: {e}")
-        return {"freedMB": 0}
+        return {"success": False, "freedMB": 0, "error": str(e)}
 
 
 # ─────────────────────────────────────────────

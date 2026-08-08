@@ -19,14 +19,19 @@ export default function JunkCleaner({ addToast }) {
     setFreedMB(0);
     if (window.pywebview?.api && window.pywebview?.api.scanJunk) {
       try {
-        const realItems = await window.pywebview?.api.scanJunk();
-        if (realItems && Array.isArray(realItems) && realItems.length > 0) {
+        let realItems = await window.pywebview?.api.scanJunk();
+        if (typeof realItems === 'string') {
+          try { realItems = JSON.parse(realItems); } catch(e) {}
+        }
+        if (Array.isArray(realItems) && realItems.length > 0) {
           setItems(realItems);
           return;
         } else if (Array.isArray(realItems)) {
           setItems([]);
         }
-      } catch (e) {}
+      } catch (e) {
+        if (addToast) addToast("정크 파일 스캔 중 에러가 발생했습니다.", "error");
+      }
     }
   };
 
@@ -90,26 +95,38 @@ export default function JunkCleaner({ addToast }) {
 
     const selectedIds = items.filter(i => i.selected).map(i => i.id);
 
-    // Call real Electron IPC if available
+    // Call real API
+    let success = false;
+    let actualFreedMB = 0;
     if (window.pywebview?.api && window.pywebview?.api.cleanJunk) {
       try {
         const result = await window.pywebview?.api.cleanJunk(selectedIds);
-        if (result && result.freedMB !== undefined) {
-          setFreedMB(result.freedMB);
+        if (result && result.success) {
+          success = true;
+          actualFreedMB = result.freedMB || 0;
+          setFreedMB(actualFreedMB);
+        } else if (result && !result.success) {
+          if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (result.error || ""), "error");
         }
-      } catch (e) {}
+      } catch (e) {
+        if (addToast) addToast("정크 파일 삭제 API 통신 오류", "error");
+      }
     } else if (window.pywebview?.api && window.pywebview?.api.cleanTempFiles) {
       try {
         const result = await window.pywebview?.api.cleanTempFiles();
-        if (result && result.freedMB !== undefined) {
-          setFreedMB(result.freedMB);
+        if (result && result.success) {
+          success = true;
+          actualFreedMB = result.freedMB || 0;
+          setFreedMB(actualFreedMB);
         }
       } catch (e) {}
     }
 
     setIsCleaning(false);
-    setCleanedSuccess(true);
-    playSound('success');
+    
+    if (success) {
+      setCleanedSuccess(true);
+      playSound('success');
 
       // Empty selected items size
       setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
@@ -119,8 +136,9 @@ export default function JunkCleaner({ addToast }) {
       } catch (e) {}
       
       if (addToast) {
-        addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${freedMB || '성공'})`, 'success');
+        addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${actualFreedMB >= 1024 ? (actualFreedMB/1024).toFixed(2) + ' GB' : actualFreedMB + ' MB'})`, 'success');
       }
+    }
   };
 
   return (
