@@ -679,10 +679,10 @@ def _tune_power_params(mode):
     
     if mode == 'gaming':
         # === CPU: Min/Max processor state = 100% (prevent frequency throttling) ===
-        # GUID: 54533251-82be-4824-96c1-47b60b740d00 (Processor)
-        # Sub: 893dee8e-2bef-41e0-89c6-b55d0929964c (min state), bc5038f7-23e0-4960-96da-33abaf5935ec (max state)
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "100")  # Min CPU = 100%
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "100")  # Max CPU = 100%
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "100")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "100")
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
         
         # === Disable CPU Core Parking (prevent cores from sleeping) ===
         # CPMINCORES = 0cc5b647... ; value = 100 means all cores stay active
@@ -706,8 +706,10 @@ def _tune_power_params(mode):
         
     elif mode == 'eco':
         # === CPU: Max processor state = 70% (save power/reduce heat) ===
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "5")   # Min CPU = 5%
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "70")  # Max CPU = 70%
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "70")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "70")
         
         # === Enable Core Parking (let cores sleep) ===
         _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "50")
@@ -719,8 +721,10 @@ def _tune_power_params(mode):
         
     else:  # standard
         # === Balanced defaults ===
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "893dee8e-2bef-41e0-89c6-b55d0929964c", "5")   # Min CPU = 5%
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "bc5038f7-23e0-4960-96da-33abaf5935ec", "100") # Max CPU = 100%
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
+        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
+        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
         
         # === Moderate Core Parking ===
         _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "70")
@@ -767,6 +771,14 @@ def set_optimization_mode(mode):
 
         # Apply detailed sub-parameters (CPU state, core parking, MMCSS, etc.)
         _tune_power_params(mode)
+        
+        # Manage Eco background suppression loop
+        from backend import game_booster
+        if mode == 'eco':
+            game_booster.start_eco_suppression_loop()
+        else:
+            game_booster.stop_eco_suppression_loop()
+            game_booster.restore_background_apps()
 
         # OS 전원 플랜 적용 여부 검증
         current_active = _get_active_power_plan_guid()

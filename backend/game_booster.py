@@ -621,3 +621,89 @@ def init_booster():
     except Exception as e:
         log.warning(f"Failed to auto-init booster: {e}")
 
+# ─────────────────────────────────────────────
+# Eco Mode Background Suppression
+# ─────────────────────────────────────────────
+
+_eco_suppression_thread = None
+_eco_stop_event = threading.Event()
+_eco_tamed_pids = set()
+
+def _get_foreground_pid():
+    try:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd:
+            pid = ctypes.wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return pid.value
+    except Exception:
+        pass
+    return None
+
+def _eco_suppression_thread_func():
+    global _eco_tamed_pids
+    log.info("Eco suppression loop started.")
+    
+    # Critical system processes to NEVER touch
+    system_procs = {'svchost.exe', 'csrss.exe', 'smss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'dwm.exe', 'explorer.exe', 'spoolsv.exe', 'taskmgr.exe'}
+    
+    while not _eco_stop_event.is_set():
+        try:
+            fg_pid = _get_foreground_pid()
+            current_heavy_pids = set()
+            
+            # Find all heavy background apps
+            for p in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent']):
+                try:
+                    pid = p.info['pid']
+                    name = p.info['name'].lower() if p.info['name'] else ""
+                    
+                    if pid == fg_pid:
+                        continue
+                    if name in system_procs:
+                        continue
+                        
+                    # Skip System/Network/Local Service processes if possible
+                    user = p.info['username']
+                    if user and ('system' in user.lower() or 'service' in user.lower()):
+                        continue
+                        
+                    current_heavy_pids.add(pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            # Tame new ones
+            new_pids = current_heavy_pids - _eco_tamed_pids
+            if new_pids:
+                _tame_processes(list(new_pids))
+                _eco_tamed_pids.update(new_pids)
+                
+            # Clean up dead ones
+            _eco_tamed_pids.intersection_update(current_heavy_pids)
+            
+        except Exception as e:
+            log.warning(f"Eco suppression loop error: {e}")
+            
+        # Sleep for 10 seconds before next check
+        for _ in range(10):
+            if _eco_stop_event.is_set():
+                break
+            time.sleep(1)
+
+def start_eco_suppression_loop():
+    global _eco_suppression_thread, _eco_stop_event
+    _eco_stop_event.clear()
+    if _eco_suppression_thread is None or not _eco_suppression_thread.is_alive():
+        _eco_suppression_thread = threading.Thread(target=_eco_suppression_thread_func, daemon=True)
+        _eco_suppression_thread.start()
+
+def stop_eco_suppression_loop():
+    global _eco_stop_event
+    _eco_stop_event.set()
+
+def restore_background_apps():
+    global _eco_tamed_pids
+    if _eco_tamed_pids:
+        log.info("Restoring priority for Eco-tamed background apps...")
+        _restore_processes(list(_eco_tamed_pids))
+        _eco_tamed_pids.clear()
