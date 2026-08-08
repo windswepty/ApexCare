@@ -41,6 +41,23 @@ def set_eula_accepted(state):
     save_config(config)
 
 def get_ai_api_key():
+    # 1. 환경 변수 우선 확인
+    if os.environ.get("OPENAI_API_KEY"):
+        return os.environ.get("OPENAI_API_KEY")
+        
+    # 2. .env 파일 파싱
+    env_path = os.path.join(os.getcwd(), '.env')
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('OPENAI_API_KEY='):
+                        return line.split('=', 1)[1].strip().strip('"').strip("'")
+        except:
+            pass
+
+    # 3. GUI 설정창에 저장된 값 폴백(Fallback)
     return load_config().get("ai_api_key", "")
 
 def set_ai_api_key(key):
