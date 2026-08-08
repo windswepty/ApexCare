@@ -666,25 +666,33 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
     High-end gets caching optimization and full performance unlock.
     """
     try:
+        CREATE_NO_WINDOW = 0x08000000
         if cpu_cores <= 4 or ram_gb < 8:
-            # 저사양: 백그라운드 강제 억제 및 가용 리소스 확보
-            _stop_service("SysMain")  # Superfetch 중지 (디스크/CPU 점유율 낮춤)
-            _stop_service("WSearch")  # Windows Search 색인 중지
+            # 저사양: 백그라운드 강제 억제 및 가용 리소스 확보 (영구적)
+            subprocess.run('sc config SysMain start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
+            subprocess.run('sc config WSearch start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
+            _stop_service("SysMain")  # 즉시 중지
+            _stop_service("WSearch")
             purge_ram() # 강력한 램 클리어 즉시 실행
-            # 저사양 맞춤 전원 프로필 세팅 (Balanced 또는 Eco)
+            
+            # 저사양 맞춤 전원 프로필 세팅
             _set_power_plan(POWER_PLAN_BALANCED)
             
-            msg = "저사양 맞춤 튜닝 적용 완료: 불필요한 백그라운드 서비스(SysMain, WSearch)를 차단하여 CPU/RAM 점유율을 대폭 낮추었습니다."
+            msg = "저사양 맞춤 튜닝 적용 완료: 불필요한 백그라운드 서비스(SysMain, WSearch)를 영구 차단하여 CPU/RAM 점유율을 대폭 낮추었습니다."
             tier = "LowEnd"
         else:
-            # 중/고사양: 최대 성능 유지 및 캐시 활용
-            # SysMain 유지 (캐싱 활용), WSearch 유지
-            # CPU 최대 클럭 확보를 위해 High Performance 모드를 베이스로 설정
-            _set_power_plan(POWER_PLAN_HIGH_PERF)
-            # 텔레메트리만 차단
+            # 중/고사양: 최대 성능 유지 및 캐시 활용 (영구적)
+            subprocess.run('sc config SysMain start= auto', shell=True, creationflags=CREATE_NO_WINDOW)
+            subprocess.run('sc config WSearch start= auto', shell=True, creationflags=CREATE_NO_WINDOW)
+            subprocess.run('sc config DiagTrack start= disabled', shell=True, creationflags=CREATE_NO_WINDOW)
+            _start_service("SysMain") # 즉시 시작
+            _start_service("WSearch")
             _stop_service("DiagTrack")
             
-            msg = "고성능 맞춤 튜닝 적용 완료: 넉넉한 하드웨어 자원을 활용하여 시스템 캐시를 유지하고 CPU 성능을 100% 개방하도록 전원 프로필을 튜닝했습니다."
+            # 고성능 프로필 베이스
+            _set_power_plan(POWER_PLAN_HIGH_PERF)
+            
+            msg = "고성능 맞춤 튜닝 적용 완료: 넉넉한 하드웨어 자원을 활용하여 시스템 캐시를 켜고, CPU 성능을 100% 개방하도록 영구 튜닝했습니다."
             tier = "HighEnd"
             
         return {

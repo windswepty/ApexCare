@@ -597,11 +597,6 @@ def toggle_booster(enabled):
         _monitor_thread.start()
         log.info("✓ Game Booster ENABLED - monitoring for games...")
         
-    if not enabled and _booster_state["active"]:
-        _restore_processes([])  # PIDs handled by the loop
-        _exit_boost_mode()
-        _booster_state["active"] = False
-        _booster_state["detected_game"] = None
-        log.info("✓ Game Booster DISABLED")
-        
+    if not enabled:
+        log.info("✓ Game Booster DISABLED - delegating teardown to background thread...")
     return {"success": True, "enabled": enabled}
