@@ -169,29 +169,64 @@ def get_processes():
         return []
 
 def kill_process(pid):
-    """Terminate a process by PID securely."""
+    """Terminate a process by PID securely with Win32 API / taskkill fallback."""
     try:
         if pid == os.getpid():
             return {"success": False, "error": "APEX CARE 자체를 종료할 수 없습니다."}
-        p = psutil.Process(pid)
-        p.terminate()
-        return {"success": True}
+        
+        # Try psutil first
+        try:
+            p = psutil.Process(pid)
+            p.kill()
+            return {"success": True}
+        except (psutil.AccessDenied, Exception):
+            # Fallback 1: Win32 TerminateProcess via ctypes
+            try:
+                PROCESS_TERMINATE = 0x0001
+                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                if handle:
+                    ctypes.windll.kernel32.TerminateProcess(handle, 1)
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                    return {"success": True}
+            except Exception:
+                pass
+            
+            # Fallback 2: taskkill /F /PID
+            try:
+                res = subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                if res.returncode == 0:
+                    return {"success": True}
+                return {"success": False, "error": res.stderr.strip() or "프로세스를 종료할 권한이 없습니다."}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def set_process_priority(pid, priority):
-    """Change process priority (Windows specific classes)."""
+    """Change process priority (Windows specific classes) with Win32 fallback."""
     try:
-        p = psutil.Process(pid)
-        pri = priority.lower()
-        if pri == 'high':
-            p.nice(psutil.HIGH_PRIORITY_CLASS)
-        elif pri == 'low':
-            p.nice(psutil.IDLE_PRIORITY_CLASS)
-        elif pri == 'realtime':
-            p.nice(psutil.REALTIME_PRIORITY_CLASS)
-        else:
-            p.nice(psutil.NORMAL_PRIORITY_CLASS)
-        return {"success": True}
+        pri_map = {
+            'high': (psutil.HIGH_PRIORITY_CLASS, 0x0080),
+            'low': (psutil.IDLE_PRIORITY_CLASS, 0x0040),
+            'realtime': (psutil.REALTIME_PRIORITY_CLASS, 0x0100),
+            'normal': (psutil.NORMAL_PRIORITY_CLASS, 0x0020)
+        }
+        target_psutil, target_win32 = pri_map.get(priority.lower(), (psutil.NORMAL_PRIORITY_CLASS, 0x0020))
+        
+        try:
+            p = psutil.Process(pid)
+            p.nice(target_psutil)
+            return {"success": True}
+        except psutil.AccessDenied:
+            # Fallback: Win32 SetPriorityClass
+            PROCESS_SET_INFORMATION = 0x0200
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
+            if handle:
+                res = ctypes.windll.kernel32.SetPriorityClass(handle, target_win32)
+                ctypes.windll.kernel32.CloseHandle(handle)
+                if res:
+                    return {"success": True}
+            return {"success": False, "error": "우선순위 변경 권한이 거부되었습니다."}
     except Exception as e:
         return {"success": False, "error": str(e)}
+

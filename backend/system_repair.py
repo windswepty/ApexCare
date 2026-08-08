@@ -1,18 +1,30 @@
 """
 APEX CARE - System Repair and Advanced Disk Ops
-Runs long-running commands like SFC, DISM, Defrag, and Network optimization in hidden subprocesses.
+Runs long-running commands like SFC, DISM, Defrag, and Network optimization in hidden subprocesses with full logging and error handling.
 """
 import subprocess
 import threading
+import logging
 
-def _run_hidden_cmd(cmd):
+log = logging.getLogger('SystemRepair')
+CREATE_NO_WINDOW = 0x08000000
+
+def _run_hidden_cmd(cmd_list):
+    """Run system command with shell=True and return detailed output."""
     try:
-        # CREATE_NO_WINDOW = 0x08000000
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=0x08000000, text=True)
+        cmd_str = " ".join(cmd_list) if isinstance(cmd_list, list) else cmd_list
+        result = subprocess.run(
+            cmd_str,
+            shell=True,
+            capture_output=True,
+            text=True,
+            creationflags=CREATE_NO_WINDOW,
+            timeout=120
+        )
         if result.returncode == 0:
             return {"success": True, "message": "성공적으로 완료되었습니다.", "output": result.stdout}
         else:
-            return {"success": False, "message": f"작업 실패 (코드: {result.returncode})", "error": result.stderr}
+            return {"success": False, "message": f"작업 실패 (코드: {result.returncode})", "error": result.stderr or result.stdout}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -20,32 +32,49 @@ def _run_hidden_cmd(cmd):
 # Background task state dictionaries
 # ─────────────────────────────────────────────
 
-_sfc_state = {"status": "idle"}
-_dism_state = {"status": "idle"}
-_trim_state = {"status": "idle"}
-_network_state = {"status": "idle"}
+_sfc_state = {"status": "idle", "output": "", "error": None}
+_dism_state = {"status": "idle", "output": "", "error": None}
+_trim_state = {"status": "idle", "output": "", "error": None}
+_network_state = {"status": "idle", "message": "", "details": []}
 
-def _run_hidden_cmd_bg(cmd, state_dict):
+def _run_hidden_cmd_bg(cmd_list, state_dict, timeout_sec=600):
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=0x08000000, text=True)
+        cmd_str = " ".join(cmd_list) if isinstance(cmd_list, list) else cmd_list
+        log.info(f"Starting background command: {cmd_str}")
+        result = subprocess.run(
+            cmd_str,
+            shell=True,
+            capture_output=True,
+            text=True,
+            creationflags=CREATE_NO_WINDOW,
+            timeout=timeout_sec
+        )
+        state_dict["output"] = result.stdout
         if result.returncode == 0:
             state_dict["status"] = "success"
+            log.info(f"✓ Command succeeded: {cmd_str}")
         else:
             state_dict["status"] = "error"
-    except Exception:
+            state_dict["error"] = result.stderr or result.stdout
+            log.warning(f"✗ Command failed (code {result.returncode}): {cmd_str} -> {state_dict['error']}")
+    except Exception as e:
         state_dict["status"] = "error"
+        state_dict["error"] = str(e)
+        log.warning(f"⚠ Command exception: {cmd_str} -> {e}")
 
 # ─────────────────────────────────────────────
-# TRIM / Disk Optimization (now async)
+# TRIM / Disk Optimization (async)
 # ─────────────────────────────────────────────
 
 def run_trim():
     """Run disk optimization and TRIM on ALL volumes asynchronously."""
     global _trim_state
     if _trim_state["status"] == "running":
-        return {"success": False, "message": "이미 실행 중입니다."}
+        return {"success": False, "message": "이미 디스크 최적화가 실행 중입니다."}
     _trim_state["status"] = "running"
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["defrag.exe", "/C", "/O"], _trim_state), daemon=True)
+    _trim_state["error"] = None
+    _trim_state["output"] = ""
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["defrag.exe", "/C", "/O"], _trim_state, 300), daemon=True)
     t.start()
     return {"success": True}
 
@@ -60,9 +89,11 @@ def run_sfc():
     """Run System File Checker asynchronously."""
     global _sfc_state
     if _sfc_state["status"] == "running":
-        return {"success": False, "message": "이미 실행 중입니다."}
+        return {"success": False, "message": "이미 SFC 무결성 검사가 실행 중입니다."}
     _sfc_state["status"] = "running"
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["sfc.exe", "/scannow"], _sfc_state), daemon=True)
+    _sfc_state["error"] = None
+    _sfc_state["output"] = ""
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["sfc.exe", "/scannow"], _sfc_state, 900), daemon=True)
     t.start()
     return {"success": True}
 
@@ -77,9 +108,11 @@ def run_dism():
     """Run DISM RestoreHealth asynchronously."""
     global _dism_state
     if _dism_state["status"] == "running":
-        return {"success": False, "message": "이미 실행 중입니다."}
+        return {"success": False, "message": "이미 DISM 복구 작업이 실행 중입니다."}
     _dism_state["status"] = "running"
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state), daemon=True)
+    _dism_state["error"] = None
+    _dism_state["output"] = ""
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, 1200), daemon=True)
     t.start()
     return {"success": True}
 
@@ -87,11 +120,11 @@ def get_dism_status():
     return _dism_state
 
 # ─────────────────────────────────────────────
-# Network Optimization (now async)
+# Network Optimization (async + sync)
 # ─────────────────────────────────────────────
 
 def _run_network_optimization_internal():
-    """The actual network optimization logic. Can be called synchronously or from a thread."""
+    """The actual network optimization logic."""
     global _network_state
     try:
         results = []
@@ -105,8 +138,8 @@ def _run_network_optimization_internal():
         results.append(("Winsock Reset", r2.get("success", False)))
         
         # 3. Disable TCP auto-tuning (reduces bufferbloat for gaming)
-        _run_hidden_cmd(["netsh", "int", "tcp", "set", "global", "autotuninglevel=disabled"])
-        results.append(("TCP AutoTuning Disabled", True))
+        r3 = _run_hidden_cmd(["netsh", "int", "tcp", "set", "global", "autotuninglevel=disabled"])
+        results.append(("TCP AutoTuning Disabled", r3.get("success", False)))
         
         # 4. Disable Nagle algorithm on all interfaces via registry
         try:
@@ -128,7 +161,7 @@ def _run_network_optimization_internal():
                     break
             winreg.CloseKey(base_key)
             results.append(("Nagle Disabled", True))
-        except Exception:
+        except Exception as e:
             results.append(("Nagle Disabled", False))
         
         # 5. Disable Network Throttling Index
@@ -148,6 +181,7 @@ def _run_network_optimization_internal():
         success_count = sum(1 for _, s in results if s)
         _network_state["status"] = "success"
         _network_state["message"] = f"네트워크 최적화 완료 ({success_count}/{len(results)}개 항목 적용)"
+        _network_state["details"] = results
         return {
             "success": True, 
             "message": _network_state["message"],
@@ -169,10 +203,10 @@ def _run_network_bg():
     _run_network_optimization_internal()
 
 def optimize_network():
-    """Comprehensive network optimization (now async)."""
+    """Comprehensive network optimization (async)."""
     global _network_state
     if _network_state["status"] == "running":
-        return {"success": False, "message": "이미 실행 중입니다."}
+        return {"success": False, "message": "이미 네트워크 최적화가 실행 중입니다."}
     _network_state["status"] = "running"
     t = threading.Thread(target=_run_network_bg, daemon=True)
     t.start()
