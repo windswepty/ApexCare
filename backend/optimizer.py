@@ -12,6 +12,8 @@ import threading
 import time
 import subprocess
 import logging
+import sys
+import stat
 from backend import system_repair
 
 log = logging.getLogger('Optimizer')
@@ -149,11 +151,11 @@ def scan_junk_background():
     _junk_scan_state["progress"] = 0
     _junk_scan_state["eta_seconds"] = 15
     try:
-        user_temp = os.environ.get('TEMP', '')
-        system_temp = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
-        prefetch = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Prefetch')
-        soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
-        chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
+        user_temp = os.path.expandvars('%TEMP%')
+        system_temp = os.path.expandvars('%SystemRoot%\\Temp')
+        prefetch = os.path.expandvars('%SystemRoot%\\Prefetch')
+        soft_dist = os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download')
+        chrome_cache = os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache')
 
         temp_size = _get_dir_size_mb(user_temp, _junk_scan_state, max_files=2000)
         _junk_scan_state["progress"] = 25
