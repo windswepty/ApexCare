@@ -290,16 +290,7 @@ def run_all_tests():
     # ==========================================
     # 10. MAIN.PY STRUCTURE CHECK (DEPRECATED)
     # ==========================================
-    # print("\n=== 10. MAIN.PY STRUCTURE CHECK ===")
-    #
-    # main_code = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py'), 'r', encoding='utf-8').read()
-    # 
-    # log('QSystemTrayIcon' in main_code, "main.py has system tray support")
-    # log('hide_to_tray' in main_code, "main.py has hide_to_tray method")
-    # log('show_from_tray' in main_code, "main.py has show_from_tray method")
-    # log('quit_app' in main_code, "main.py has quit_app method")
-    # log('closeEvent' in main_code, "main.py overrides closeEvent")
-    # log('setQuitOnLastWindowClosed(False)' in main_code, "App wont quit on window close")
+    # (Tray feature removed from project)
     # log('QThread' in main_code, "main.py uses QThread for async")
     # log('StatsWorker' in main_code, "main.py has StatsWorker thread")
     # log('ScanWorker' in main_code, "main.py has ScanWorker thread")

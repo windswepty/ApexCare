@@ -9,7 +9,6 @@ import {
   Cpu,
   X
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function GameBooster() {
   const [status, setStatus] = useState({
@@ -111,7 +110,6 @@ export default function GameBooster() {
   };
 
   const toggleBooster = async () => {
-    playSound('click');
     const newState = !status.enabled;
     setStatus(prev => ({ ...prev, enabled: newState }));
     
@@ -237,7 +235,6 @@ export default function GameBooster() {
             </h4>
             <button
               onClick={() => {
-                playSound('click');
                 setIsModalOpen(true);
               }}
               className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-purple-500/30 w-full sm:w-auto"
@@ -259,7 +256,6 @@ export default function GameBooster() {
               </h3>
               <button
                 onClick={() => {
-                  playSound('toggle');
                   setIsModalOpen(false);
                 }}
                 className="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"

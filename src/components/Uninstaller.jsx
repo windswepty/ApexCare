@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Trash2, Search, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function Uninstaller({ addToast }) {
   const [apps, setApps] = useState([]);
@@ -70,7 +69,6 @@ export default function Uninstaller({ addToast }) {
       if (addToast) addToast("언인스톨러 API가 준비되지 않았습니다.", "error");
       return;
     }
-    playSound('click');
     
     // Launch standard uninstaller
     await window.pywebview.api.uninstallApp(app.uninstallString);
@@ -82,7 +80,6 @@ export default function Uninstaller({ addToast }) {
 
   const handleScanLeftovers = async () => {
     if (!window.pywebview?.api || typeof window.pywebview.api.findAppLeftovers !== 'function' || !activeApp) return;
-    playSound('scan');
     setIsCleaning(true);
     setStep('leftovers');
     
@@ -93,7 +90,6 @@ export default function Uninstaller({ addToast }) {
 
   const handleCleanLeftovers = async () => {
     if (!window.pywebview?.api || typeof window.pywebview.api.cleanAppLeftovers !== 'function') return;
-    playSound('success');
     setIsCleaning(true);
     
     const paths = leftovers.map(l => l.path);

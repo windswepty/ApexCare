@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('dist_react', 'dist_react'), ('public/icon.ico', 'public')],
+    datas=[('dist_react', 'dist_react')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

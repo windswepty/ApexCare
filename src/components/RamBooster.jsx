@@ -7,7 +7,6 @@ import {
   CheckCircle2, 
   XCircle 
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function RamBooster({ addToast }) {
   const [ramData, setRamData] = useState({
@@ -65,7 +64,6 @@ export default function RamBooster({ addToast }) {
 
   const handlePurgeStandby = async () => {
     if (isPurging) return;
-    playSound('boost');
     setIsPurging(true);
 
     let success = false;
@@ -86,7 +84,6 @@ export default function RamBooster({ addToast }) {
     
     if (success) {
       setPurgedSuccess(true);
-      playSound('success');
       if (addToast) addToast('대기 메모리(Standby Cache)가 성공적으로 최적화되었습니다!', 'success');
     } else {
       alert("RAM 최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
@@ -95,7 +92,6 @@ export default function RamBooster({ addToast }) {
   };
 
   const killProcess = async (id, pid) => {
-    playSound('click');
     // Optimistically remove
     const processToRemove = processes.find(p => (p.id || p.pid) === id && p.pid === pid);
     setProcesses(prev => prev.filter(p => (p.id || p.pid) !== id && p.pid !== pid));

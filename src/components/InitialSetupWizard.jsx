@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders, MemoryStick } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   const [step, setStep] = useState('scanning'); // 'scanning' | 'result' | 'applying'
@@ -35,7 +34,6 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   }, [stats]);
 
   const handleApply = async () => {
-    playSound('toggle');
     setStep('applying');
     
     // Call the actual backend tailored tuning API

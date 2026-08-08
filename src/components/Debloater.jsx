@@ -7,7 +7,6 @@ import {
   ShieldAlert,
   ServerCrash
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function Debloater({ addToast }) {
   const [items, setItems] = useState([]);
@@ -52,7 +51,6 @@ export default function Debloater({ addToast }) {
     setSelectedIds(prev => 
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
-    playSound('hover');
   };
 
   const selectAll = () => {
@@ -61,7 +59,6 @@ export default function Debloater({ addToast }) {
     } else {
       setSelectedIds(items.map(x => x.id));
     }
-    playSound('hover');
   };
 
   const startDebloat = async () => {
@@ -71,7 +68,6 @@ export default function Debloater({ addToast }) {
       return;
     }
 
-    playSound('scan');
     setIsScanning(true);
     
     try {
@@ -96,7 +92,6 @@ export default function Debloater({ addToast }) {
                     alert("오류 발생: " + st.error);
                     if (addToast) addToast("오류 발생: " + st.error, 'error');
                   } else {
-                    playSound('success');
                     if (addToast) addToast("선택한 항목들의 순정화(제거)가 완료되었습니다!", 'success');
                     setSelectedIds([]);
                   }

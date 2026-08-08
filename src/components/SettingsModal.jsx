@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, X, Key, Save } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function SettingsModal({ isOpen, onClose, addToast }) {
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
-    playSound('click');
     setIsSaving(true);
     // 향후 설정 저장 로직 위치
     setTimeout(() => {

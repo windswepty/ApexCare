@@ -1,20 +1,16 @@
 import React from 'react';
 import { Minus, Square, X, Settings } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function TitleBar({ onOpenSettings }) {
   const handleMinimize = () => {
-    playSound('click');
     if (window.pywebview?.api) window.pywebview?.api.minimizeWindow();
   };
 
   const handleMaximize = () => {
-    playSound('click');
     if (window.pywebview?.api) window.pywebview?.api.maximizeWindow();
   };
 
   const handleClose = () => {
-    playSound('click');
     if (window.pywebview?.api) window.pywebview?.api.closeWindow();
   };
 

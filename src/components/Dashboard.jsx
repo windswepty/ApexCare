@@ -15,7 +15,6 @@ import {
   Monitor
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { playSound } from '../utils/audio';
 
 // Global variable to persist history across unmounts (e.g. when changing tabs/modes)
 let globalCpuHistory = Array(25).fill(0);
@@ -166,7 +165,6 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
 
   const runMasterOptimization = async () => {
     if (isScanning) return;
-    playSound('scan');
     setIsScanning(true);
     
     try {
@@ -216,7 +214,6 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
   };
 
   const finishOptimization = (freedMB) => {
-    playSound('success');
     
     const now = new Date().toLocaleDateString('ko-KR');
     localStorage.setItem('apex_last_optimized', now);

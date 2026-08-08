@@ -8,74 +8,6 @@ if sys.stderr is None:
 
 import webview
 from backend.api import Api
-import threading
-import pystray
-from PIL import Image, ImageDraw
-
-def create_image():
-    # Load actual program icon
-    try:
-        icon_path = os.path.join(os.path.dirname(__file__), 'public', 'icon.ico')
-        if hasattr(sys, '_MEIPASS'):
-            icon_path = os.path.join(sys._MEIPASS, 'public', 'icon.ico')
-        if os.path.exists(icon_path):
-            return Image.open(icon_path)
-    except Exception as e:
-        pass
-
-    # Fallback if image not found
-    image = Image.new('RGB', (64, 64), color = (8, 12, 20))
-    dc = ImageDraw.Draw(image)
-    dc.rectangle(
-        (16, 16, 48, 48),
-        fill=(34, 211, 238) # Cyan-400
-    )
-    return image
-
-tray_icon = None
-
-def setup_tray(window, api):
-    global tray_icon
-    
-    def on_show(icon, item):
-        threading.Thread(target=window.show, daemon=True).start()
-
-    def on_quit(icon, item):
-        icon.stop()
-        threading.Thread(target=api.quitApplication, daemon=True).start()
-
-    def toggle_game_booster(icon, item):
-        def _toggle():
-            current = api.getGameBoosterStatus()
-            api.toggleGameBooster(not current)
-        threading.Thread(target=_toggle, daemon=True).start()
-
-    def is_game_booster_on(item):
-        return api.getGameBoosterStatus()
-
-    def set_opt_mode(mode):
-        def handler(icon, item):
-            threading.Thread(target=api.setOptimizationMode, args=(mode,), daemon=True).start()
-        return handler
-
-    def is_opt_mode(mode):
-        def handler(item):
-            return api.getOptimizationMode() == mode
-        return handler
-
-    menu = pystray.Menu(
-        pystray.MenuItem('APEX CARE 띄우기', on_show, default=True),
-        pystray.MenuItem('🎮 스마트 게임 부스터', toggle_game_booster, checked=is_game_booster_on),
-        pystray.MenuItem('⚡ 성능 모드', pystray.Menu(
-            pystray.MenuItem('표준 (Standard)', set_opt_mode('standard'), checked=is_opt_mode('standard'), radio=True),
-            pystray.MenuItem('게이밍 (Gaming)', set_opt_mode('gaming'), checked=is_opt_mode('gaming'), radio=True),
-            pystray.MenuItem('에코 (Eco)', set_opt_mode('eco'), checked=is_opt_mode('eco'), radio=True)
-        )),
-        pystray.MenuItem('완전히 종료 (프로세스 킬)', on_quit)
-    )
-    
-    tray_icon = pystray.Icon("APEX_CARE", create_image(), "APEX CARE", menu)
-    threading.Thread(target=tray_icon.run, daemon=True).start()
 
 
 def get_html_path():
@@ -109,15 +41,5 @@ if __name__ == '__main__':
     # Ensure persistent storage across version updates by setting a fixed storage path
     app_data_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'APEX_CARE_DATA')
     os.makedirs(app_data_path, exist_ok=True)
-    
-    
-    # window closing event hook (for Alt+F4 or direct window close)
-    def on_closing():
-        window.hide()
-        return False
-        
-    window.events.closing += on_closing
-    
-    setup_tray(window, api)
     
     webview.start(debug=False, private_mode=False, storage_path=app_data_path)

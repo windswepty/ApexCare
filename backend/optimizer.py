@@ -10,7 +10,11 @@ import psutil
 import concurrent.futures
 import threading
 import time
+import subprocess
+import logging
 from backend import system_repair
+
+log = logging.getLogger('Optimizer')
 
 # ─────────────────────────────────────────────
 # Deep Optimization Engine (Background Thread)
@@ -448,15 +452,37 @@ POWER_PLAN_POWER_SAVER = "a1841308-3541-4fab-bc81-f71556f20b4a"
 
 
 def _set_power_plan(guid_str):
-    """Set active power plan via Win32 PowerSetActiveScheme."""
+    """Set active power plan via Win32 PowerSetActiveScheme, with subprocess fallback."""
+    success = False
+    # Method 1: Win32 API (preferred)
     try:
         powrprof = ctypes.WinDLL('powrprof', use_last_error=True)
         guid = _guid_from_string(guid_str)
         result = powrprof.PowerSetActiveScheme(None, ctypes.byref(guid))
-        return result == 0
+        if result == 0:
+            success = True
+            log.info(f"[Optimizer] ✓ Power plan set via Win32 API: {guid_str}")
     except Exception as e:
-        print(f"[Optimizer] Power plan error: {e}")
-        return False
+        log.warning(f"[Optimizer] Win32 power plan error: {e}")
+    
+    # Method 2: subprocess fallback with shell=True
+    if not success:
+        try:
+            CREATE_NO_WINDOW = 0x08000000
+            result = subprocess.run(
+                f'powercfg /setactive {guid_str}',
+                shell=True, capture_output=True, text=True,
+                creationflags=CREATE_NO_WINDOW, timeout=10
+            )
+            if result.returncode == 0:
+                success = True
+                log.info(f"[Optimizer] ✓ Power plan set via powercfg subprocess: {guid_str}")
+            else:
+                log.warning(f"[Optimizer] ✗ powercfg /setactive failed: {result.stderr.strip()}")
+        except Exception as e:
+            log.warning(f"[Optimizer] ✗ powercfg subprocess error: {e}")
+    
+    return success
 
 
 def _get_active_power_plan_guid():
@@ -480,7 +506,7 @@ def _get_active_power_plan_guid():
             ctypes.WinDLL('kernel32').LocalFree(p_guid)
             return guid_str
     except Exception as e:
-        print(f"[Optimizer] Get active power plan error: {e}")
+        log.warning(f"[Optimizer] Get active power plan error: {e}")
     return None
 
 
@@ -502,21 +528,35 @@ def get_optimization_mode():
 
 def _tune_power_params(mode):
     """Apply detailed power plan sub-parameters via powercfg for real performance impact."""
-    import subprocess
     CREATE_NO_WINDOW = 0x08000000
     
     def _powercfg(*args):
+        cmd = 'powercfg ' + ' '.join(str(a) for a in args)
         try:
-            subprocess.run(["powercfg"] + list(args), creationflags=CREATE_NO_WINDOW, timeout=5)
-        except Exception:
-            pass
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True,
+                creationflags=CREATE_NO_WINDOW, timeout=10
+            )
+            if result.returncode != 0:
+                log.warning(f"[Optimizer] powercfg failed: {cmd} -> {result.stderr.strip()}")
+            return result.returncode == 0
+        except Exception as e:
+            log.warning(f"[Optimizer] powercfg error: {cmd} -> {e}")
+            return False
     
     def _reg_set(path, name, value, vtype="REG_DWORD"):
+        cmd = f'reg add "{path}" /v "{name}" /t {vtype} /d {value} /f'
         try:
-            subprocess.run(["reg", "add", path, "/v", name, "/t", vtype, "/d", str(value), "/f"], 
-                         creationflags=CREATE_NO_WINDOW, timeout=5)
-        except Exception:
-            pass
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True,
+                creationflags=CREATE_NO_WINDOW, timeout=10
+            )
+            if result.returncode != 0:
+                log.warning(f"[Optimizer] reg set failed: {name} -> {result.stderr.strip()}")
+            return result.returncode == 0
+        except Exception as e:
+            log.warning(f"[Optimizer] reg set error: {name} -> {e}")
+            return False
     
     if mode == 'gaming':
         # === CPU: Min/Max processor state = 100% (prevent frequency throttling) ===

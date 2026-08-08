@@ -4,7 +4,6 @@ import {
   Zap, 
   Power
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function StartupManager({ addToast }) {
   const [startupApps, setStartupApps] = useState([]);
@@ -35,7 +34,6 @@ export default function StartupManager({ addToast }) {
   }, []);
 
   const toggleApp = async (id, appName) => {
-    playSound('toggle');
     const app = startupApps.find(a => a.id === id);
     if (!app) return;
     const newEnabled = !app.enabled;
@@ -68,7 +66,6 @@ export default function StartupManager({ addToast }) {
   };
 
   const disableAllHighImpact = async () => {
-    playSound('boost');
     
     const appsToDisable = startupApps.filter(app => app.impact === 'High' && app.enabled);
     

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun, Thermometer } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsDarkMode }) {
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
@@ -112,7 +111,6 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             <button
               key={mode}
               onClick={() => {
-                playSound('toggle');
                 setCurrentMode(mode);
               }}
               className={`flex-1 relative z-10 text-[11px] font-bold transition-colors duration-300 h-full flex items-center justify-center ${

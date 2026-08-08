@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { playSound } from '../utils/audio';
 
 const JunkContext = createContext();
 
@@ -71,7 +70,6 @@ export function JunkProvider({ children, addToast }) {
                 if (state.status === 'success') {
                   setFreedMB(state.freedMB || 0);
                   setCleanedSuccess(true);
-                  playSound('success');
                   // Empty selected items size
                   setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
                   
@@ -94,7 +92,6 @@ export function JunkProvider({ children, addToast }) {
   }, [isCleaning, addToast]);
 
   const rescanJunk = async () => {
-    playSound('scan');
     setCleanedSuccess(false);
     setFreedMB(0);
     setScanProgress(0);
@@ -114,7 +111,6 @@ export function JunkProvider({ children, addToast }) {
   };
 
   const startClean = async (selectedIds) => {
-    playSound('scan');
     setIsCleaning(true);
     setCleanProgress(0);
     setCleanEta(5);
@@ -133,17 +129,14 @@ export function JunkProvider({ children, addToast }) {
   };
 
   const toggleItem = (id) => {
-    playSound('toggle');
     setItems(items.map(item => item.id === id ? { ...item, selected: !item.selected } : item));
   };
 
   const selectAll = () => {
-    playSound('click');
     setItems(items.map(item => ({ ...item, selected: true })));
   };
 
   const deselectAll = () => {
-    playSound('click');
     setItems(items.map(item => ({ ...item, selected: false })));
   };
 

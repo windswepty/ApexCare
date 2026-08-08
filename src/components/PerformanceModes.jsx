@@ -15,7 +15,6 @@ import {
   Cpu,
   Gauge
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function PerformanceModes({ currentMode, setCurrentMode, addToast }) {
   const [isBoosterEnabled, setIsBoosterEnabled] = useState(true);
@@ -44,7 +43,6 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   const activeApp = runningApps.find(app => app.pid === activeAppId) || runningApps[0] || { name: '로딩 중...', memoryMB: 0, cpuPct: '0%' };
 
   const handleSetPriority = async (pid, priority) => {
-    playSound('click');
     setActiveAppId(pid);
     if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setProcessPriority === 'function') {
       try {
@@ -165,7 +163,6 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             <span className="text-xs font-mono text-gray-700 dark:text-slate-300 font-medium whitespace-nowrap">부스터 엔진:</span>
             <button
               onClick={() => {
-                playSound('toggle');
                 setIsBoosterEnabled(!isBoosterEnabled);
               }}
               className={`w-12 h-6 shrink-0 rounded-full p-1 transition-all duration-300 ${
@@ -294,7 +291,6 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             <div
               key={mode.id}
               onClick={() => {
-                playSound('success');
                 setCurrentMode(mode.id);
                 if (addToast) addToast(`[${mode.title.split('(')[0].trim()}] 프로필이 적용되었습니다!`, 'success');
               }}

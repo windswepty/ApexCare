@@ -9,7 +9,6 @@ import {
   Layers,
   Sparkles
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function SystemRepair({ addToast }) {
   const [sfcStatus, setSfcStatus] = useState('idle');
@@ -33,7 +32,6 @@ export default function SystemRepair({ addToast }) {
               setSfcStatus(state.status);
               setSfcProgress(100);
               setSfcEta(0);
-              playSound(state.status === 'success' ? 'success' : 'error');
               if (addToast) addToast(state.status === 'success' ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
           } catch (e) {
@@ -64,7 +62,6 @@ export default function SystemRepair({ addToast }) {
               setDismStatus(state.status);
               setDismProgress(100);
               setDismEta(0);
-              playSound(state.status === 'success' ? 'success' : 'error');
               if (addToast) addToast(state.status === 'success' ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
           } catch (e) {
@@ -83,7 +80,6 @@ export default function SystemRepair({ addToast }) {
   }, [dismStatus]);
 
   const runSfc = async () => {
-    playSound('scan');
     
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runSfc === 'function') {
@@ -101,7 +97,6 @@ export default function SystemRepair({ addToast }) {
   };
 
   const runDism = async () => {
-    playSound('scan');
     
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runDism === 'function') {

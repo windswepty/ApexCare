@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { ShieldCheck, CheckCircle2, Lock } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function EulaModal({ onAccept }) {
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -11,7 +10,6 @@ export default function EulaModal({ onAccept }) {
 
   const handleConfirm = () => {
     if (!canProceed) return;
-    playSound('success');
     localStorage.setItem('apex_eula_accepted', 'true');
     onAccept();
   };
@@ -73,7 +71,6 @@ export default function EulaModal({ onAccept }) {
               type="checkbox"
               checked={agreeTerms}
               onChange={(e) => {
-                playSound('toggle');
                 setAgreeTerms(e.target.checked);
               }}
               className="w-4 h-4 rounded bg-gray-100 dark:bg-slate-950 border-black/10 dark:border-slate-700 text-cyan-500 focus:ring-cyan-500 accent-cyan-500 cursor-pointer"
@@ -88,7 +85,6 @@ export default function EulaModal({ onAccept }) {
               type="checkbox"
               checked={agreeOpt}
               onChange={(e) => {
-                playSound('toggle');
                 setAgreeOpt(e.target.checked);
               }}
               className="w-4 h-4 rounded bg-gray-100 dark:bg-slate-950 border-black/10 dark:border-slate-700 text-cyan-500 focus:ring-cyan-500 accent-cyan-500 cursor-pointer"
@@ -103,7 +99,6 @@ export default function EulaModal({ onAccept }) {
               type="checkbox"
               checked={agreePrivacy}
               onChange={(e) => {
-                playSound('toggle');
                 setAgreePrivacy(e.target.checked);
               }}
               className="w-4 h-4 rounded bg-gray-100 dark:bg-slate-950 border-black/10 dark:border-slate-700 text-cyan-500 focus:ring-cyan-500 accent-cyan-500 cursor-pointer"

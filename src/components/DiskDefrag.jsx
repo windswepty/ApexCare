@@ -7,7 +7,6 @@ import {
   Layers 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { playSound } from '../utils/audio';
 
 export default function DiskDefrag({ addToast }) {
   const [blocks, setBlocks] = useState(() => {
@@ -74,7 +73,6 @@ export default function DiskDefrag({ addToast }) {
                 setDefragDone(true);
                 localStorage.setItem('apex_disk_defrag_done', 'true');
                 localStorage.setItem('apex_disk_defrag_time', Date.now().toString());
-                playSound('success');
                 setBlocks(prev => {
                   const next = prev.map(b => b === 'fragmented' ? 'contiguous' : b);
                   localStorage.setItem('apex_disk_defrag_state', JSON.stringify(next));
@@ -109,7 +107,6 @@ export default function DiskDefrag({ addToast }) {
 
   const startDefragAndTrim = async () => {
     if (isDefragging) return;
-    playSound('scan');
     
     setDefragDone(false);
     setCmdOutput("C:\\Windows\\System32> defrag.exe /C /O\n\n[APEX Engine] 윈도우 네이티브 시스템에 모든 드라이브(C:, D: 등 전체)의 최적화 및 TRIM(빈 블록 데이터 폐기) 명령을 요청합니다...\n[APEX Engine] 저장 장치 타입(NVMe, SATA SSD 등)에 따라 작업이 수 초 내외로 빠르게 완료될 수 있습니다. 대기 중...\n\n");

@@ -14,7 +14,6 @@ import {
   ServerCrash,
   Crosshair
 } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
   const sidebarWrapperRef = useRef(null);
@@ -83,7 +82,6 @@ export default function Sidebar({ activeTab, setActiveTab }) {
               <button
                 key={item.id}
                 onClick={() => {
-                  playSound('click');
                   setActiveTab(item.id);
                 }}
                 className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl transition-all duration-300 text-sm font-medium ${

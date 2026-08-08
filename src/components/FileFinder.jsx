@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Search, HardDrive, Files, Trash2, CheckSquare, Square, Loader2, AlertTriangle } from 'lucide-react';
-import { playSound } from '../utils/audio';
 
 export default function FileFinder({ addToast }) {
   const [activeTab, setActiveTab] = useState('large'); // 'large' or 'duplicates'
@@ -12,7 +11,6 @@ export default function FileFinder({ addToast }) {
 
   const handleScanLarge = async () => {
     setLoading(true);
-    playSound('click');
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.findLargeFiles === 'function') {
         const data = await window.pywebview.api.findLargeFiles(500);
@@ -29,7 +27,6 @@ export default function FileFinder({ addToast }) {
 
   const handleScanDuplicates = async () => {
     setLoading(true);
-    playSound('click');
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.findDuplicateFiles === 'function') {
         const data = await window.pywebview.api.findDuplicateFiles();
@@ -91,7 +88,6 @@ export default function FileFinder({ addToast }) {
 
   const handleDelete = async () => {
     if (selectedPaths.size === 0 || !window.pywebview?.api) return;
-    playSound('click');
     setDeleting(true);
     
     const pathsArray = Array.from(selectedPaths);
@@ -101,7 +97,6 @@ export default function FileFinder({ addToast }) {
     setSelectedPaths(new Set());
     
     if (result.success) {
-      playSound('success');
       if (addToast) addToast(`성공적으로 삭제되었습니다. 확보된 용량: ${result.freedMB}MB`, 'success');
       // Rescan
       if (activeTab === 'large') handleScanLarge();

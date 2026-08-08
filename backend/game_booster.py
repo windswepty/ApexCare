@@ -1,11 +1,11 @@
 """
-APEX CARE - Game Booster & Process Tamer v2.0
+APEX CARE - Game Booster & Process Tamer v3.0 (Hardened)
 Real performance boost via:
 - Timer resolution forcing (0.5ms for lower input latency)
 - EcoQoS for background apps (force to E-cores on hybrid CPUs)
 - Power throttling disable for games (force P-cores)
 - Nagle algorithm disable (reduce network latency)
-- Process priority elevation
+- Process priority elevation (with admin privilege enforcement)
 - Automatic cleanup on game exit
 """
 import psutil
@@ -15,6 +15,11 @@ import ctypes
 import ctypes.wintypes
 import os
 import subprocess
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='[GameBooster] %(message)s')
+log = logging.getLogger('GameBooster')
 
 # List of popular game executables to detect
 GAMES_LIST = [
@@ -86,6 +91,154 @@ _booster_state = {
 
 _monitor_thread = None
 _stop_event = threading.Event()
+_admin_checked = False
+_is_admin_cached = False
+
+# ─────────────────────────────────────────────
+# Admin Privilege Check & Enforcement
+# ─────────────────────────────────────────────
+
+def _is_admin():
+    """Check if the current process is running with admin privileges."""
+    global _admin_checked, _is_admin_cached
+    if _admin_checked:
+        return _is_admin_cached
+    try:
+        _is_admin_cached = ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        _is_admin_cached = False
+    _admin_checked = True
+    if not _is_admin_cached:
+        log.warning("⚠ NOT running as Administrator! Process priority/power control will be limited.")
+    else:
+        log.info("✓ Running as Administrator - full process control available.")
+    return _is_admin_cached
+
+
+def _enable_debug_privilege():
+    """Enable SeDebugPrivilege to allow controlling any process regardless of owner.
+    
+    This is the key privilege that allows us to modify system/service processes
+    and processes owned by other users. Requires admin rights.
+    """
+    try:
+        advapi32 = ctypes.WinDLL('advapi32', use_last_error=True)
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        
+        class LUID(ctypes.Structure):
+            _fields_ = [("LowPart", ctypes.wintypes.DWORD), ("HighPart", ctypes.wintypes.LONG)]
+        class LUID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Luid", LUID), ("Attributes", ctypes.wintypes.DWORD)]
+        class TOKEN_PRIVILEGES(ctypes.Structure):
+            _fields_ = [("PrivilegeCount", ctypes.wintypes.DWORD), ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+        
+        TOKEN_ADJUST_PRIVILEGES = 0x0020
+        TOKEN_QUERY = 0x0008
+        SE_PRIVILEGE_ENABLED = 0x00000002
+        
+        hToken = ctypes.wintypes.HANDLE()
+        kernel32.GetCurrentProcess.restype = ctypes.wintypes.HANDLE
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ctypes.byref(hToken)):
+            return False
+        
+        luid = LUID()
+        if not advapi32.LookupPrivilegeValueW(None, "SeDebugPrivilege", ctypes.byref(luid)):
+            kernel32.CloseHandle(hToken)
+            return False
+        
+        tp = TOKEN_PRIVILEGES()
+        tp.PrivilegeCount = 1
+        tp.Privileges[0].Luid = luid
+        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
+        
+        advapi32.AdjustTokenPrivileges(hToken, False, ctypes.byref(tp), ctypes.sizeof(tp), None, None)
+        success = ctypes.get_last_error() == 0
+        kernel32.CloseHandle(hToken)
+        
+        if success:
+            log.info("✓ SeDebugPrivilege enabled - can control all processes")
+        else:
+            log.warning("⚠ Failed to enable SeDebugPrivilege")
+        return success
+    except Exception as e:
+        log.warning(f"⚠ SeDebugPrivilege error: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
+# Win32 API Direct Priority Control (Fallback)
+# ─────────────────────────────────────────────
+
+# Priority class constants
+IDLE_PRIORITY_CLASS = 0x0040
+BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+NORMAL_PRIORITY_CLASS = 0x0020
+ABOVE_NORMAL_PRIORITY_CLASS = 0x8000
+HIGH_PRIORITY_CLASS = 0x0080
+REALTIME_PRIORITY_CLASS = 0x0100
+
+PROCESS_SET_INFORMATION = 0x0200
+PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_ALL_ACCESS = 0x001FFFFF
+
+
+def _set_priority_via_win32(pid, priority_class):
+    """Directly set process priority via Win32 API (bypasses psutil AccessDenied).
+    
+    Uses OpenProcess with PROCESS_SET_INFORMATION access right.
+    With SeDebugPrivilege enabled, this works even for system processes.
+    """
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
+        if not handle:
+            error = ctypes.get_last_error()
+            log.warning(f"  OpenProcess failed for PID {pid} (error={error})")
+            return False
+        
+        result = kernel32.SetPriorityClass(handle, priority_class)
+        kernel32.CloseHandle(handle)
+        
+        if result:
+            return True
+        else:
+            error = ctypes.get_last_error()
+            log.warning(f"  SetPriorityClass failed for PID {pid} (error={error})")
+            return False
+    except Exception as e:
+        log.warning(f"  Win32 priority set error for PID {pid}: {e}")
+        return False
+
+
+def _suspend_process_via_win32(pid):
+    """Suspend a process via NtSuspendProcess for aggressive background suppression."""
+    try:
+        ntdll = ctypes.WinDLL('ntdll')
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if not handle:
+            return False
+        result = ntdll.NtSuspendProcess(handle)
+        kernel32.CloseHandle(handle)
+        return result == 0
+    except Exception:
+        return False
+
+
+def _resume_process_via_win32(pid):
+    """Resume a suspended process via NtResumeProcess."""
+    try:
+        ntdll = ctypes.WinDLL('ntdll')
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if not handle:
+            return False
+        result = ntdll.NtResumeProcess(handle)
+        kernel32.CloseHandle(handle)
+        return result == 0
+    except Exception:
+        return False
+
 
 # ─────────────────────────────────────────────
 # Real Performance Boost Functions
@@ -104,13 +257,15 @@ def _set_timer_resolution(enable):
             actual = ctypes.c_ulong()
             ntdll.NtSetTimerResolution(ctypes.c_ulong(5000), ctypes.c_bool(True), ctypes.byref(actual))
             _booster_state["timer_resolution_set"] = True
+            log.info(f"✓ Timer resolution set to 0.5ms (actual: {actual.value/10000:.2f}ms)")
         else:
             # Restore default
             actual = ctypes.c_ulong()
             ntdll.NtSetTimerResolution(ctypes.c_ulong(156250), ctypes.c_bool(True), ctypes.byref(actual))
             _booster_state["timer_resolution_set"] = False
-    except Exception:
-        pass
+            log.info("✓ Timer resolution restored to default")
+    except Exception as e:
+        log.warning(f"⚠ Timer resolution error: {e}")
 
 
 def _set_process_power_throttling(pid, throttle):
@@ -165,6 +320,7 @@ def _disable_nagle():
         base_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path, 0, winreg.KEY_READ)
         
         i = 0
+        modified_count = 0
         while True:
             try:
                 subkey_name = winreg.EnumKey(base_key, i)
@@ -173,13 +329,15 @@ def _disable_nagle():
                 winreg.SetValueEx(subkey, "TcpAckFrequency", 0, winreg.REG_DWORD, 1)
                 winreg.SetValueEx(subkey, "TCPNoDelay", 0, winreg.REG_DWORD, 1)
                 winreg.CloseKey(subkey)
+                modified_count += 1
                 i += 1
             except OSError:
                 break
         winreg.CloseKey(base_key)
         _booster_state["nagle_disabled"] = True
-    except Exception:
-        pass
+        log.info(f"✓ Nagle disabled on {modified_count} network interfaces")
+    except Exception as e:
+        log.warning(f"⚠ Nagle disable error: {e}")
 
 
 def _restore_nagle():
@@ -209,56 +367,105 @@ def _restore_nagle():
                 break
         winreg.CloseKey(base_key)
         _booster_state["nagle_disabled"] = False
-    except Exception:
-        pass
+        log.info("✓ Nagle restored to default")
+    except Exception as e:
+        log.warning(f"⚠ Nagle restore error: {e}")
 
 
 # ─────────────────────────────────────────────
-# Process Priority / Taming
+# Process Priority / Taming (Hardened with fallback)
 # ─────────────────────────────────────────────
 
 def get_booster_status():
     return _booster_state
 
 def _tame_processes(pids):
-    """Lower priority AND apply EcoQoS to background apps."""
+    """Lower priority AND apply EcoQoS to background apps.
+    
+    Uses psutil first, falls back to Win32 API on AccessDenied.
+    """
     tamed_count = 0
     for pid in pids:
         try:
             p = psutil.Process(pid)
-            if p.nice() != psutil.IDLE_PRIORITY_CLASS:
-                p.nice(psutil.IDLE_PRIORITY_CLASS)
+            proc_name = p.name()
+            
+            # Try psutil first
+            try:
+                if p.nice() != psutil.IDLE_PRIORITY_CLASS:
+                    p.nice(psutil.IDLE_PRIORITY_CLASS)
+                tamed_count += 1
+            except psutil.AccessDenied:
+                # Fallback: Win32 API direct call
+                if _set_priority_via_win32(pid, IDLE_PRIORITY_CLASS):
+                    log.info(f"  ✓ Tamed {proc_name} (PID {pid}) via Win32 API fallback")
+                    tamed_count += 1
+                else:
+                    log.warning(f"  ✗ Failed to tame {proc_name} (PID {pid}) - AccessDenied even with Win32")
+            
             # Apply EcoQoS (force to E-cores / efficiency mode)
             _set_process_power_throttling(pid, True)
-            tamed_count += 1
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
             pass
+        except Exception as e:
+            log.warning(f"  ✗ Tame error for PID {pid}: {e}")
+    
+    if tamed_count > 0:
+        log.info(f"✓ Tamed {tamed_count} background processes (IDLE priority + EcoQoS)")
     return tamed_count
 
 def _boost_game_processes(pids):
-    """Elevate game to HIGH priority + disable power throttling (force P-cores)."""
+    """Elevate game to HIGH priority + disable power throttling (force P-cores).
+    
+    Uses psutil first, falls back to Win32 API on AccessDenied.
+    """
+    boosted_count = 0
     for pid in pids:
         try:
             p = psutil.Process(pid)
-            if p.nice() != psutil.HIGH_PRIORITY_CLASS:
-                p.nice(psutil.HIGH_PRIORITY_CLASS)
+            proc_name = p.name()
+            
+            # Try psutil first
+            try:
+                if p.nice() != psutil.HIGH_PRIORITY_CLASS:
+                    p.nice(psutil.HIGH_PRIORITY_CLASS)
+                boosted_count += 1
+                log.info(f"  ✓ Boosted {proc_name} (PID {pid}) to HIGH priority via psutil")
+            except psutil.AccessDenied:
+                # Fallback: Win32 API direct call
+                if _set_priority_via_win32(pid, HIGH_PRIORITY_CLASS):
+                    log.info(f"  ✓ Boosted {proc_name} (PID {pid}) to HIGH priority via Win32 API")
+                    boosted_count += 1
+                else:
+                    log.warning(f"  ✗ Failed to boost {proc_name} (PID {pid}) - AccessDenied even with Win32")
+            
             # Disable EcoQoS so game gets performance cores
             _set_process_power_throttling(pid, False)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
             pass
+        except Exception as e:
+            log.warning(f"  ✗ Boost error for PID {pid}: {e}")
+    
+    return boosted_count
 
 def _restore_processes(pids):
     """Restore normal priority and remove EcoQoS from background apps."""
     for pid in pids:
         try:
             p = psutil.Process(pid)
-            if p.nice() == psutil.IDLE_PRIORITY_CLASS:
-                p.nice(psutil.NORMAL_PRIORITY_CLASS)
+            try:
+                if p.nice() == psutil.IDLE_PRIORITY_CLASS:
+                    p.nice(psutil.NORMAL_PRIORITY_CLASS)
+            except psutil.AccessDenied:
+                _set_priority_via_win32(pid, NORMAL_PRIORITY_CLASS)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
 
 def _enter_boost_mode():
     """Apply all system-wide boost settings when a game is detected."""
+    log.info("🚀 Entering BOOST MODE - applying system-wide optimizations")
     _set_timer_resolution(True)   # 0.5ms timer
     _disable_nagle()              # Low latency TCP
     
@@ -266,11 +473,13 @@ def _enter_boost_mode():
     try:
         from backend import optimizer
         optimizer.set_optimization_mode('gaming')
-    except Exception:
-        pass
+        log.info("✓ Power plan switched to Gaming (High Performance)")
+    except Exception as e:
+        log.warning(f"⚠ Power plan switch error: {e}")
 
 def _exit_boost_mode():
     """Restore all system-wide settings when game exits."""
+    log.info("🔄 Exiting BOOST MODE - restoring system defaults")
     _set_timer_resolution(False)  # Restore default timer
     _restore_nagle()              # Restore Nagle
     
@@ -278,8 +487,9 @@ def _exit_boost_mode():
     try:
         from backend import optimizer
         optimizer.set_optimization_mode('standard')
-    except Exception:
-        pass
+        log.info("✓ Power plan restored to Standard (Balanced)")
+    except Exception as e:
+        log.warning(f"⚠ Power plan restore error: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -288,6 +498,10 @@ def _exit_boost_mode():
 
 def _booster_loop():
     global _booster_state
+    
+    # Enable SeDebugPrivilege at thread start for maximum process control
+    if _is_admin():
+        _enable_debug_privilege()
     
     last_tamable_pids = []
     
@@ -334,6 +548,8 @@ def _booster_loop():
                 _booster_state["boosted_pids"] = current_game_pids
                 _booster_state["boost_count"] += 1
                 
+                log.info(f"🎮 Game detected: {game_found} (PIDs: {current_game_pids})")
+                
                 # Apply all system-wide boosts
                 _enter_boost_mode()
                 _boost_game_processes(current_game_pids)
@@ -341,6 +557,7 @@ def _booster_loop():
                 
             elif _booster_state["detected_game"] != game_found:
                 # Game changed
+                log.info(f"🎮 Game switched to: {game_found}")
                 _restore_processes(_booster_state["boosted_pids"])
                 _booster_state["detected_game"] = game_found
                 _booster_state["boosted_pids"] = current_game_pids
@@ -359,6 +576,7 @@ def _booster_loop():
         else:
             if _booster_state["active"]:
                 # Game exited — restore everything
+                log.info("🎮 Game exited - restoring all processes")
                 _restore_processes(last_tamable_pids)
                 _restore_processes(_booster_state["boosted_pids"])
                 _exit_boost_mode()
@@ -377,11 +595,13 @@ def toggle_booster(enabled):
         _stop_event.clear()
         _monitor_thread = threading.Thread(target=_booster_loop, daemon=True)
         _monitor_thread.start()
+        log.info("✓ Game Booster ENABLED - monitoring for games...")
         
     if not enabled and _booster_state["active"]:
         _restore_processes([])  # PIDs handled by the loop
         _exit_boost_mode()
         _booster_state["active"] = False
         _booster_state["detected_game"] = None
+        log.info("✓ Game Booster DISABLED")
         
     return {"success": True, "enabled": enabled}
