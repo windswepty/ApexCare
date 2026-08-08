@@ -1,11 +1,10 @@
 import React from 'react';
-import { AlertTriangle, Sparkles } from 'lucide-react';
-import AIProblemSolverModal from './AIProblemSolverModal';
+import { AlertTriangle } from 'lucide-react';
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null, isAiModalOpen: false, systemState: "" };
+    this.state = { hasError: false, error: null, errorInfo: null };
   }
 
   static getDerivedStateFromError(error) {
@@ -18,15 +17,7 @@ export default class ErrorBoundary extends React.Component {
       errorInfo: errorInfo
     });
     console.error("ErrorBoundary caught an error:", error, errorInfo);
-    
-    // Attempt to grab minimal system state if available
-    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
-      window.pywebview.api.getSystemStats().then(stats => {
-        if (stats) {
-          this.setState({ systemState: JSON.stringify(stats, null, 2) });
-        }
-      }).catch(e => console.error(e));
-    }
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
   }
 
   render() {
@@ -48,28 +39,12 @@ export default class ErrorBoundary extends React.Component {
           
           <div className="flex gap-4 mt-6">
             <button 
-              onClick={() => this.setState({ isAiModalOpen: true })} 
-              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold transition-all shadow-lg flex items-center gap-2"
-            >
-              <Sparkles className="w-5 h-5" />
-              AI에게 원인 및 해결 방법 묻기
-            </button>
-            
-            <button 
               onClick={() => window.location.reload()} 
               className="px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded font-bold transition-colors shadow-lg"
             >
               앱 새로고침
             </button>
           </div>
-
-          <AIProblemSolverModal 
-            isOpen={this.state.isAiModalOpen}
-            onClose={() => this.setState({ isAiModalOpen: false })}
-            errorLog={errorLog}
-            systemState={this.state.systemState || "System state not available."}
-            userMessage="앱 실행 도중 이 오류가 발생해서 화면이 하얗게 변했습니다. 어떻게 조치해야 하는지 알려주세요."
-          />
         </div>
       );
     }

@@ -3,37 +3,17 @@ import { Settings, X, Key, Save } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
 export default function SettingsModal({ isOpen, onClose, addToast }) {
-  const [apiKey, setApiKey] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getAiApiKey === 'function') {
-        window.pywebview.api.getAiApiKey().then(key => {
-          if (key) setApiKey(key);
-        }).catch(e => console.error(e));
-      }
-    }
-  }, [isOpen]);
 
   const handleSave = async () => {
     playSound('click');
     setIsSaving(true);
-    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setAiApiKey === 'function') {
-      try {
-        await window.pywebview.api.setAiApiKey(apiKey);
-        if (addToast) addToast("설정이 저장되었습니다.", "success");
-        onClose();
-      } catch (e) {
-        if (addToast) addToast("설정 저장에 실패했습니다.", "error");
-      }
-    } else {
-      setTimeout(() => {
-        if (addToast) addToast("설정이 저장되었습니다 (모의).", "success");
-        onClose();
-      }, 500);
-    }
-    setIsSaving(false);
+    // 향후 설정 저장 로직 위치
+    setTimeout(() => {
+      if (addToast) addToast("설정이 저장되었습니다.", "success");
+      onClose();
+      setIsSaving(false);
+    }, 500);
   };
 
   if (!isOpen) return null;
@@ -52,27 +32,14 @@ export default function SettingsModal({ isOpen, onClose, addToast }) {
         </div>
         
         <div className="p-6">
-          <div className="mb-6">
-            <label className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">
-              <Key className="w-4 h-4 text-indigo-500" />
-              Gemini API Key
-            </label>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              AI 문제 해결사(AI Problem Solver) 기능을 사용하기 위해 필요한 키입니다. 키는 로컬 환경에만 안전하게 저장됩니다.
-            </p>
-            <input 
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white transition-all"
-            />
+          <div className="mb-6 flex flex-col items-center justify-center py-8 text-gray-500">
+            <Settings className="w-12 h-12 mb-2 opacity-20" />
+            <p>현재 변경할 수 있는 설정 항목이 없습니다.</p>
           </div>
           
           <button 
             onClick={handleSave}
-            disabled={isSaving}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg font-bold transition-all shadow-md shadow-indigo-500/20"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition-all shadow-md shadow-indigo-500/20"
           >
             {isSaving ? '저장 중...' : (
               <>
