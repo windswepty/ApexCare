@@ -70,13 +70,13 @@ export function JunkProvider({ children, addToast }) {
               if (state.status !== 'running' && state.status !== 'idle') {
                 setIsCleaning(false);
                 if (state.status === 'success') {
-                  setFreedMB(state.freedMB || 0);
+                  setFreedMB(state.freed_mb || 0);
                   setCleanedSuccess(true);
                   // Empty selected items size
                   setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
                   
                   if (addToast) {
-                    const mb = state.freedMB || 0;
+                    const mb = state.freed_mb || 0;
                     addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB'})`, 'success');
                   }
                 } else {

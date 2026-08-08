@@ -192,7 +192,7 @@ def scan_junk():
 # Junk Clean (Background Execution)
 # ─────────────────────────────────────────────
 
-_junk_clean_state = {"status": "idle", "freedMB": 0, "error": None, "progress": 0, "eta_seconds": 0}
+_junk_clean_state = {"status": "idle", "freed_mb": 0.0, "error": None, "progress": 0, "eta_seconds": 0}
 _junk_clean_thread = None
 
 def get_junk_clean_status():
@@ -201,26 +201,31 @@ def get_junk_clean_status():
 def clean_junk_background(category_ids, cancel_event):
     global _junk_clean_state
     _junk_clean_state["status"] = "running"
-    _junk_clean_state["freedMB"] = 0
+    _junk_clean_state["freed_mb"] = 0.0
     _junk_clean_state["error"] = None
     _junk_clean_state["progress"] = 0
     _junk_clean_state["eta_seconds"] = 10
+    
+    import stat
     try:
-        freed_bytes = 0
-        user_temp = os.environ.get('TEMP', '')
-        system_temp = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
-        prefetch = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Prefetch')
-        soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
-        chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
+        total_freed_bytes = 0
+        total_attempt_count = 0
+        total_success_count = 0
+        
+        user_temp = os.path.expandvars('%TEMP%')
+        system_temp = os.path.expandvars('%SystemRoot%\\Temp')
+        prefetch = os.path.expandvars('%SystemRoot%\\Prefetch')
+        soft_dist = os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download')
+        chrome_cache = os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache')
 
         def _clean_dir(path, max_files=5000):
+            nonlocal total_attempt_count, total_success_count, total_freed_bytes
             local_freed = 0
             file_count = 0
             start_time = time.time()
             if not os.path.exists(path):
                 return 0
             
-            # Use os.walk bottom-up so we can delete files then remove empty dirs
             for root, dirs, files in os.walk(path, topdown=False):
                 if cancel_event and cancel_event.is_set():
                     break
@@ -229,11 +234,19 @@ def clean_junk_background(category_ids, cancel_event):
                     if cancel_event and cancel_event.is_set():
                         break
                     file_path = os.path.join(root, name)
+                    total_attempt_count += 1
                     try:
                         sz = os.path.getsize(file_path)
-                        os.remove(file_path)
+                        try:
+                            os.remove(file_path)
+                        except (OSError, PermissionError):
+                            os.chmod(file_path, stat.S_IWRITE)
+                            os.remove(file_path)
+                            
                         local_freed += sz
+                        total_freed_bytes += sz
                         file_count += 1
+                        total_success_count += 1
                         
                         if file_count % 50 == 0:
                             elapsed = time.time() - start_time
@@ -242,6 +255,8 @@ def clean_junk_background(category_ids, cancel_event):
                             eta = int((max_files - file_count) / rate) if rate > 0 else 0
                             _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4))
                             _junk_clean_state["eta_seconds"] = max(0, eta)
+                            print(f"[JunkPurger] 삭제 시도 파일 수: {total_attempt_count}, 성공: {total_success_count}, 누적 확보 용량: {total_freed_bytes} bytes")
+                            sys.stdout.flush()
                     except (OSError, PermissionError):
                         continue
                         
@@ -250,7 +265,6 @@ def clean_junk_background(category_ids, cancel_event):
                         break
                     dir_path = os.path.join(root, name)
                     try:
-                        # Only deletes if empty (which means all files were successfully removed)
                         os.rmdir(dir_path)
                     except (OSError, PermissionError):
                         continue
@@ -270,9 +284,12 @@ def clean_junk_background(category_ids, cancel_event):
         for d in target_dirs:
             if cancel_event and cancel_event.is_set():
                 break
-            freed_bytes += _clean_dir(d, max_files=2000)
+            _clean_dir(d, max_files=2000)
 
-        _junk_clean_state["freedMB"] = round(freed_bytes / (1024 * 1024), 2)
+        _junk_clean_state["freed_mb"] = round(total_freed_bytes / (1024 * 1024), 2)
+        print(f"[JunkPurger] 최종 확보 용량: {_junk_clean_state['freed_mb']} MB")
+        sys.stdout.flush()
+        
         if cancel_event and cancel_event.is_set():
             _junk_clean_state["status"] = "cancelled"
             _junk_clean_state["progress"] = 0

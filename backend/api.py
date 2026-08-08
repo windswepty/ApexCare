@@ -57,8 +57,8 @@ class Api:
         """Synchronous temp file clean for dashboard one-click optimization."""
         try:
             optimizer.clean_junk_background([1], cancel_event=None)
-            freed = optimizer._junk_clean_state.get("freedMB", 0)
-            return {"success": True, "message": f"임시 파일 정리 완료 (약 {freed}MB 확보)", "freedMB": freed}
+            freed = optimizer._junk_clean_state.get("freed_mb", 0)
+            return {"success": True, "message": f"임시 파일 정리 완료 (약 {freed}MB 확보)", "freed_mb": freed}
         except Exception as e:
             return {"success": False, "message": "임시 파일 정리 실패", "error": str(e)}
         
