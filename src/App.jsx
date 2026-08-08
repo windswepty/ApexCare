@@ -29,7 +29,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
   const [isBackendReady, setIsBackendReady] = useState(false);
-  const [showInitialWizard, setShowInitialWizard] = useState(() => localStorage.getItem('isFirstRunComplete') !== 'true');
+  const [showInitialWizard, setShowInitialWizard] = useState(true);
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -129,7 +129,6 @@ export default function App() {
               isDarkMode={isDarkMode} 
               onComplete={(selectedMode) => {
                 setCurrentMode(selectedMode);
-                localStorage.setItem('isFirstRunComplete', 'true');
                 setShowInitialWizard(false);
               }} 
             />
