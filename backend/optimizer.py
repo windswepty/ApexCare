@@ -491,6 +491,9 @@ def purge_ram():
         my_pid = os.getpid()
         purged_count = 0
         
+        # Capture memory before purge
+        mem_before = psutil.virtual_memory().available
+        
         # 1. Selective Working Set trimming: only trim idle background apps
         for p in psutil.process_iter(['pid', 'name', 'status', 'cpu_percent']):
             try:
@@ -520,21 +523,25 @@ def purge_ram():
                 
         # 2. Conditional Standby Cache Purge: only when available RAM is critically low
         mem = psutil.virtual_memory()
-        available_pct = (mem.available / mem.total) * 100
+        available_pct_before = (mem_before / mem.total) * 100
         
         standby_purged = False
-        if available_pct < 15:
+        if available_pct_before < 15:
             _enable_privilege("SeProfileSingleProcessPrivilege")
             _enable_privilege("SeDebugPrivilege")
             command = ctypes.c_int(4)  # MemoryPurgeStandbyList
             status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
             standby_purged = (status == 0)
+            
+        # Capture memory after purge and calculate freed MB
+        mem_after = psutil.virtual_memory().available
+        freed_mb = max(0, (mem_after - mem_before) / (1024 * 1024))
         
         return {
             "success": True, 
             "purgedProcesses": purged_count,
             "standbyPurged": standby_purged,
-            "availablePctBefore": round(available_pct, 1)
+            "freed_mb": freed_mb
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -752,20 +759,30 @@ def set_optimization_mode(mode):
             pass
 
         # [공통 최적화] 모든 모드에 적용 (온도 감소 및 기본 성능 확보)
-        purge_ram()
+        purge_res = purge_ram()
+        freed_mb = purge_res.get("freed_mb", 0)
         _stop_service("DiagTrack") # 윈도우 원격 분석(텔레메트리) 중지하여 백그라운드 CPU 사용량/온도 감소
 
         from backend import game_booster
 
         target_guid = POWER_PLAN_BALANCED
+        mode_ko = "균형 조정"
+        plan_ko = "균형"
+        priority_ko = "NORMAL"
+        
         if mode == 'gaming':
+            mode_ko = "게이밍 울트라"
+            plan_ko = "고성능/최고의 성능"
+            priority_ko = "HIGH"
             # Check for Ultimate Performance plan
             CREATE_NO_WINDOW = 0x08000000
             res = subprocess.run('powercfg /l', shell=True, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
             if 'e9a42b02-d5df-448d-aa00-03f14749eb61' in res.stdout:
                 target_guid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
+                plan_ko = "최고의 성능"
             else:
                 target_guid = POWER_PLAN_HIGH_PERF
+                plan_ko = "고성능"
                 
             _set_power_plan(target_guid)
             _stop_service("wuauserv") # 게임 중 윈도우 업데이트 중지
@@ -774,6 +791,9 @@ def set_optimization_mode(mode):
             game_booster.boost_foreground_app()
             
         elif mode == 'eco':
+            mode_ko = "에코 배터리 세이버"
+            plan_ko = "절전"
+            priority_ko = "IDLE (Backgrounds)"
             target_guid = POWER_PLAN_POWER_SAVER
             _set_power_plan(target_guid)
             _stop_service("wuauserv") # 에코 모드 시 윈도우 업데이트 중지 (배터리/온도 절약)
@@ -795,19 +815,31 @@ def set_optimization_mode(mode):
             game_booster.stop_eco_suppression_loop()
             game_booster.restore_background_apps()
 
-        # OS 전원 플랜 적용 여부 검증
-        current_active = _get_active_power_plan_guid()
-        verified = (current_active == target_guid) if current_active else True
+        # OS 전원 플랜 적용 여부 검증 (Cross-Validation)
+        CREATE_NO_WINDOW = 0x08000000
+        res = subprocess.run('powercfg /getactivescheme', shell=True, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        actual_active = res.stdout.strip()
+        verified = target_guid.lower() in actual_active.lower()
+        
+        # Determine format for RAM
+        ram_formatted = f"{freed_mb:.1f}MB" if freed_mb < 1024 else f"{(freed_mb/1024):.1f}GB"
+        
+        # Backend explicit logging
+        log.info(f"[BOOST] {mode_ko} 모드 적용 완료! (전원 옵션: {plan_ko} / RAM 확보: {ram_formatted} / 우선순위: {priority_ko})")
+        
+        # Frontend UI message
+        ui_msg = f"{mode_ko} 적용 완료: {ram_formatted} 메모리 반환 및 {plan_ko} 세팅됨"
             
         return {
             "success": True, 
             "mode": mode, 
             "targetGuid": target_guid, 
-            "activeGuid": current_active, 
+            "activeGuid": actual_active, 
             "verified": verified,
-            "message": f"성능 모드 [{mode}]가 윈도우 OS 전원 프로필에 적용되었습니다 (검증: {'정상' if verified else '기본 적용'})."
+            "message": ui_msg
         }
     except Exception as e:
+        log.error(f"Error in set_optimization_mode: {e}")
         return {"success": False, "error": str(e)}
 
 def init_optimization_mode():
