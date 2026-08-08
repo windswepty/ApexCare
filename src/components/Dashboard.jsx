@@ -102,11 +102,13 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
   const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
   const [gpuHistory, setGpuHistory] = useState(globalGpuHistory);
 
+  const optPollInterval = useRef(null);
+
   useEffect(() => {
     const fetchRealStats = async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getSystemStats) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
-          const stats = await window.pywebview?.api.getSystemStats();
+          const stats = await window.pywebview.api.getSystemStats();
           if (stats) {
             setCpuUsage(stats.cpuUsage || 0);
             setGpuUsage(stats.gpuUsage || 0);
@@ -156,7 +158,10 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
         fetchRealStats();
       }
     }, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (optPollInterval.current) clearInterval(optPollInterval.current);
+    };
   }, [isScanning]);
 
   const runMasterOptimization = async () => {
@@ -173,23 +178,29 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
           return;
         }
 
-        const pollInterval = setInterval(async () => {
-          const status = await window.pywebview.api.getDeepOptimizationStatus();
-          if (status) {
-            setOptStatus(status);
-            
-            if (!status.running) {
-              clearInterval(pollInterval);
-              if (status.error) {
-                if (status.error.includes("취소")) {
-                  setModalMessage({ title: '작업 취소', text: '사용자에 의해 최적화가 중단되었습니다.', isError: false });
-                } else {
-                  setModalMessage({ title: '오류 발생', text: status.error, isError: true });
+        optPollInterval.current = setInterval(async () => {
+          if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDeepOptimizationStatus === 'function') {
+            try {
+              const status = await window.pywebview.api.getDeepOptimizationStatus();
+              if (status) {
+                setOptStatus(status);
+                
+                if (!status.running) {
+                  clearInterval(optPollInterval.current);
+                  if (status.error) {
+                    if (status.error.includes("취소")) {
+                      setModalMessage({ title: '작업 취소', text: '사용자에 의해 최적화가 중단되었습니다.', isError: false });
+                    } else {
+                      setModalMessage({ title: '오류 발생', text: status.error, isError: true });
+                    }
+                    setIsScanning(false);
+                  } else {
+                    finishOptimization(status.freed_mb);
+                  }
                 }
-                setIsScanning(false);
-              } else {
-                finishOptimization(status.freed_mb);
               }
+            } catch (err) {
+              console.error('Error polling optimization status:', err);
             }
           }
         }, 1000);

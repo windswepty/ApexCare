@@ -24,7 +24,7 @@ export function JunkProvider({ children, addToast }) {
     let interval;
     if (isScanning) {
       interval = setInterval(async () => {
-        if (window.pywebview?.api?.getJunkScanStatus) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getJunkScanStatus === 'function') {
           try {
             const state = await window.pywebview.api.getJunkScanStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
@@ -38,7 +38,9 @@ export function JunkProvider({ children, addToast }) {
                 if (addToast) addToast("정크 파일 스캔 중 에러가 발생했습니다.", "error");
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Error polling junk scan status:', e);
+          }
         }
       }, 1000);
     }
@@ -53,7 +55,7 @@ export function JunkProvider({ children, addToast }) {
         setCleanProgress(p => (p < 99 ? p + 20 : 99));
         setCleanEta(e => (e > 0 ? e - 1 : 0));
         
-        if (window.pywebview?.api?.getJunkCleanStatus) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getJunkCleanStatus === 'function') {
           try {
             const state = await window.pywebview.api.getJunkCleanStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
@@ -73,7 +75,9 @@ export function JunkProvider({ children, addToast }) {
                 if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (state.error || ""), "error");
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Error polling junk clean status:', e);
+          }
         }
       }, 1000);
     }

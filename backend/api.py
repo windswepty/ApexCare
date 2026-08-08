@@ -42,13 +42,19 @@ class Api:
         return optimizer.get_junk_clean_status()
 
     def cleanJunk(self, selectedIds):
-        return optimizer.clean_junk(selectedIds, optimizer._cancel_event)
+        return optimizer.clean_junk(selectedIds)
+
+    def cancelJunkClean(self):
+        return optimizer.cancel_junk_clean()
 
     def cleanTempFiles(self):
-        # 1번 항목(Temp) 정리 호출
-        res = optimizer.clean_junk([1])
-        freed = res.get("freedMB", 0)
-        return {"success": True, "message": f"임시 파일 정리 완료 (약 {freed}MB 확보)", "freedMB": freed}
+        """Synchronous temp file clean for dashboard one-click optimization."""
+        try:
+            optimizer.clean_junk_background([1], cancel_event=None)
+            freed = optimizer._junk_clean_state.get("freedMB", 0)
+            return {"success": True, "message": f"임시 파일 정리 완료 (약 {freed}MB 확보)", "freedMB": freed}
+        except Exception as e:
+            return {"success": False, "message": "임시 파일 정리 실패", "error": str(e)}
         
     def purgeRam(self):
         res = optimizer.purge_ram()
@@ -59,8 +65,14 @@ class Api:
     def runTrim(self):
         return system_repair.run_trim()
 
+    def getTrimStatus(self):
+        return system_repair.get_trim_status()
+
     def optimizeNetwork(self):
         return system_repair.optimize_network()
+
+    def getNetworkStatus(self):
+        return system_repair.get_network_status()
 
     def runSfc(self):
         return system_repair.run_sfc()

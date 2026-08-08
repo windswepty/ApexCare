@@ -129,12 +129,12 @@ def find_leftovers(app_name):
                                     fp = os.path.join(dirpath, f)
                                     if not os.path.islink(fp):
                                         size += os.path.getsize(fp)
-                        except: pass
+                        except Exception: pass
                         leftovers.append({
                             "path": full_path,
                             "sizeMB": round(size / (1024*1024), 2)
                         })
-        except:
+        except Exception:
             pass
             
     return leftovers
@@ -154,7 +154,7 @@ def clean_leftovers(paths):
                 shutil.rmtree(p, ignore_errors=True)
                 if not os.path.exists(p):
                     deleted_mb += (size / (1024*1024))
-            except:
+            except Exception:
                 failed += 1
                 
     return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}

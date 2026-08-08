@@ -58,9 +58,41 @@ export default function DiskDefrag({ addToast }) {
   useEffect(() => {
     let interval;
     if (isDefragging) {
-      interval = setInterval(() => {
+      interval = setInterval(async () => {
         setTrimProgress(p => (p < 99 ? p + 3.3 : 99));
         setTrimEta(e => (e > 0 ? e - 1 : 0));
+        
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getTrimStatus === 'function') {
+          try {
+            const state = await window.pywebview.api.getTrimStatus();
+            if (state && state.status !== 'running' && state.status !== 'idle') {
+              setIsDefragging(false);
+              const success = state.status === 'success';
+              setCmdOutput(prev => prev + (success ? "성공적으로 완료되었습니다." : state.message || "오류가 발생했습니다.") + "\n\n[APEX Engine] 모든 작업이 종료되었습니다.");
+              
+              if (success) {
+                setDefragDone(true);
+                localStorage.setItem('apex_disk_defrag_done', 'true');
+                localStorage.setItem('apex_disk_defrag_time', Date.now().toString());
+                playSound('success');
+                setBlocks(prev => {
+                  const next = prev.map(b => b === 'fragmented' ? 'contiguous' : b);
+                  localStorage.setItem('apex_disk_defrag_state', JSON.stringify(next));
+                  return next;
+                });
+                try {
+                  confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
+                } catch (e) {}
+                if (addToast) addToast('디스크 조각모음 및 TRIM 최적화가 완료되었습니다!', 'success');
+              } else {
+                alert("최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
+                if (addToast) addToast('디스크 최적화에 실패했습니다.', 'error');
+              }
+            }
+          } catch (e) {
+            console.error('Error polling trim status:', e);
+          }
+        }
       }, 1000);
     } else {
       setTrimProgress(0);
@@ -78,47 +110,28 @@ export default function DiskDefrag({ addToast }) {
   const startDefragAndTrim = async () => {
     if (isDefragging) return;
     playSound('scan');
-    setIsDefragging(true);
+    
     setDefragDone(false);
     setCmdOutput("C:\\Windows\\System32> defrag.exe /C /O\n\n[APEX Engine] 윈도우 네이티브 시스템에 모든 드라이브(C:, D: 등 전체)의 최적화 및 TRIM(빈 블록 데이터 폐기) 명령을 요청합니다...\n[APEX Engine] 저장 장치 타입(NVMe, SATA SSD 등)에 따라 작업이 수 초 내외로 빠르게 완료될 수 있습니다. 대기 중...\n\n");
 
-    let success = false;
-    let outputText = "";
-    if (window.pywebview?.api && window.pywebview?.api.runTrim) {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runTrim === 'function') {
       try {
-        const res = await window.pywebview?.api.runTrim();
-        success = res?.success;
-        outputText = res?.output || (success ? "성공적으로 완료되었습니다." : "출력 내용이 없습니다.");
+        const res = await window.pywebview.api.runTrim();
+        if (res?.success) {
+          setIsDefragging(true);
+        } else {
+          alert("이미 실행 중입니다.");
+        }
       } catch (e) {
-        success = false;
-        outputText = String(e);
+        setCmdOutput(prev => prev + String(e) + "\n\n[APEX Engine] 작업 실패.");
       }
     } else {
-      await new Promise(r => setTimeout(r, 2000));
-      success = true;
-      outputText = "개발 모드: 가상 출력 완료.\n\n볼륨 C: 최적화 완료.\n모든 볼륨 최적화 완료.";
-    }
-
-    setIsDefragging(false);
-    setCmdOutput(prev => prev + outputText + "\n\n[APEX Engine] 모든 작업이 종료되었습니다.");
-
-    if (success) {
-      setDefragDone(true);
-      localStorage.setItem('apex_disk_defrag_done', 'true');
-      localStorage.setItem('apex_disk_defrag_time', Date.now().toString());
-      playSound('success');
-      setBlocks(prev => {
-        const next = prev.map(b => b === 'fragmented' ? 'contiguous' : b);
-        localStorage.setItem('apex_disk_defrag_state', JSON.stringify(next));
-        return next;
-      });
-      try {
-        confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
-      } catch (e) {}
-      if (addToast) addToast('디스크 조각모음 및 TRIM 최적화가 완료되었습니다!', 'success');
-    } else {
-      alert("최적화에 실패했습니다. 관리자 권한을 확인해주세요.");
-      if (addToast) addToast('디스크 최적화에 실패했습니다.', 'error');
+      setIsDefragging(true);
+      setTimeout(() => {
+        setIsDefragging(false);
+        setDefragDone(true);
+        setCmdOutput(prev => prev + "개발 모드: 가상 출력 완료.\n\n볼륨 C: 최적화 완료.\n모든 볼륨 최적화 완료.\n\n[APEX Engine] 모든 작업이 종료되었습니다.");
+      }, 2000);
     }
   };
 

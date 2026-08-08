@@ -24,9 +24,9 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
 
   useEffect(() => {
     const fetchProcesses = async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getProcesses) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getProcesses === 'function') {
         try {
-          const procs = await window.pywebview?.api.getProcesses();
+          const procs = await window.pywebview.api.getProcesses();
           if (procs && procs.length > 0) {
             setRunningApps(procs);
             if (!activeAppId) setActiveAppId(procs[0].pid);
@@ -46,9 +46,9 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   const handleSetPriority = async (pid, priority) => {
     playSound('click');
     setActiveAppId(pid);
-    if (window.pywebview?.api && window.pywebview?.api.setProcessPriority) {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setProcessPriority === 'function') {
       try {
-        await window.pywebview?.api.setProcessPriority(pid, priority);
+        await window.pywebview.api.setProcessPriority(pid, priority);
         if (addToast) addToast('우선순위가 성공적으로 변경되었습니다.', 'success');
       } catch (e) {
         alert('우선순위 변경 권한이 없습니다.');

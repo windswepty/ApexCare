@@ -46,14 +46,14 @@ export default function App() {
 
   useEffect(() => {
     let checkInterval = setInterval(async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getSystemStats) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
-          const stats = await window.pywebview?.api.getSystemStats();
+          const stats = await window.pywebview.api.getSystemStats();
           if (stats && stats.cpuModel !== 'Error') {
             setSystemStats(stats);
             setIsBackendReady(true);
             // Sync current active power plan mode from backend
-            if (window.pywebview?.api.getOptimizationMode) {
+            if (typeof window.pywebview.api.getOptimizationMode === 'function') {
               const res = await window.pywebview.api.getOptimizationMode();
               if (res && res.mode) {
                 setCurrentMode(res.mode);
@@ -61,7 +61,9 @@ export default function App() {
             }
             clearInterval(checkInterval);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error('Error checking backend readiness:', e);
+        }
       }
     }, 200);
     return () => clearInterval(checkInterval);
@@ -80,10 +82,12 @@ export default function App() {
       return; // Skip first render - initial mode is loaded from backend
     }
     const applyMode = async () => {
-      if (window.pywebview?.api && window.pywebview?.api.setOptimizationMode) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setOptimizationMode === 'function') {
         try {
-          await window.pywebview?.api.setOptimizationMode(currentMode);
-        } catch (e) {}
+          await window.pywebview.api.setOptimizationMode(currentMode);
+        } catch (e) {
+          console.error('Error setting optimization mode:', e);
+        }
       }
     };
     applyMode();

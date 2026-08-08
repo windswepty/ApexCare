@@ -26,7 +26,7 @@ export default function SystemRepair({ addToast }) {
       interval = setInterval(async () => {
         setSfcProgress(p => (p < 99 ? p + 0.5 : 99));
         setSfcEta(e => (e > 0 ? e - 1 : 0));
-        if (window.pywebview?.api?.getSfcStatus) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSfcStatus === 'function') {
           try {
             const state = await window.pywebview.api.getSfcStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
@@ -36,7 +36,9 @@ export default function SystemRepair({ addToast }) {
               playSound(state.status === 'success' ? 'success' : 'error');
               if (addToast) addToast(state.status === 'success' ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Error polling sfc status:', e);
+          }
         }
       }, 1000);
     } else if (sfcStatus === 'success') {
@@ -55,7 +57,7 @@ export default function SystemRepair({ addToast }) {
       interval = setInterval(async () => {
         setDismProgress(p => (p < 99 ? p + 0.2 : 99));
         setDismEta(e => (e > 0 ? e - 1 : 0));
-        if (window.pywebview?.api?.getDismStatus) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDismStatus === 'function') {
           try {
             const state = await window.pywebview.api.getDismStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
@@ -65,7 +67,9 @@ export default function SystemRepair({ addToast }) {
               playSound(state.status === 'success' ? 'success' : 'error');
               if (addToast) addToast(state.status === 'success' ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Error polling dism status:', e);
+          }
         }
       }, 1000);
     } else if (dismStatus === 'success') {
@@ -82,10 +86,12 @@ export default function SystemRepair({ addToast }) {
     playSound('scan');
     
     try {
-      if (window.pywebview?.api && window.pywebview?.api.runSfc) {
-        const res = await window.pywebview?.api.runSfc();
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runSfc === 'function') {
+        const res = await window.pywebview.api.runSfc();
         if (res?.success) setSfcStatus('running');
-        else addToast("이미 실행 중입니다.", "error");
+        else {
+          if (addToast) addToast("이미 실행 중입니다.", "error");
+        }
       } else {
         setSfcStatus('running');
       }
@@ -98,10 +104,12 @@ export default function SystemRepair({ addToast }) {
     playSound('scan');
     
     try {
-      if (window.pywebview?.api && window.pywebview?.api.runDism) {
-        const res = await window.pywebview?.api.runDism();
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runDism === 'function') {
+        const res = await window.pywebview.api.runDism();
         if (res?.success) setDismStatus('running');
-        else addToast("이미 실행 중입니다.", "error");
+        else {
+          if (addToast) addToast("이미 실행 중입니다.", "error");
+        }
       } else {
         setDismStatus('running');
       }

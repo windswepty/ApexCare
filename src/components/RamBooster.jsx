@@ -21,9 +21,9 @@ export default function RamBooster({ addToast }) {
 
   useEffect(() => {
     const fetchRealData = async () => {
-      if (window.pywebview?.api && window.pywebview?.api.getSystemStats) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
-          const stats = await window.pywebview?.api.getSystemStats();
+          const stats = await window.pywebview.api.getSystemStats();
           if (stats) {
             // psutil's ramUsedGB on Windows is (Total - Free), so it ALREADY includes Standby Cache.
             const totalGB = parseFloat(stats.ramTotalGB ?? 32.0);
@@ -45,9 +45,9 @@ export default function RamBooster({ addToast }) {
         } catch (e) {}
       }
 
-      if (window.pywebview?.api && window.pywebview?.api.getProcesses) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getProcesses === 'function') {
         try {
-          const realProcs = await window.pywebview?.api.getProcesses();
+          const realProcs = await window.pywebview.api.getProcesses();
           if (realProcs && realProcs.length > 0) {
             setProcesses(realProcs);
           }
@@ -69,9 +69,9 @@ export default function RamBooster({ addToast }) {
     setIsPurging(true);
 
     let success = false;
-    if (window.pywebview?.api && window.pywebview?.api.purgeRam) {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.purgeRam === 'function') {
       try {
-        const res = await window.pywebview?.api.purgeRam();
+        const res = await window.pywebview.api.purgeRam();
         success = res?.success;
       } catch (e) {
         success = false;

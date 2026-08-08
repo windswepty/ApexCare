@@ -13,33 +13,35 @@ export default function FileFinder({ addToast }) {
   const handleScanLarge = async () => {
     setLoading(true);
     playSound('click');
-    if (window.pywebview?.api) {
-      try {
-        const data = await window.pywebview.api.findLargeFiles(500); // 500MB+
-        setLargeFiles(data);
-        if (addToast) addToast(`대용량 파일 스캔이 완료되었습니다. (${data.length}개 발견)`, 'success');
-      } catch (e) {
-        console.error(e);
-        if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.findLargeFiles === 'function') {
+        const data = await window.pywebview.api.findLargeFiles(500);
+        setLargeFiles(Array.isArray(data) ? data : []);
+        if (addToast) addToast(`대용량 파일 스캔이 완료되었습니다. (${Array.isArray(data) ? data.length : 0}개 발견)`, 'success');
       }
+    } catch (e) {
+      console.error('Error scanning large files:', e);
+      if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleScanDuplicates = async () => {
     setLoading(true);
     playSound('click');
-    if (window.pywebview?.api) {
-      try {
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.findDuplicateFiles === 'function') {
         const data = await window.pywebview.api.findDuplicateFiles();
-        setDuplicates(data);
-        if (addToast) addToast(`중복 파일 스캔이 완료되었습니다. (${data.length}개 발견)`, 'success');
-      } catch (e) {
-        console.error(e);
-        if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
+        setDuplicates(Array.isArray(data) ? data : []);
+        if (addToast) addToast(`중복 파일 스캔이 완료되었습니다. (${Array.isArray(data) ? data.length : 0}개 발견)`, 'success');
       }
+    } catch (e) {
+      console.error('Error scanning duplicates:', e);
+      if (addToast) addToast('스캔 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const toggleSelect = (path) => {

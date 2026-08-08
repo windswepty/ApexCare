@@ -385,9 +385,3 @@ def toggle_booster(enabled):
         _booster_state["detected_game"] = None
         
     return {"success": True, "enabled": enabled}
-
-# Auto-start the loop in disabled mode if imported
-if _monitor_thread is None:
-    _stop_event.clear()
-    _monitor_thread = threading.Thread(target=_booster_loop, daemon=True)
-    _monitor_thread.start()

@@ -1,7 +1,9 @@
 import json
 import os
 
-CONFIG_FILE = "settings.json"
+APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'APEX_CARE_DATA')
+os.makedirs(APPDATA_DIR, exist_ok=True)
+CONFIG_FILE = os.path.join(APPDATA_DIR, "settings.json")
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):

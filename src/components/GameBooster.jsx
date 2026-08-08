@@ -82,27 +82,47 @@ export default function GameBooster() {
   ];
 
   useEffect(() => {
-    fetchStatus();
+    const checkAndFetch = () => {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
+        fetchStatus();
+      }
+    };
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
+      checkAndFetch();
+    } else {
+      window.addEventListener('pywebviewready', checkAndFetch);
+    }
     const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('pywebviewready', checkAndFetch);
+    };
   }, []);
 
   const fetchStatus = async () => {
-    if (window.pywebview?.api?.getGameBoosterStatus) {
-      const st = await window.pywebview.api.getGameBoosterStatus();
-      if (st) setStatus(st);
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
+        const st = await window.pywebview.api.getGameBoosterStatus();
+        if (st) setStatus(st);
+      }
+    } catch (e) {
+      console.error('Error fetching game booster status:', e);
     }
   };
 
   const toggleBooster = async () => {
     playSound('click');
     const newState = !status.enabled;
-    // Optimistic update
     setStatus(prev => ({ ...prev, enabled: newState }));
     
-    if (window.pywebview?.api?.toggleGameBooster) {
-      await window.pywebview.api.toggleGameBooster(newState);
-      fetchStatus();
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleGameBooster === 'function') {
+        await window.pywebview.api.toggleGameBooster(newState);
+        fetchStatus();
+      }
+    } catch (e) {
+      console.error('Error toggling game booster:', e);
+      setStatus(prev => ({ ...prev, enabled: !newState }));
     }
   };
 

@@ -10,6 +10,7 @@ import psutil
 import concurrent.futures
 import threading
 import time
+from backend import system_repair
 
 # ─────────────────────────────────────────────
 # Deep Optimization Engine (Background Thread)
@@ -29,6 +30,7 @@ def get_deep_optimization_status():
     return _optimization_state
 
 _cancel_event = threading.Event()
+_junk_cancel_event = threading.Event()
 
 def _run_deep_optimization():
     global _optimization_state
@@ -44,11 +46,11 @@ def _run_deep_optimization():
     _cancel_event.clear()
     
     try:
-        # Step 1: Deep Junk Clean
+        # Step 1: Deep Junk Clean (synchronous within this thread)
         _optimization_state["current_task"] = "브라우저 캐시, 임시 파일, 업데이트 잔여물 삭제 중..."
         _optimization_state["eta_seconds"] = 10
-        res = clean_junk([1, 2, 3, 4], cancel_event=_cancel_event)
-        freed = res.get("freedMB", 0)
+        clean_junk_background([1, 2, 3, 4], cancel_event=_cancel_event)
+        freed = _junk_clean_state.get("freedMB", 0)
         _optimization_state["freed_mb"] += freed
         _optimization_state["progress_pct"] = 40
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
@@ -61,8 +63,7 @@ def _run_deep_optimization():
 
         # Step 3: Network Deep Flush
         _optimization_state["current_task"] = "네트워크 캐시 및 DNS 초기화 중..."
-        from backend import system_repair
-        system_repair.optimize_network()
+        system_repair.run_network_optimization_sync()
         _optimization_state["progress_pct"] = 80
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
             
@@ -198,7 +199,6 @@ def clean_junk_background(category_ids, cancel_event):
                             os.remove(entry.path)
                             local_freed += sz
                         elif entry.is_dir() and not entry.is_symlink():
-                            import shutil
                             shutil.rmtree(entry.path, ignore_errors=True)
                     except (OSError, PermissionError):
                         continue
@@ -235,10 +235,18 @@ def clean_junk(category_ids, cancel_event=None):
         return {"success": True}
     if _junk_clean_state["status"] == "running":
         return {"success": False, "message": "이미 정리 중입니다."}
-        
-    _junk_clean_thread = threading.Thread(target=clean_junk_background, args=(category_ids, cancel_event), daemon=True)
+    
+    _junk_cancel_event.clear()
+    _junk_clean_thread = threading.Thread(target=clean_junk_background, args=(category_ids, _junk_cancel_event), daemon=True)
     _junk_clean_thread.start()
     return {"success": True}
+
+def cancel_junk_clean():
+    """Cancel an in-progress junk clean operation."""
+    if _junk_clean_state["status"] == "running":
+        _junk_cancel_event.set()
+        return {"success": True}
+    return {"success": False, "message": "실행 중인 정리 작업이 없습니다."}
 
 
 # ─────────────────────────────────────────────
@@ -365,8 +373,6 @@ def purge_ram():
         return {"success": False, "error": str(e)}
 
 
-# ─────────────────────────────────────────────
-# Power Plan Control (pure ctypes Win32 API)
 # ─────────────────────────────────────────────
 # Power Plan Control (pure ctypes Win32 API)
 # ─────────────────────────────────────────────

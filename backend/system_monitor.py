@@ -7,7 +7,6 @@ import platform
 import os
 import ctypes
 import ctypes.wintypes
-import ctypes.wintypes
 import time
 import threading
 
@@ -38,11 +37,10 @@ def _gpu_poller():
         hq = win32pdh.OpenQuery()
         hc = win32pdh.AddCounter(hq, '\\GPU Engine(*)\\Utilization Percentage')
         win32pdh.CollectQueryData(hq)
-    except Exception as e:
-        print("[GPU Poller] PDH Init error:", e)
-        while True:
-            _gpu_usage = 0
-            time.sleep(1)
+    except Exception:
+        # GPU monitoring not available — exit thread silently
+        _gpu_usage = 0
+        return
 
     while True:
         try:
@@ -55,7 +53,7 @@ def _gpu_poller():
                     if 'engtype_3D' in k:
                         usage += v
             _gpu_usage = round(usage)
-        except Exception as e:
+        except Exception:
             _gpu_usage = 0
             time.sleep(1)
 
@@ -134,8 +132,6 @@ def get_system_stats():
             'uptimeSec': int(time.time() - psutil.boot_time())
         }
     except Exception as e:
-        with open("error_log.txt", "a") as f:
-            f.write(f"[SystemMonitor] Error: {e}\n")
         print(f"[SystemMonitor] Error: {e}")
         return None
 
