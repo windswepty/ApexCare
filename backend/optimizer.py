@@ -213,38 +213,48 @@ def clean_junk_background(category_ids, cancel_event):
         soft_dist = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
         chrome_cache = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cache')
 
-        def _clean_dir(path, max_files=1000):
+        def _clean_dir(path, max_files=5000):
             local_freed = 0
             file_count = 0
             start_time = time.time()
             if not os.path.exists(path):
                 return 0
-            try:
-                for entry in os.scandir(path):
+            
+            # Use os.walk bottom-up so we can delete files then remove empty dirs
+            for root, dirs, files in os.walk(path, topdown=False):
+                if cancel_event and cancel_event.is_set():
+                    break
+                    
+                for name in files:
                     if cancel_event and cancel_event.is_set():
                         break
+                    file_path = os.path.join(root, name)
                     try:
-                        if entry.is_file() and not entry.is_symlink():
-                            sz = entry.stat().st_size
-                            os.remove(entry.path)
-                            local_freed += sz
-                            file_count += 1
-                        elif entry.is_dir() and not entry.is_symlink():
-                            shutil.rmtree(entry.path, ignore_errors=True)
-                            file_count += 5 # 디렉토리는 좀 더 비중을 둠
-                            
-                        if file_count % 30 == 0:
+                        sz = os.path.getsize(file_path)
+                        os.remove(file_path)
+                        local_freed += sz
+                        file_count += 1
+                        
+                        if file_count % 50 == 0:
                             elapsed = time.time() - start_time
                             rate = file_count / elapsed if elapsed > 0 else 1
                             prog = min(99, int((file_count / max_files) * 100))
                             eta = int((max_files - file_count) / rate) if rate > 0 else 0
-                            _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4)) # 임의 분배
+                            _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4))
                             _junk_clean_state["eta_seconds"] = max(0, eta)
-                            
                     except (OSError, PermissionError):
                         continue
-            except (OSError, PermissionError):
-                pass
+                        
+                for name in dirs:
+                    if cancel_event and cancel_event.is_set():
+                        break
+                    dir_path = os.path.join(root, name)
+                    try:
+                        # Only deletes if empty (which means all files were successfully removed)
+                        os.rmdir(dir_path)
+                    except (OSError, PermissionError):
+                        continue
+            
             return local_freed
 
         target_dirs = []
@@ -262,7 +272,7 @@ def clean_junk_background(category_ids, cancel_event):
                 break
             freed_bytes += _clean_dir(d, max_files=2000)
 
-        _junk_clean_state["freedMB"] = round(freed_bytes / (1024 * 1024))
+        _junk_clean_state["freedMB"] = round(freed_bytes / (1024 * 1024), 2)
         if cancel_event and cancel_event.is_set():
             _junk_clean_state["status"] = "cancelled"
             _junk_clean_state["progress"] = 0
