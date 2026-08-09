@@ -138,7 +138,15 @@ export function JunkProvider({ children, addToast }) {
     
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
-        await window.pywebview.api.scanJunk();
+        const res = await window.pywebview.api.scanJunk();
+        if (res && res.success === false) {
+           if (addToast && res.error === "UAC_REQUIRED") {
+               addToast("관리자 권한이 필요합니다.", "error");
+           } else if (res.message) {
+               addToast(res.message, "error");
+           }
+           setIsScanning(false);
+        }
       } else {
         setIsScanning(false);
       }
@@ -156,7 +164,15 @@ export function JunkProvider({ children, addToast }) {
     
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.cleanJunk === 'function') {
-        await window.pywebview.api.cleanJunk(selectedIds);
+        const res = await window.pywebview.api.cleanJunk(selectedIds);
+        if (res && res.success === false) {
+           if (addToast && res.error === "UAC_REQUIRED") {
+               addToast("관리자 권한이 필요합니다.", "error");
+           } else if (res.message) {
+               addToast(res.message, "error");
+           }
+           setIsCleaning(false);
+        }
       } else {
         setIsCleaning(false);
       }

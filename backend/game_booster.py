@@ -613,7 +613,9 @@ def _booster_loop():
                     new_game_pids = list(set(current_game_pids) - set(_booster_state["boosted_pids"]))
                     if new_game_pids:
                         _boost_game_processes(new_game_pids)
-                        _booster_state["boosted_pids"].extend(new_game_pids)
+                    
+                    # Prevent Memory Leak: explicitly reassign to currently alive PIDs only
+                    _booster_state["boosted_pids"] = current_game_pids
                     _tame_processes(current_tamable_pids)
                     
                 last_tamable_pids = current_tamable_pids

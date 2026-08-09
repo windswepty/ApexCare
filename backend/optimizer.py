@@ -138,6 +138,15 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
         pass
     return round(total / (1024 * 1024), 2)
 
+import psutil
+import threading
+import time
+import os
+import sys
+import gc
+
+_scan_lock = threading.Lock()
+_clean_lock = threading.Lock()
 
 _junk_scan_state = {"status": "idle", "data": [], "progress": 0, "eta_seconds": 0}
 _junk_scan_thread = None
@@ -203,8 +212,11 @@ def scan_junk_background():
 
 def scan_junk():
     global _junk_scan_thread
-    if _junk_scan_state["status"] == "running":
-        return {"success": False, "message": "이미 스캔 중입니다."}
+    with _scan_lock:
+        if _junk_scan_state["status"] == "running":
+            return {"success": False, "message": "이미 스캔 중입니다."}
+        _junk_scan_state["status"] = "running"
+    
     _junk_scan_thread = threading.Thread(target=scan_junk_background, daemon=True)
     _junk_scan_thread.start()
     return {"success": True}
@@ -306,15 +318,21 @@ def clean_junk_background(category_ids, cancel_event):
                             os.remove(file_path)
                         except (OSError, PermissionError):
                             try:
+                                import stat
                                 os.chmod(file_path, stat.S_IWRITE)
                                 os.remove(file_path)
-                            except (OSError, PermissionError) as e:
+                            except Exception as e:
                                 print(f"[LOCKED/SKIPPED] {file_path} - {e}")
                                 sys.stdout.flush()
                                 skipped_files_log.append({"path": file_path, "size_bytes": sz})
                                 continue
-                            
-                        local_freed += sz
+                    except Exception as e:
+                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
+                        sys.stdout.flush()
+                        skipped_files_log.append({"path": file_path, "size_bytes": 0})
+                        continue
+                        
+                    local_freed += sz
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
@@ -330,11 +348,11 @@ def clean_junk_background(category_ids, cancel_event):
                             _junk_clean_state["eta_seconds"] = max(0, eta)
                             print(f"[JunkPurger] 삭제 시도 파일 수: {total_attempt_count}, 성공: {total_success_count}, 누적 확보 용량: {total_freed_bytes} bytes")
                             sys.stdout.flush()
-                    except (OSError, PermissionError) as e:
-                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
+                    except Exception as e:
+                        print(f"[ERROR] Logic error parsing {file_path} - {e}")
                         sys.stdout.flush()
-                        skipped_files_log.append({"path": file_path, "size_bytes": 0})
                         continue
+
                         
                 for name in dirs:
                     if cancel_event and cancel_event.is_set():
@@ -347,7 +365,7 @@ def clean_junk_background(category_ids, cancel_event):
                         
                     try:
                         os.rmdir(dir_path)
-                    except (OSError, PermissionError):
+                    except Exception:
                         continue
             
             return local_freed
@@ -448,12 +466,15 @@ def clean_junk_background(category_ids, cancel_event):
 
 def clean_junk(category_ids, cancel_event=None):
     global _junk_clean_thread, _junk_clean_state
-    if not category_ids:
-        _junk_clean_state["status"] = "success"
-        _junk_clean_state["freedMB"] = 0
-        return {"success": True}
-    if _junk_clean_state["status"] == "running":
-        return {"success": False, "message": "이미 정리 중입니다."}
+    
+    with _clean_lock:
+        if not category_ids:
+            _junk_clean_state["status"] = "success"
+            _junk_clean_state["freedMB"] = 0
+            return {"success": True}
+        if _junk_clean_state["status"] == "running":
+            return {"success": False, "message": "이미 정리 중입니다."}
+        _junk_clean_state["status"] = "running"
     
     _junk_cancel_event.clear()
     _junk_clean_thread = threading.Thread(target=clean_junk_background, args=(category_ids, _junk_cancel_event), daemon=True)
@@ -528,6 +549,13 @@ def purge_ram():
         mem_before = psutil.virtual_memory().available
         
         # Safely purge standby list
+        try:
+            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            if not is_admin:
+                return {"success": False, "error": "UAC_REQUIRED"}
+        except Exception:
+            return {"success": False, "error": "UAC_REQUIRED"}
+
         _enable_privilege("SeProfileSingleProcessPrivilege")
         _enable_privilege("SeDebugPrivilege")
         command = ctypes.c_int(4)  # MemoryPurgeStandbyList
@@ -752,6 +780,13 @@ def set_optimization_mode(mode):
     Goes beyond just switching power plans: applies CPU scheduling, core parking,
     MMCSS, USB latency, and GPU scheduling parameters.
     """
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        if not is_admin:
+            return {"success": False, "error": "UAC_REQUIRED"}
+    except Exception:
+        return {"success": False, "error": "UAC_REQUIRED"}
+        
     try:
         try:
             from backend import config_manager
