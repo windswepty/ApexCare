@@ -74,10 +74,25 @@ APPS_TO_TAME = [
     "slack.exe",
     "kakao.exe",
     "kakaotalk.exe",
-    "whale.exe",
+    "whale.exe"
+]
+
+# Strict Whitelist: NEVER touch these processes (System Core & Game Launchers)
+WHITELIST = [
+    "explorer.exe",
+    "svchost.exe",
+    "steam.exe",
     "steamwebhelper.exe",
     "epicgameslauncher.exe",
-    "battlenet.exe"
+    "battlenet.exe",
+    "csrss.exe",
+    "winlogon.exe",
+    "lsass.exe",
+    "services.exe",
+    "smss.exe",
+    "wininit.exe",
+    "dwm.exe",
+    "fontdrvhost.exe"
 ]
 
 _booster_state = {
@@ -393,7 +408,11 @@ def _tame_processes(pids):
     for pid in pids:
         try:
             p = psutil.Process(pid)
-            proc_name = p.name()
+            proc_name = p.name().lower()
+            
+            # Strict Whitelist Check
+            if proc_name in WHITELIST:
+                continue
             
             # Try psutil first
             try:
@@ -429,7 +448,11 @@ def _boost_game_processes(pids):
     for pid in pids:
         try:
             p = psutil.Process(pid)
-            proc_name = p.name()
+            proc_name = p.name().lower()
+            
+            # Strict Whitelist Check (just in case)
+            if proc_name in WHITELIST:
+                continue
             
             # Try psutil first
             try:

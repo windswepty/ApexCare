@@ -496,83 +496,24 @@ def _enable_privilege(priv_name):
         return False
 
 def purge_ram():
-    """Smart Memory Optimizer: selective trimming of idle processes + conditional standby purge.
+    """Smart Memory Optimizer: Safe standby cache purge.
     
-    Unlike blanket EmptyWorkingSet (which causes page faults and stuttering),
-    this only trims genuinely idle background processes and only purges
-    standby cache when available memory is critically low (<15%).
+    This function NO LONGER empties the working sets of active processes to avoid
+    crashing games and applications. It ONLY purges the Windows standby list
+    (global standby cache) using built-in system calls, which is 100% safe.
     """
     try:
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        psapi = ctypes.WinDLL('psapi', use_last_error=True)
         ntdll = ctypes.WinDLL('ntdll', use_last_error=True)
-        
-        kernel32.SetProcessWorkingSetSize.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_size_t, ctypes.c_size_t]
-        
-        # Protect list: never trim these system-critical / active processes
-        _protected = {
-            'explorer.exe', 'dwm.exe', 'csrss.exe', 'svchost.exe',
-            'winlogon.exe', 'lsass.exe', 'services.exe', 'system',
-            'smss.exe', 'wininit.exe', 'fontdrvhost.exe',
-        }
-        # Also protect any known game executables (from game_booster)
-        try:
-            from backend.game_booster import GAMES_LIST
-            _protected.update(GAMES_LIST)
-        except Exception:
-            pass
-        
-        my_pid = os.getpid()
-        purged_count = 0
         
         # Capture memory before purge
         mem_before = psutil.virtual_memory().available
         
-        # 1. Selective Working Set trimming: only trim idle background apps
-        for p in psutil.process_iter(['pid', 'name', 'status', 'cpu_percent']):
-            try:
-                pid = p.info['pid']
-                name = (p.info.get('name') or '').lower()
-                if pid <= 4 or pid == my_pid:
-                    continue
-                if name in _protected:
-                    continue
-                    
-                # Only trim processes that are genuinely idle (very low CPU)
-                cpu = p.info.get('cpu_percent', 0) or 0
-                if cpu > 2.0:  # Process is actively using CPU, don't trim
-                    continue
-                    
-                mem_info = p.memory_info()
-                if mem_info.rss < 50 * 1024 * 1024:  # Skip tiny processes (<50MB)
-                    continue
-                
-                handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid)
-                if handle:
-                    try:
-                        psapi.EmptyWorkingSet(handle)
-                        purged_count += 1
-                    except Exception as handle_e:
-                        log.debug(f"[RAM Purge] Failed to EmptyWorkingSet for PID {pid}: {handle_e}")
-                    finally:
-                        kernel32.CloseHandle(handle)
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
-            except Exception as e:
-                log.warning(f"[RAM Purge] Error iterating process {p.info.get('pid', 'unknown')}: {e}")
-                continue
-                
-        # 2. Conditional Standby Cache Purge: only when available RAM is critically low
-        mem = psutil.virtual_memory()
-        available_pct_before = (mem_before / mem.total) * 100
-        
-        standby_purged = False
-        if available_pct_before < 15:
-            _enable_privilege("SeProfileSingleProcessPrivilege")
-            _enable_privilege("SeDebugPrivilege")
-            command = ctypes.c_int(4)  # MemoryPurgeStandbyList
-            status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
-            standby_purged = (status == 0)
+        # Safely purge standby list
+        _enable_privilege("SeProfileSingleProcessPrivilege")
+        _enable_privilege("SeDebugPrivilege")
+        command = ctypes.c_int(4)  # MemoryPurgeStandbyList
+        status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
+        standby_purged = (status == 0)
             
         # Capture memory after purge and calculate freed MB
         mem_after = psutil.virtual_memory().available
@@ -580,7 +521,7 @@ def purge_ram():
         
         return {
             "success": True, 
-            "purgedProcesses": purged_count,
+            "purgedProcesses": 0,
             "standbyPurged": standby_purged,
             "freed_mb": freed_mb
         }
