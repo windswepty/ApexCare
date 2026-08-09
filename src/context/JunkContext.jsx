@@ -76,19 +76,30 @@ export function JunkProvider({ children, addToast }) {
                   setSkippedMB(state.skipped_mb || 0);
                   setCleanDetails(state.details || {});
                   setCleanedSuccess(true);
-                  // 리스캔하여 실제 남은 파일 팩트 유지 (성공 배너는 유지)
-                  rescanJunk(true);
+                  // 리스캔을 방지하고 스킵된 용량을 수학적으로 분배하여 UI에 덮어씌움
+                  const skippedMBValue = state.skipped_mb || 0;
+                  setItems(prevItems => {
+                    const totalSelected = prevItems.filter(i => i.selected).reduce((acc, i) => acc + i.sizeMB, 0);
+                    return prevItems.map(item => {
+                      if (item.selected) {
+                        const ratio = totalSelected > 0 ? item.sizeMB / totalSelected : 0;
+                        const newSize = skippedMBValue * ratio;
+                        return { ...item, sizeMB: Number(newSize.toFixed(2)) };
+                      }
+                      return item;
+                    });
+                  });
                   
                   if (addToast) {
                     const mb = state.freed_mb || 0;
                     const skipped = state.skipped_mb || 0;
-                    const totalStr = mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB';
-                    const skippedStr = skipped >= 1024 ? (skipped/1024).toFixed(2) + ' GB' : skipped + ' MB';
+                    const totalStr = mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb.toFixed(2) + ' MB';
+                    const skippedStr = skipped >= 1024 ? (skipped/1024).toFixed(2) + ' GB' : skipped.toFixed(2) + ' MB';
                     
                     let detailsStr = '';
                     if (state.details && Object.keys(state.details).length > 0) {
                       const detailParts = Object.entries(state.details).map(([drv, size]) => {
-                         const sizeStr = size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size + ' MB';
+                         const sizeStr = size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size.toFixed(2) + ' MB';
                          return `${drv} ${sizeStr}`;
                       });
                       detailsStr = ` (${detailParts.join(' / ')})`;

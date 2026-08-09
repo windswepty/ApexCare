@@ -70,21 +70,11 @@ export default function JunkCleaner() {
             <div className="text-3xl font-black text-cyan-400 font-mono">
               {totalSelectedMB >= 1024 
                 ? (totalSelectedMB / 1024).toFixed(2) + ' GB'
-                : totalSelectedMB + ' MB'
+                : totalSelectedMB.toFixed(2) + ' MB'
               }
             </div>
           </div>
 
-          {freedMB > 0 ? (
-            <button
-              onClick={rescanJunk}
-              disabled={isScanning}
-              className={`btn-secondary px-5 py-3 text-xs flex items-center gap-2 ${isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <RefreshCw className={`w-4 h-4 text-cyan-400 ${isScanning ? 'animate-spin' : ''}`} />
-              <span>{isScanning ? '스캔 중...' : '시스템 다시 스캔'}</span>
-            </button>
-          ) : (
             <button
               onClick={handleClean}
               disabled={isCleaning || totalSelectedMB === 0 || isScanning}
@@ -102,7 +92,6 @@ export default function JunkCleaner() {
                 </>
               )}
             </button>
-          )}
         </div>
       </div>
 
@@ -219,7 +208,7 @@ export default function JunkCleaner() {
             <div className="text-right">
               <span className={`font-mono font-bold text-sm ${item.sizeMB > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
                 {item.sizeMB > 0
-                  ? (item.sizeMB >= 1024 ? `${(item.sizeMB / 1024).toFixed(2)} GB` : `${item.sizeMB} MB`)
+                  ? (item.sizeMB >= 1024 ? `${(item.sizeMB / 1024).toFixed(2)} GB` : `${item.sizeMB.toFixed(2)} MB`)
                   : '0 MB Clean'
                 }
               </span>
