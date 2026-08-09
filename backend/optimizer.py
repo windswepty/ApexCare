@@ -255,8 +255,18 @@ def clean_junk_background(category_ids, cancel_event):
                 os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
                 os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
                 os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
-                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower()
+                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
+                os.environ.get('APPDATA', 'C:\\Users\\Default\\AppData\\Roaming').lower(),
+                "steamlibrary",
+                "steamapps"
             ]
+            
+            def _is_safe_to_delete(file_path):
+                """Pre-Check: Verify file path is not in any protected directory."""
+                path_lower = file_path.lower()
+                if any(pr in path_lower for pr in protected_roots):
+                    return False
+                return True
             DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
             SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk', '.pf'} # .pf for prefetch
             
@@ -274,6 +284,10 @@ def clean_junk_background(category_ids, cancel_event):
                     if cancel_event and cancel_event.is_set():
                         break
                     file_path = os.path.join(root, name)
+                    
+                    # Pre-Check Cross-Validation
+                    if not _is_safe_to_delete(file_path):
+                        continue
                     
                     # Strict Whitelist & Blacklist extension check
                     ext = os.path.splitext(name)[1].lower()
@@ -326,6 +340,11 @@ def clean_junk_background(category_ids, cancel_event):
                     if cancel_event and cancel_event.is_set():
                         break
                     dir_path = os.path.join(root, name)
+                    
+                    # Pre-Check Cross-Validation for directories
+                    if not _is_safe_to_delete(dir_path):
+                        continue
+                        
                     try:
                         os.rmdir(dir_path)
                     except (OSError, PermissionError):

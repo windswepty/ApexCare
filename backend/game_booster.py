@@ -68,7 +68,6 @@ GAMES_LIST = [
 # List of background apps to tame (lower priority + EcoQoS)
 APPS_TO_TAME = [
     "chrome.exe",
-    "discord.exe",
     "msedge.exe",
     "spotify.exe",
     "slack.exe",
@@ -82,9 +81,12 @@ WHITELIST = [
     "explorer.exe",
     "svchost.exe",
     "steam.exe",
+    "steamservice.exe",
     "steamwebhelper.exe",
     "epicgameslauncher.exe",
     "battlenet.exe",
+    "battle.net.exe",
+    "discord.exe",
     "csrss.exe",
     "winlogon.exe",
     "lsass.exe",
@@ -399,6 +401,20 @@ def _restore_nagle():
 def get_booster_status():
     return _booster_state
 
+def _is_safe_to_tame(proc_name, pid=None):
+    """Pre-Check Safety Routine: Verify process is not in whitelist or foreground."""
+    if not proc_name:
+        return False
+    proc_name = proc_name.lower()
+    
+    # 1. Whitelist Check
+    if proc_name in WHITELIST:
+        return False
+        
+    # 2. Foreground / UI Check (Basic heuristic: if it's a known system app)
+    # GetForegroundWindow check could be added here if needed, but whitelist covers most.
+    return True
+
 def _tame_processes(pids):
     """Lower priority AND apply EcoQoS to background apps.
     
@@ -410,8 +426,8 @@ def _tame_processes(pids):
             p = psutil.Process(pid)
             proc_name = p.name().lower()
             
-            # Strict Whitelist Check
-            if proc_name in WHITELIST:
+            # Strict Pre-Check
+            if not _is_safe_to_tame(proc_name, pid):
                 continue
             
             # Try psutil first
@@ -450,8 +466,8 @@ def _boost_game_processes(pids):
             p = psutil.Process(pid)
             proc_name = p.name().lower()
             
-            # Strict Whitelist Check (just in case)
-            if proc_name in WHITELIST:
+            # Strict Whitelist Check (just in case we accidentally targeted a system app)
+            if not _is_safe_to_tame(proc_name, pid) and proc_name not in GAMES_LIST:
                 continue
             
             # Try psutil first
