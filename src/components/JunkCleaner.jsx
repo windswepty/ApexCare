@@ -35,8 +35,11 @@ export default function JunkCleaner() {
     .filter(i => i.selected)
     .reduce((acc, i) => acc + i.sizeMB, 0);
 
+  // Allow cleaning if any item is selected and has > 0 size
+  const canClean = items.some(i => i.selected && i.sizeMB > 0.0001);
+
   const handleClean = () => {
-    if (totalSelectedMB === 0 || isCleaning) return;
+    if (!canClean || isCleaning) return;
     const selectedIds = items.filter(i => i.selected).map(i => i.id);
     startClean(selectedIds);
   };
@@ -77,8 +80,8 @@ export default function JunkCleaner() {
 
             <button
               onClick={handleClean}
-              disabled={isCleaning || totalSelectedMB === 0 || isScanning}
-              className={`btn-primary px-6 py-3 ${isCleaning || totalSelectedMB === 0 || isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isCleaning || !canClean || isScanning}
+              className={`btn-primary px-6 py-3 ${isCleaning || !canClean || isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isCleaning ? (
                 <>
@@ -140,10 +143,10 @@ export default function JunkCleaner() {
             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
             <div>
               <h4 className="font-bold text-emerald-300 text-sm">
-                총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 정리 완료!
+                총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${Number(freedMB).toFixed(2)} MB`}</span> 정리 완료!
                 {skippedMB > 0 ? (
                   <span className="text-emerald-200/80 ml-1">
-                    ({skippedMB >= 1024 ? `${(skippedMB / 1024).toFixed(2)} GB` : `${skippedMB} MB`}는 시스템 사용 중으로 안전하게 스킵됨)
+                    ({skippedMB >= 1024 ? `${(skippedMB / 1024).toFixed(2)} GB` : `${Number(skippedMB).toFixed(2)} MB`}는 시스템 사용 중으로 안전하게 스킵됨)
                   </span>
                 ) : null}
                 <span className="text-emerald-200 font-mono text-xs ml-1">{getDetailsString()}</span>
