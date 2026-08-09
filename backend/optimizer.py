@@ -240,6 +240,7 @@ def clean_junk_background(category_ids, cancel_event):
         prefetch = os.path.expandvars('%SystemRoot%\\Prefetch')
         soft_dist = os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download')
         chrome_cache = os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache')
+        skipped_files_log = []
 
         def _clean_dir(path, max_files=5000):
             nonlocal total_attempt_count, total_success_count, total_freed_bytes
@@ -269,6 +270,7 @@ def clean_junk_background(category_ids, cancel_event):
                             except (OSError, PermissionError) as e:
                                 print(f"[LOCKED/SKIPPED] {file_path} - {e}")
                                 sys.stdout.flush()
+                                skipped_files_log.append({"path": file_path, "size_bytes": sz})
                                 continue
                             
                         local_freed += sz
@@ -290,6 +292,7 @@ def clean_junk_background(category_ids, cancel_event):
                     except (OSError, PermissionError) as e:
                         print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
                         sys.stdout.flush()
+                        skipped_files_log.append({"path": file_path, "size_bytes": 0})
                         continue
                         
                 for name in dirs:
@@ -308,20 +311,6 @@ def clean_junk_background(category_ids, cancel_event):
             target_dirs.extend([user_temp, system_temp])
         if 2 in category_ids:
             target_dirs.append(chrome_cache)
-            # 유휴 브라우저 및 디스코드 프로세스 강제 종료 (캐시 잠금 해제)
-            import psutil
-            target_procs = ['chrome.exe', 'msedge.exe', 'discord.exe']
-            killed_count = 0
-            for proc in psutil.process_iter(['name']):
-                try:
-                    if proc.info['name'] and proc.info['name'].lower() in target_procs:
-                        proc.terminate()
-                        killed_count += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    pass
-            if killed_count > 0:
-                print(f"[JunkPurger] 브라우저/디스코드 유휴 프로세스 {killed_count}개 종료 완료 (캐시 잠금 해제)")
-                sys.stdout.flush()
 
         if 3 in category_ids:
             target_dirs.append(soft_dist)
@@ -383,6 +372,18 @@ def clean_junk_background(category_ids, cancel_event):
         _junk_clean_state["freed_mb"] = freed_total_mb
         _junk_clean_state["skipped_mb"] = skipped_mb
         _junk_clean_state["details"] = details
+        
+        if skipped_files_log:
+            try:
+                log_path = os.path.join(os.path.expanduser("~"), "Desktop", "APEX_Skipped_Files.log")
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write("=== APEX CARE: 사용 중이어서 안전하게 스킵된 파일 목록 ===\n\n")
+                    skipped_files_log.sort(key=lambda x: x["size_bytes"], reverse=True)
+                    for item in skipped_files_log:
+                        mb = round(item["size_bytes"] / (1024 * 1024), 2)
+                        f.write(f"[{mb} MB] {item['path']}\n")
+            except Exception as e:
+                log.debug(f"Failed to write skipped files log: {e}")
         
         print(f"[JunkPurger] 최종 확보 용량: {freed_total_mb} MB, 스킵된 용량(OS 잠금): {skipped_mb} MB")
         sys.stdout.flush()
