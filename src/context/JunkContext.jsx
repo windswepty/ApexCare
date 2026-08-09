@@ -17,6 +17,7 @@ export function JunkProvider({ children, addToast }) {
   const [scanEta, setScanEta] = useState(0);
   const [cleanedSuccess, setCleanedSuccess] = useState(false);
   const [freedMB, setFreedMB] = useState(0);
+  const [skippedMB, setSkippedMB] = useState(0);
   const [cleanDetails, setCleanDetails] = useState({});
   
   const [hasScannedOnce, setHasScannedOnce] = useState(false);
@@ -72,14 +73,18 @@ export function JunkProvider({ children, addToast }) {
                 setIsCleaning(false);
                 if (state.status === 'success') {
                   setFreedMB(state.freed_mb || 0);
+                  setSkippedMB(state.skipped_mb || 0);
                   setCleanDetails(state.details || {});
                   setCleanedSuccess(true);
-                  // Empty selected items size
-                  setItems(prevItems => prevItems.map(item => item.selected ? { ...item, sizeMB: 0, selected: false } : item));
+                  // 리스캔하여 실제 남은 파일 팩트 유지 (성공 배너는 유지)
+                  rescanJunk(true);
                   
                   if (addToast) {
                     const mb = state.freed_mb || 0;
+                    const skipped = state.skipped_mb || 0;
                     const totalStr = mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb + ' MB';
+                    const skippedStr = skipped >= 1024 ? (skipped/1024).toFixed(2) + ' GB' : skipped + ' MB';
+                    
                     let detailsStr = '';
                     if (state.details && Object.keys(state.details).length > 0) {
                       const detailParts = Object.entries(state.details).map(([drv, size]) => {
@@ -88,7 +93,11 @@ export function JunkProvider({ children, addToast }) {
                       });
                       detailsStr = ` (${detailParts.join(' / ')})`;
                     }
-                    addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${totalStr}${detailsStr})`, 'success');
+                    if (skipped > 0) {
+                      addToast(`총 ${totalStr} 정리 완료! (${skippedStr}는 시스템 사용 중으로 안전하게 스킵됨)${detailsStr}`, 'success');
+                    } else {
+                      addToast(`정크 파일 세척이 완료되었습니다! (확보된 용량: ${totalStr}${detailsStr})`, 'success');
+                    }
                   }
                 } else {
                   if (addToast) addToast("정크 파일 삭제 중 에러 발생: " + (state.error || ""), "error");
@@ -106,9 +115,12 @@ export function JunkProvider({ children, addToast }) {
     return () => clearInterval(interval);
   }, [isCleaning, addToast]);
 
-  const rescanJunk = async () => {
-    setCleanedSuccess(false);
-    setFreedMB(0);
+  const rescanJunk = async (preserveSuccess = false) => {
+    if (!preserveSuccess) {
+      setCleanedSuccess(false);
+      setFreedMB(0);
+      setSkippedMB(0);
+    }
     setScanProgress(0);
     setScanEta(0);
     setIsScanning(true);
@@ -158,7 +170,7 @@ export function JunkProvider({ children, addToast }) {
   return (
     <JunkContext.Provider value={{
       items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
-      cleanedSuccess, freedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
+      cleanedSuccess, freedMB, skippedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
       setCleanedSuccess
     }}>
       {children}

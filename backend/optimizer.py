@@ -120,20 +120,6 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                 fp = os.path.join(root, f)
                 try:
                     if not os.path.islink(fp):
-                        # Pre-Check 강화: 쓰기 권한 테스트
-                        if not os.access(fp, os.W_OK):
-                            import stat
-                            try:
-                                os.chmod(fp, stat.S_IWRITE)
-                            except (OSError, PermissionError):
-                                continue
-                        
-                        # 완벽한 Locked 확인
-                        try:
-                            open(fp, 'a').close()
-                        except (OSError, PermissionError):
-                            continue
-                        
                         total += os.path.getsize(fp)
                         file_count += 1
                         
@@ -243,6 +229,8 @@ def clean_junk_background(category_ids, cancel_event):
     
     import stat
     try:
+        target_scan_mb = sum(item.get("sizeMB", 0) for item in _junk_scan_state.get("data", []) if item.get("id") in category_ids)
+
         total_freed_bytes = 0
         total_attempt_count = 0
         total_success_count = 0
@@ -320,6 +308,21 @@ def clean_junk_background(category_ids, cancel_event):
             target_dirs.extend([user_temp, system_temp])
         if 2 in category_ids:
             target_dirs.append(chrome_cache)
+            # 유휴 브라우저 및 디스코드 프로세스 강제 종료 (캐시 잠금 해제)
+            import psutil
+            target_procs = ['chrome.exe', 'msedge.exe', 'discord.exe']
+            killed_count = 0
+            for proc in psutil.process_iter(['name']):
+                try:
+                    if proc.info['name'] and proc.info['name'].lower() in target_procs:
+                        proc.terminate()
+                        killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            if killed_count > 0:
+                print(f"[JunkPurger] 브라우저/디스코드 유휴 프로세스 {killed_count}개 종료 완료 (캐시 잠금 해제)")
+                sys.stdout.flush()
+
         if 3 in category_ids:
             target_dirs.append(soft_dist)
         if 4 in category_ids:
@@ -374,10 +377,14 @@ def clean_junk_background(category_ids, cancel_event):
                 except Exception as e:
                     log.debug(f"Failed to get end free space for {drv}: {e}")
 
-        _junk_clean_state["freed_mb"] = round(total_actual_freed / (1024 * 1024), 2)
+        freed_total_mb = round(total_actual_freed / (1024 * 1024), 2)
+        skipped_mb = max(0.0, round(target_scan_mb - freed_total_mb, 2))
+
+        _junk_clean_state["freed_mb"] = freed_total_mb
+        _junk_clean_state["skipped_mb"] = skipped_mb
         _junk_clean_state["details"] = details
         
-        print(f"[JunkPurger] 최종 확보 용량 (물리적 차이): {_junk_clean_state['freed_mb']} MB")
+        print(f"[JunkPurger] 최종 확보 용량: {freed_total_mb} MB, 스킵된 용량(OS 잠금): {skipped_mb} MB")
         sys.stdout.flush()
         
         if cancel_event and cancel_event.is_set():

@@ -12,7 +12,7 @@ import { useJunk } from '../context/JunkContext';
 export default function JunkCleaner() {
   const {
     items, isScanning, isCleaning, cleanProgress, cleanEta, scanProgress, scanEta, hasScannedOnce,
-    cleanedSuccess, freedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
+    cleanedSuccess, freedMB, skippedMB, cleanDetails, rescanJunk, startClean, toggleItem, selectAll, deselectAll,
     setCleanedSuccess
   } = useJunk();
 
@@ -151,9 +151,15 @@ export default function JunkCleaner() {
             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
             <div>
               <h4 className="font-bold text-emerald-300 text-sm">
-                정크 파일 세척 완료! 총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 공간이 성공적으로 확보되었습니다! <span className="text-emerald-200 font-mono text-xs">{getDetailsString()}</span>
+                총 <span className="text-emerald-400 font-mono font-black">{freedMB >= 1024 ? `${(freedMB / 1024).toFixed(2)} GB` : `${freedMB} MB`}</span> 정리 완료!
+                {skippedMB > 0 ? (
+                  <span className="text-emerald-200/80 ml-1">
+                    ({skippedMB >= 1024 ? `${(skippedMB / 1024).toFixed(2)} GB` : `${skippedMB} MB`}는 시스템 사용 중으로 안전하게 스킵됨)
+                  </span>
+                ) : null}
+                <span className="text-emerald-200 font-mono text-xs ml-1">{getDetailsString()}</span>
               </h4>
-              <p className="text-xs text-gray-700 dark:text-slate-300">
+              <p className="text-xs text-gray-700 dark:text-slate-300 mt-1">
                 실제 비활성 임시 파일이 디스크에서 안전하게 제거되었습니다.
               </p>
             </div>
