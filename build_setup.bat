@@ -8,7 +8,7 @@ if exist "build\APEX CARE Setup 1.0.1" rmdir /s /q "build\APEX CARE Setup 1.0.1"
 if exist "dist\APEX CARE Setup 1.0.1.exe" del /q "dist\APEX CARE Setup 1.0.1.exe"
 
 echo [2/2] Building Setup Wizard with PyInstaller...
-pyinstaller --noconfirm --onefile --windowed --icon="public\setup_icon.ico" --add-data "dist/APEX CARE Payload.exe;." --add-data "dist/APEX CARE Uninstaller.exe;." --add-data "public/eula.txt;." --add-data "public/setup_icon.ico;." --name "APEX CARE Setup 1.0.1" tools/setup_wizard.py
+pyinstaller --noconfirm "APEX CARE Setup 1.0.1.spec"
 
 if %errorlevel% neq 0 (
     echo [Error] Build failed!

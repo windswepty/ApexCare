@@ -326,13 +326,8 @@ def clean_junk_background(category_ids, cancel_event):
                                 sys.stdout.flush()
                                 skipped_files_log.append({"path": file_path, "size_bytes": sz})
                                 continue
-                    except Exception as e:
-                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
-                        sys.stdout.flush()
-                        skipped_files_log.append({"path": file_path, "size_bytes": 0})
-                        continue
                         
-                    local_freed += sz
+                        local_freed += sz
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
@@ -349,10 +344,10 @@ def clean_junk_background(category_ids, cancel_event):
                             print(f"[JunkPurger] 삭제 시도 파일 수: {total_attempt_count}, 성공: {total_success_count}, 누적 확보 용량: {total_freed_bytes} bytes")
                             sys.stdout.flush()
                     except Exception as e:
-                        print(f"[ERROR] Logic error parsing {file_path} - {e}")
+                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
                         sys.stdout.flush()
+                        skipped_files_log.append({"path": file_path, "size_bytes": 0})
                         continue
-
                         
                 for name in dirs:
                     if cancel_event and cancel_event.is_set():

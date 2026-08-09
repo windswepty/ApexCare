@@ -6,7 +6,13 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('dist_react', 'dist_react')],
-    hiddenimports=['backend.uninstaller', 'backend.optimizer', 'backend.system_repair', 'backend.system_monitor', 'backend.file_finder', 'backend.debloater', 'backend.game_booster', 'backend.config_manager', 'backend.api'],
+    hiddenimports=[
+        'backend.uninstaller', 'backend.optimizer', 'backend.system_repair', 
+        'backend.system_monitor', 'backend.file_finder', 'backend.debloater', 
+        'backend.game_booster', 'backend.config_manager', 'backend.api',
+        'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
+        'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

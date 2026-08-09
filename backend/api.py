@@ -1,16 +1,17 @@
 import os
+import logging
+import json
+
 from backend import system_monitor
 from backend import optimizer
 from backend import system_repair
 from backend import uninstaller
 from backend import file_finder
 from backend import debloater
-import logging
-
-log = logging.getLogger('API')
 from backend import game_booster
 from backend import config_manager
-import json
+
+log = logging.getLogger('API')
 
 class Api:
     def __init__(self, window):
