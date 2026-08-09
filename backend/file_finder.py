@@ -23,6 +23,8 @@ def scan_large_files(min_mb=500):
     # Exclude system folders to prevent breaking things
     exclude_dirs = ['Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'System Volume Information', '$Recycle.Bin', 'AppData']
     
+    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
+    
     for target_dir in drives:
         if not os.path.exists(target_dir):
             continue
@@ -31,7 +33,16 @@ def scan_large_files(min_mb=500):
             # Filter excluded dirs in place
             dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
             
+            # Security check: absolute block on core folders
+            root_lower = root.lower()
+            if any(blk in root_lower for blk in ['\\windows\\system32', '\\windows\\syswow64', '\\windows\\winsxs']):
+                continue
+            
             for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in DANGER_EXTS:
+                    continue
+                    
                 try:
                     full_path = os.path.join(root, file)
                     if not os.path.islink(full_path):
@@ -75,6 +86,10 @@ def scan_duplicates():
     # Exclude system folders
     exclude_dirs = ['Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'System Volume Information', '$Recycle.Bin', 'AppData']
     
+    # Strict whitelist and blacklist
+    SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk'}
+    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
+    
     file_sizes = {}
     
     # First pass: group files by size
@@ -86,7 +101,17 @@ def scan_duplicates():
             # Filter excluded dirs in place
             dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
             
+            # Security check: absolute block on core folders
+            root_lower = root.lower()
+            if any(blk in root_lower for blk in ['\\windows\\system32', '\\windows\\syswow64', '\\windows\\winsxs']):
+                continue
+            
             for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in DANGER_EXTS:
+                    continue
+                # For duplicate scanning, we don't necessarily only allow SAFE_EXTS, but we strictly block DANGER_EXTS.
+                
                 try:
                     full_path = os.path.join(root, file)
                     if not os.path.islink(full_path):
@@ -150,11 +175,15 @@ def delete_files(paths):
     
     # Critical system paths that should NEVER be touched
     protected_roots = [
-        os.environ.get('WINDIR', 'C:\\Windows').lower(),
+        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
+        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
+        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
         os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
-        os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
-        os.environ.get('PROGRAMDATA', 'C:\\ProgramData').lower()
+        os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower()
     ]
+    
+    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
+    SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk'}
     
     for p in paths:
         if not os.path.exists(p) or not os.path.isfile(p):
@@ -163,8 +192,19 @@ def delete_files(paths):
             
         # Security check: prevent deletion if path is inside protected roots
         p_lower = p.lower()
-        is_protected = any(p_lower.startswith(pr) for pr in protected_roots)
+        is_protected = any(p_lower.startswith(pr) or (pr in p_lower) for pr in protected_roots)
         if is_protected:
+            failed += 1
+            continue
+            
+        # Strict Whitelist & Blacklist extension check
+        ext = os.path.splitext(p)[1].lower()
+        if ext in DANGER_EXTS:
+            failed += 1
+            continue
+        
+        # Only allow safe extensions to be deleted by this function
+        if ext not in SAFE_EXTS and ext != '':
             failed += 1
             continue
             

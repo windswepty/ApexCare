@@ -249,15 +249,42 @@ def clean_junk_background(category_ids, cancel_event):
             start_time = time.time()
             if not os.path.exists(path):
                 return 0
+                
+            protected_roots = [
+                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
+                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
+                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
+                os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
+                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower()
+            ]
+            DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
+            SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk', '.pf'} # .pf for prefetch
             
             for root, dirs, files in os.walk(path, topdown=False):
                 if cancel_event and cancel_event.is_set():
                     break
                     
+                # Security check for directories
+                root_lower = root.lower()
+                is_protected = any(pr in root_lower for pr in protected_roots)
+                if is_protected:
+                    continue
+                    
                 for name in files:
                     if cancel_event and cancel_event.is_set():
                         break
                     file_path = os.path.join(root, name)
+                    
+                    # Strict Whitelist & Blacklist extension check
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext in DANGER_EXTS:
+                        continue
+                    
+                    # Chrome cache files usually have no extension, prefetch has .pf.
+                    # We will allow safe extensions and files with no extension.
+                    if ext not in SAFE_EXTS and ext != '':
+                        continue
+                        
                     total_attempt_count += 1
                     try:
                         sz = os.path.getsize(file_path)
