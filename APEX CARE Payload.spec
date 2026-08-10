@@ -11,7 +11,8 @@ a = Analysis(
         'backend.system_monitor', 'backend.file_finder', 'backend.debloater', 
         'backend.game_booster', 'backend.config_manager', 'backend.api',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
-        'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time'
+        'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time',
+        'win32pdh', 'pythoncom', 'win32com'
     ],
     hookspath=[],
     hooksconfig={},

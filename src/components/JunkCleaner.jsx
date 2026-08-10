@@ -53,7 +53,7 @@ export default function JunkCleaner() {
   const getDetailsString = () => {
     if (!cleanDetails || Object.keys(cleanDetails).length === 0) return '';
     const parts = Object.entries(cleanDetails).map(([drv, size]) => {
-      return `${drv} ${size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size + ' MB'}`;
+      return `${drv} ${size >= 1024 ? (size/1024).toFixed(2) + ' GB' : size.toFixed(2) + ' MB'}`;
     });
     return ` (${parts.join(' / ')})`;
   };
