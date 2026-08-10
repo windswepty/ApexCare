@@ -16,10 +16,16 @@ export default function JunkCleaner() {
     setCleanedSuccess
   } = useJunk();
 
+  const hasInitiatedScan = React.useRef(false);
+
   useEffect(() => {
+    if (hasInitiatedScan.current) return;
+
     const checkAndScan = () => {
+      if (hasInitiatedScan.current) return;
       if (!hasScannedOnce && window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
-        rescanJunk();
+        hasInitiatedScan.current = true;
+        rescanJunk(false, true); // preserveSuccess = false, isAutoScan = true
       }
     };
 
@@ -29,7 +35,7 @@ export default function JunkCleaner() {
       window.addEventListener('pywebviewready', checkAndScan);
       return () => window.removeEventListener('pywebviewready', checkAndScan);
     }
-  }, [hasScannedOnce, rescanJunk]);
+  }, []); // Empty dependency array to strictly run once
 
   const totalSelectedMB = items
     .filter(i => i.selected)

@@ -126,7 +126,7 @@ export function JunkProvider({ children, addToast }) {
     return () => clearInterval(interval);
   }, [isCleaning, addToast]);
 
-  const rescanJunk = async (preserveSuccess = false) => {
+  const rescanJunk = async (preserveSuccess = false, isAutoScan = false) => {
     if (!preserveSuccess) {
       setCleanedSuccess(false);
       setFreedMB(0);
@@ -140,10 +140,12 @@ export function JunkProvider({ children, addToast }) {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.scanJunk === 'function') {
         const res = await window.pywebview.api.scanJunk();
         if (res && res.success === false) {
-           if (addToast && res.error === "UAC_REQUIRED") {
-               addToast("관리자 권한이 필요합니다.", "error");
-           } else if (res.message) {
-               addToast(res.message, "error");
+           if (!isAutoScan) {
+             if (addToast && res.error === "UAC_REQUIRED") {
+                 addToast("관리자 권한이 필요합니다.", "error");
+             } else if (res.message) {
+                 addToast(res.message, "error");
+             }
            }
            setIsScanning(false);
         }

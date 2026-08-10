@@ -36,7 +36,11 @@ export default function App() {
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => {
+      // Prevent identical messages from stacking up
+      if (prev.some(t => t.message === message)) return prev;
+      return [...prev, { id, message, type }];
+    });
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 10000);
