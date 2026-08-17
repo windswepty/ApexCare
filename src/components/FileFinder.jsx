@@ -88,6 +88,15 @@ export default function FileFinder({ addToast }) {
 
   const handleDelete = async () => {
     if (selectedPaths.size === 0 || !window.pywebview?.api) return;
+
+    // [중요] 백엔드(file_finder.py delete_files)는 os.unlink 로 즉시 영구 삭제한다.
+    // 휴지통을 거치지 않으므로 되돌릴 방법이 전혀 없다. 반드시 확인을 받는다.
+    if (!window.confirm(
+      `선택한 ${selectedPaths.size}개 파일을 영구적으로 삭제합니다.\n\n` +
+      `휴지통으로 이동하지 않으며, 삭제 후에는 복구할 수 없습니다.\n\n` +
+      `계속하시겠습니까?`
+    )) return;
+
     setDeleting(true);
     
     try {
