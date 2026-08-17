@@ -18,6 +18,7 @@ import {
 
 export default function PerformanceModes({ currentMode, setCurrentMode, addToast }) {
   const [isBoosterEnabled, setIsBoosterEnabled] = useState(true);
+  const [isApplying, setIsApplying] = useState(false);  // Zero-Risk Shield: Debounce mode switching
   const [activeAppId, setActiveAppId] = useState(null);
   const [runningApps, setRunningApps] = useState([]);
 
@@ -291,12 +292,16 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             <div
               key={mode.id}
               onClick={() => {
+                // Zero-Risk Shield: Debounce — prevent rapid mode switching
+                if (isApplying || currentMode === mode.id) return;
+                setIsApplying(true);
                 setCurrentMode(mode.id);
                 if (addToast) addToast(`[${mode.title.split('(')[0].trim()}] 프로필이 적용되었습니다!`, 'success');
+                setTimeout(() => setIsApplying(false), 2000);
               }}
               className={`relative flex-1 glass-panel text-left p-6 group cursor-pointer transition-all duration-300 ${
                 isActive
-                  ? `border-2 ${mode.borderColor} bg-white dark:bg-slate-900/90 shadow-xl scale-[1.02]` : 'hover:border-black/10 dark:border-slate-700 opacity-85'
+                  ? `border-2 ${mode.borderColor} bg-white dark:bg-slate-900/90 shadow-xl scale-[1.02]` : `hover:border-black/10 dark:border-slate-700 ${isApplying ? 'opacity-50 pointer-events-none' : 'opacity-85'}`
               }`}
             >
               {/* Active Badge indicator top right */}

@@ -19,6 +19,52 @@ from backend import system_repair
 log = logging.getLogger('Optimizer')
 
 # ─────────────────────────────────────────────
+# Zero-Risk Shield: Absolute Protection Constants
+# These constants are shared by ALL scan/clean functions.
+# Any path containing these substrings (case-insensitive) is UNTOUCHABLE.
+# ─────────────────────────────────────────────
+
+PROTECTED_ROOTS = [
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\assembly',
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\servicing',
+    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\installer',
+    os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
+    os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
+    os.environ.get('APPDATA', '').lower(),
+    os.environ.get('LOCALAPPDATA', '').lower() + '\\microsoft',
+    # Game platforms — absolute no-touch
+    'steamlibrary', 'steamapps',
+    'origin games', 'riot games', 'epic games',
+    'battle.net', 'ubisoft game launcher',
+]
+
+# Extensions that must NEVER be deleted under any circumstances
+DANGER_EXTS = frozenset({
+    '.dll', '.exe', '.sys', '.ini', '.ocx', '.drv', '.cpl',
+    '.cat', '.mum', '.manifest', '.msi', '.msp', '.mst',
+    '.inf', '.nls', '.tlb', '.ax', '.acm', '.scr', '.com',
+})
+
+# Extensions that are safe to delete in temp/cache directories
+SAFE_JUNK_EXTS = frozenset({
+    '.tmp', '.log', '.bak', '.old', '.chk', '.pf',
+    '.dmp', '.etl', '.cache',
+})
+
+
+def _is_protected_path(file_path):
+    """Zero-Risk Shield: Returns True if the path is inside any protected zone.
+    
+    This is a module-level guard function used by BOTH scan and clean logic.
+    Case-insensitive substring matching ensures no bypass through casing tricks.
+    """
+    path_lower = file_path.lower()
+    return any(pr in path_lower for pr in PROTECTED_ROOTS)
+
+# ─────────────────────────────────────────────
 # Deep Optimization Engine (Background Thread)
 # ─────────────────────────────────────────────
 
@@ -107,7 +153,11 @@ def cancel_deep_optimization():
 # ─────────────────────────────────────────────
 
 def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
-    """Walk directory and sum file sizes. Sequential, safe."""
+    """Walk directory and sum file sizes. Sequential, safe.
+    
+    Zero-Risk Shield: Protected paths are filtered out during scan
+    so they never even appear in size calculations.
+    """
     total = 0
     file_count = 0
     start_time = time.time()
@@ -116,6 +166,12 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
         return 0
     try:
         for root, dirs, files in os.walk(dir_path):
+            # Zero-Risk Shield: Block traversal into protected directories
+            root_lower = root.lower()
+            if any(pr in root_lower for pr in PROTECTED_ROOTS):
+                dirs.clear()  # Stop os.walk from descending further
+                continue
+            
             for f in files:
                 fp = os.path.join(root, f)
                 try:
@@ -126,7 +182,6 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                         if state_obj and file_count % 50 == 0:
                             elapsed = time.time() - start_time
                             rate = file_count / elapsed if elapsed > 0 else 1
-                            # 임의의 프로그레스 시뮬레이션
                             prog = min(99, int((file_count / max_files) * 100))
                             eta = int((max_files - file_count) / rate) if rate > 0 else 0
                             state_obj["progress"] = prog
@@ -255,41 +310,25 @@ def clean_junk_background(category_ids, cancel_event):
         skipped_files_log = []
 
         def _clean_dir(path, max_files=5000):
+            """Delete junk files from a directory with Zero-Risk Shield protection.
+            
+            Uses module-level PROTECTED_ROOTS, DANGER_EXTS, and SAFE_JUNK_EXTS
+            constants to ensure consistent protection across all code paths.
+            """
             nonlocal total_attempt_count, total_success_count, total_freed_bytes
             local_freed = 0
             file_count = 0
             start_time = time.time()
             if not os.path.exists(path):
                 return 0
-                
-            protected_roots = [
-                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
-                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
-                os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
-                os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
-                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
-                os.environ.get('APPDATA', 'C:\\Users\\Default\\AppData\\Roaming').lower(),
-                "steamlibrary",
-                "steamapps"
-            ]
-            
-            def _is_safe_to_delete(file_path):
-                """Pre-Check: Verify file path is not in any protected directory."""
-                path_lower = file_path.lower()
-                if any(pr in path_lower for pr in protected_roots):
-                    return False
-                return True
-            DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
-            SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk', '.pf'} # .pf for prefetch
             
             for root, dirs, files in os.walk(path, topdown=False):
                 if cancel_event and cancel_event.is_set():
                     break
                     
-                # Security check for directories
+                # Zero-Risk Shield: Block protected directories
                 root_lower = root.lower()
-                is_protected = any(pr in root_lower for pr in protected_roots)
-                if is_protected:
+                if any(pr in root_lower for pr in PROTECTED_ROOTS):
                     continue
                     
                 for name in files:
@@ -297,18 +336,18 @@ def clean_junk_background(category_ids, cancel_event):
                         break
                     file_path = os.path.join(root, name)
                     
-                    # Pre-Check Cross-Validation
-                    if not _is_safe_to_delete(file_path):
+                    # Zero-Risk Shield: Cross-validate full path
+                    if _is_protected_path(file_path):
                         continue
                     
-                    # Strict Whitelist & Blacklist extension check
+                    # Strict extension check using module-level constants
                     ext = os.path.splitext(name)[1].lower()
                     if ext in DANGER_EXTS:
                         continue
                     
                     # Chrome cache files usually have no extension, prefetch has .pf.
                     # We will allow safe extensions and files with no extension.
-                    if ext not in SAFE_EXTS and ext != '':
+                    if ext not in SAFE_JUNK_EXTS and ext != '':
                         continue
                         
                     total_attempt_count += 1
@@ -318,7 +357,6 @@ def clean_junk_background(category_ids, cancel_event):
                             os.remove(file_path)
                         except (OSError, PermissionError):
                             try:
-                                import stat
                                 os.chmod(file_path, stat.S_IWRITE)
                                 os.remove(file_path)
                             except Exception as e:
@@ -354,8 +392,8 @@ def clean_junk_background(category_ids, cancel_event):
                         break
                     dir_path = os.path.join(root, name)
                     
-                    # Pre-Check Cross-Validation for directories
-                    if not _is_safe_to_delete(dir_path):
+                    # Zero-Risk Shield: Protect directories too
+                    if _is_protected_path(dir_path):
                         continue
                         
                     try:
@@ -435,8 +473,9 @@ def clean_junk_background(category_ids, cancel_event):
         if skipped_files_log:
             try:
                 log_path = os.path.join(os.path.expanduser("~"), "Desktop", "APEX_Skipped_Files.log")
-                with open(log_path, "w", encoding="utf-8") as f:
-                    f.write("=== APEX CARE: 사용 중이어서 안전하게 스킵된 파일 목록 ===\n\n")
+                with open(log_path, "a", encoding="utf-8") as f:
+                    from datetime import datetime
+                    f.write(f"\n=== APEX CARE: 스킵 파일 로그 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ===\n")
                     skipped_files_log.sort(key=lambda x: x["size_bytes"], reverse=True)
                     for item in skipped_files_log:
                         mb = round(item["size_bytes"] / (1024 * 1024), 2)

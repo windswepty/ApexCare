@@ -402,16 +402,24 @@ def get_booster_status():
     return _booster_state
 
 def _is_safe_to_tame(proc_name, pid=None):
-    """Pre-Check Safety Routine: Verify process is not in whitelist or foreground."""
+    """Pre-Check Safety Routine: Verify process is not in whitelist, game list, or foreground.
+    
+    Zero-Risk Shield: This function is the SINGLE gate that decides whether a process
+    can have its priority lowered. If it returns False, the process is UNTOUCHABLE.
+    """
     if not proc_name:
         return False
     proc_name = proc_name.lower()
     
-    # 1. Whitelist Check
+    # 1. Whitelist Check — system core & game launchers
     if proc_name in WHITELIST:
         return False
+    
+    # 2. Game Process Check — NEVER tame running games
+    if proc_name in GAMES_LIST:
+        return False
         
-    # 2. Foreground / UI Check (Basic heuristic: if it's a known system app)
+    # 3. Foreground / UI Check (Basic heuristic: if it's a known system app)
     # GetForegroundWindow check could be added here if needed, but whitelist covers most.
     return True
 

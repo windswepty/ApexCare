@@ -72,19 +72,22 @@ export function JunkProvider({ children, addToast }) {
               if (state.status !== 'running' && state.status !== 'idle') {
                 setIsCleaning(false);
                 if (state.status === 'success') {
-                  setFreedMB(state.freed_mb || 0);
-                  setSkippedMB(state.skipped_mb || 0);
+                  // Zero-Risk Shield: Enforce exact 2-decimal precision to prevent
+                  // floating point drift between backend (Python round(x,2)) and frontend
+                  const freedVal = parseFloat(Number(state.freed_mb || 0).toFixed(2));
+                  const skippedVal = parseFloat(Number(state.skipped_mb || 0).toFixed(2));
+                  setFreedMB(freedVal);
+                  setSkippedMB(skippedVal);
                   setCleanDetails(state.details || {});
                   setCleanedSuccess(true);
                   // 리스캔을 방지하고 스킵된 용량을 수학적으로 분배하여 UI에 덮어씌움
-                  const skippedMBValue = state.skipped_mb || 0;
                   setItems(prevItems => {
                     const totalSelected = prevItems.filter(i => i.selected).reduce((acc, i) => acc + i.sizeMB, 0);
                     return prevItems.map(item => {
                       if (item.selected) {
                         const ratio = totalSelected > 0 ? item.sizeMB / totalSelected : 0;
-                        const newSize = skippedMBValue * ratio;
-                        return { ...item, sizeMB: Number(newSize.toFixed(2)) };
+                        const newSize = parseFloat(Number(skippedVal * ratio).toFixed(2));
+                        return { ...item, sizeMB: newSize };
                       }
                       return item;
                     });

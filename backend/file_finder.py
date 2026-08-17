@@ -6,6 +6,9 @@ import logging
 
 log = logging.getLogger('FileFinder')
 
+# Import shared protection constants from optimizer
+from backend.optimizer import PROTECTED_ROOTS, DANGER_EXTS
+
 def get_local_drives():
     import psutil
     drives = []
@@ -20,10 +23,14 @@ def scan_large_files(min_mb=500):
     min_bytes = min_mb * 1024 * 1024
     large_files = []
     
-    # Exclude system folders to prevent breaking things
-    exclude_dirs = ['Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'System Volume Information', '$Recycle.Bin', 'AppData']
+    # Exclude system folders AND game platforms to prevent breaking things
+    exclude_dirs = [
+        'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData',
+        'System Volume Information', '$Recycle.Bin', 'AppData',
+        'SteamLibrary', 'steamapps', 'Origin Games', 'Riot Games',
+        'Epic Games', 'Battle.net', 'Ubisoft Game Launcher',
+    ]
     
-    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
     
     for target_dir in drives:
         if not os.path.exists(target_dir):
@@ -83,12 +90,15 @@ def scan_duplicates():
     """Scan all local drives for duplicate files."""
     drives = get_local_drives()
     
-    # Exclude system folders
-    exclude_dirs = ['Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'System Volume Information', '$Recycle.Bin', 'AppData']
+    # Exclude system folders AND game platforms
+    exclude_dirs = [
+        'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData',
+        'System Volume Information', '$Recycle.Bin', 'AppData',
+        'SteamLibrary', 'steamapps', 'Origin Games', 'Riot Games',
+        'Epic Games', 'Battle.net', 'Ubisoft Game Launcher',
+    ]
     
     # Strict whitelist and blacklist
-    SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk'}
-    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
     
     file_sizes = {}
     
@@ -169,45 +179,33 @@ def scan_duplicates():
     return duplicates
 
 def delete_files(paths):
-    """Delete multiple files safely with strict system folder protection."""
+    """Delete multiple files safely with strict system folder protection.
+    
+    Uses module-level PROTECTED_ROOTS and DANGER_EXTS from optimizer.
+    Allows deletion of user-selected files (large files, duplicates) as long as
+    they are NOT in protected directories and NOT system-critical extensions.
+    """
     deleted_mb = 0
     failed = 0
-    
-    # Critical system paths that should NEVER be touched
-    protected_roots = [
-        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
-        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
-        os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
-        os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
-        os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower()
-    ]
-    
-    DANGER_EXTS = {'.dll', '.exe', '.sys', '.ini', '.ocx'}
-    SAFE_EXTS = {'.tmp', '.log', '.bak', '.old', '.chk'}
     
     for p in paths:
         if not os.path.exists(p) or not os.path.isfile(p):
             failed += 1
             continue
             
-        # Security check: prevent deletion if path is inside protected roots
+        # Zero-Risk Shield: prevent deletion inside protected zones
         p_lower = p.lower()
-        is_protected = any(p_lower.startswith(pr) or (pr in p_lower) for pr in protected_roots)
+        is_protected = any(pr in p_lower for pr in PROTECTED_ROOTS)
         if is_protected:
             failed += 1
             continue
             
-        # Strict Whitelist & Blacklist extension check
+        # Zero-Risk Shield: block system-critical extensions
         ext = os.path.splitext(p)[1].lower()
         if ext in DANGER_EXTS:
             failed += 1
             continue
         
-        # Only allow safe extensions to be deleted by this function
-        if ext not in SAFE_EXTS and ext != '':
-            failed += 1
-            continue
-            
         try:
             size = os.path.getsize(p)
             os.unlink(p)
