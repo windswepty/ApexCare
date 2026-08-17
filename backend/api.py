@@ -78,8 +78,13 @@ class Api:
     def getTrimStatus(self):
         return system_repair.get_trim_status()
 
-    def optimizeNetwork(self):
-        return system_repair.optimize_network()
+    def optimizeNetwork(self, consent=False):
+        # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).
+        # 기본값이 False 라 프론트가 옛 버전이어도 영구 변경이 들어가지 않는다.
+        return system_repair.apply_network_tweaks(consent=consent)
+
+    def restoreNetworkTweaks(self):
+        return system_repair.restore_network_tweaks()
 
     def getNetworkStatus(self):
         return system_repair.get_network_status()

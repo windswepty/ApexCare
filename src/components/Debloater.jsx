@@ -92,8 +92,18 @@ export default function Debloater({ addToast }) {
                     alert("오류 발생: " + st.error);
                     if (addToast) addToast("오류 발생: " + st.error, 'error');
                   } else {
-                    if (addToast) addToast("선택한 항목들의 순정화(제거)가 완료되었습니다!", 'success');
-                    setSelectedIds([]);
+                    // 백엔드가 항목별 성패를 돌려준다. 하나도 못 지웠는데
+                    // '완료'라고 띄우지 않도록 실제 결과를 그대로 보여준다.
+                    const failed = st.failed || [];
+                    const succeeded = st.succeeded || [];
+                    if (failed.length > 0 && succeeded.length > 0) {
+                      if (addToast) addToast(`${succeeded.length}개 제거 완료, ${failed.length}개 실패: ${failed.join(', ')}`, 'error');
+                    } else if (failed.length > 0) {
+                      if (addToast) addToast(`제거하지 못했습니다: ${failed.join(', ')}`, 'error');
+                    } else {
+                      if (addToast) addToast(`${succeeded.length}개 항목의 순정화(제거)가 완료되었습니다!`, 'success');
+                      setSelectedIds([]);
+                    }
                   }
                 }
               }

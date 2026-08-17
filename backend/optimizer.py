@@ -102,7 +102,8 @@ def _run_deep_optimization():
         _optimization_state["current_task"] = "브라우저 캐시, 임시 파일, 업데이트 잔여물 삭제 중..."
         _optimization_state["eta_seconds"] = 10
         clean_junk_background([1, 2, 3, 4], cancel_event=_cancel_event)
-        freed = _junk_clean_state.get("freedMB", 0)
+        # 실제 상태 키는 'freed_mb'. 예전엔 'freedMB' 를 읽어서 항상 0MB 로 보고됐다.
+        freed = _junk_clean_state.get("freed_mb", 0)
         _optimization_state["freed_mb"] += freed
         _optimization_state["progress_pct"] = 40
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
@@ -113,16 +114,29 @@ def _run_deep_optimization():
         _optimization_state["progress_pct"] = 60
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
-        # Step 3: Network Deep Flush
-        _optimization_state["current_task"] = "네트워크 캐시 및 DNS 초기화 중..."
+        # Step 3: DNS 캐시 초기화
+        # 여기서는 캐시만 비운다. Winsock 초기화/TCP 튜닝 같은 영구 변경은
+        # 사용자 동의 없이 원클릭 최적화에 섞어 넣지 않는다.
+        _optimization_state["current_task"] = "DNS 캐시 초기화 중..."
         system_repair.run_network_optimization_sync()
         _optimization_state["progress_pct"] = 80
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
-            
+
         # Step 4: SSD TRIM
+        # run_trim() 은 스레드를 띄우고 바로 반환한다. 기다리지 않으면 defrag 가
+        # 아직 돌고 있는데 화면에는 '완료'가 떠 버린다.
         _optimization_state["current_task"] = "물리 디스크 응답속도 최적화(TRIM) 중..."
-        system_repair.run_trim()
-        
+        trim_res = system_repair.run_trim()
+        if trim_res.get("success"):
+            trim_deadline = time.time() + 300
+            while time.time() < trim_deadline:
+                if system_repair.get_trim_status().get("status") != "running":
+                    break
+                if _cancel_event.is_set():
+                    # TRIM 자체는 중간에 끊지 않는다(디스크 작업). 대기만 그만둔다.
+                    break
+                time.sleep(1)
+
         _optimization_state["progress_pct"] = 100
         _optimization_state["eta_seconds"] = 0
         _optimization_state["current_task"] = "완료! 시스템이 완벽하게 최적화되었습니다."
@@ -504,7 +518,7 @@ def clean_junk(category_ids, cancel_event=None):
     with _clean_lock:
         if not category_ids:
             _junk_clean_state["status"] = "success"
-            _junk_clean_state["freedMB"] = 0
+            _junk_clean_state["freed_mb"] = 0.0
             return {"success": True}
         if _junk_clean_state["status"] == "running":
             return {"success": False, "message": "이미 정리 중입니다."}
