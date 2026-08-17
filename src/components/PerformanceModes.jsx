@@ -46,12 +46,18 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   const handleSetPriority = async (pid, priority) => {
     setActiveAppId(pid);
     if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setProcessPriority === 'function') {
+      let res = null;
       try {
-        await window.pywebview.api.setProcessPriority(pid, priority);
-        if (addToast) addToast('우선순위가 성공적으로 변경되었습니다.', 'success');
+        res = await window.pywebview.api.setProcessPriority(pid, priority);
       } catch (e) {
-        alert('우선순위 변경 권한이 없습니다.');
-        if (addToast) addToast('우선순위 변경에 실패했습니다.', 'error');
+        res = null;
+      }
+
+      if (res && res.success) {
+        if (addToast) addToast('우선순위가 성공적으로 변경되었습니다.', 'success');
+      } else {
+        // 시스템 보호 프로세스 차단 사유를 백엔드 한국어 메시지 그대로 보여준다
+        if (addToast) addToast(res?.message || '우선순위 변경에 실패했습니다.', 'error');
       }
     }
   };

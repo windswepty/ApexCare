@@ -524,7 +524,10 @@ def _enter_boost_mode():
     # Switch to gaming power plan + detailed tuning
     try:
         from backend import optimizer
-        optimizer.set_optimization_mode('gaming')
+        # user_set=False: 게임 자동감지는 사용자의 명시적 선택이 아니므로
+        # config 에 '사용자가 고른 모드'로 굳히지 않는다.
+        # (굳히면 다음 실행부터 앱 시작만으로 gaming 튜닝이 재적용된다)
+        optimizer.set_optimization_mode('gaming', user_set=False)
         log.info("✓ Power plan switched to Gaming (High Performance)")
     except Exception as e:
         log.warning(f"⚠ Power plan switch error: {e}")
@@ -538,7 +541,8 @@ def _exit_boost_mode():
     # Restore standard mode
     try:
         from backend import optimizer
-        optimizer.set_optimization_mode('standard')
+        # 자동 복귀 역시 사용자의 명시적 선택이 아니다
+        optimizer.set_optimization_mode('standard', user_set=False)
         log.info("✓ Power plan restored to Standard (Balanced)")
     except Exception as e:
         log.warning(f"⚠ Power plan restore error: {e}")

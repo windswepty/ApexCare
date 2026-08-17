@@ -12,6 +12,7 @@ import threading
 import subprocess
 import logging
 import gc
+from backend import process_guard
 log = logging.getLogger('SystemMonitor')
 
 # Cache CPU model info once at import time (WMI is heavy, only call once)
@@ -150,13 +151,24 @@ def get_system_stats():
 
 
 def get_processes():
-    """Get top 8 processes by memory. Pure psutil, no external calls."""
+    """Get top 8 processes by memory. Pure psutil, no external calls.
+
+    시스템 필수 프로세스와 APEX CARE 자기 가족 PID 는 목록 단계에서 제외한다.
+    RamBooster.jsx 가 모든 행에 '프로세스 종료' 버튼을 조건 없이 그리기 때문에,
+    누를 수 없는 버튼을 보여주는 것보다 애초에 노출하지 않는 편이 낫다.
+    (차단 자체는 kill_process / set_process_priority 의 process_guard 관문이 담당한다)
+    """
     try:
         procs = []
+        own_family = process_guard.get_own_pid_family()
         for p in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent']):
             try:
                 mem_info = p.info.get('memory_info')
                 if mem_info is None:
+                    continue
+                if p.info['pid'] in own_family:
+                    continue
+                if process_guard.is_protected_name(p.info.get('name')):
                     continue
                 mem_mb = mem_info.rss / (1024 * 1024)
                 if mem_mb > 10:  # Only show processes using > 10MB
@@ -182,64 +194,98 @@ def get_processes():
         return []
 
 def kill_process(pid):
-    """Terminate a process by PID securely with Win32 API / taskkill fallback."""
+    """Terminate a process by PID securely with Win32 API / taskkill fallback.
+
+    Zero-Risk Shield: process_guard.check_controllable() 이 단일 관문이다.
+    여기서 막히면 시스템 필수 프로세스는 어떤 폴백 경로로도 종료되지 않는다.
+    """
+    ok, safe_pid, proc_name, error = process_guard.check_controllable(pid, action="kill")
+    if not ok:
+        log.warning(f"kill_process blocked: pid={pid} name={proc_name} reason={error}")
+        return {"success": False, "message": error, "error": error}
+
+    done_msg = f"'{proc_name}' 프로세스를 종료했습니다."
     try:
-        if pid == os.getpid():
-            return {"success": False, "error": "APEX CARE 자체를 종료할 수 없습니다."}
-        
         # Try psutil first
         try:
-            p = psutil.Process(pid)
+            p = psutil.Process(safe_pid)
             p.kill()
-            return {"success": True}
+            return {"success": True, "message": done_msg}
         except (psutil.AccessDenied, Exception):
             # Fallback 1: Win32 TerminateProcess via ctypes
             try:
                 PROCESS_TERMINATE = 0x0001
-                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, safe_pid)
                 if handle:
                     ctypes.windll.kernel32.TerminateProcess(handle, 1)
                     ctypes.windll.kernel32.CloseHandle(handle)
-                    return {"success": True}
+                    return {"success": True, "message": done_msg}
             except Exception as e:
                 log.debug(f"Win32 terminate fallback failed: {e}")
-            
-            # Fallback 2: taskkill /F /PID
+
+            # Fallback 2: taskkill /F /PID  (safe_pid 는 process_guard 가 검증한 양의 정수)
             try:
-                res = subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                res = subprocess.run(f"taskkill /F /PID {safe_pid}", shell=True, capture_output=True, text=True, creationflags=0x08000000, timeout=10)
                 if res.returncode == 0:
-                    return {"success": True}
-                return {"success": False, "error": res.stderr.strip() or "프로세스를 종료할 권한이 없습니다."}
+                    return {"success": True, "message": done_msg}
+                fail_msg = "프로세스를 종료할 권한이 없습니다."
+                return {"success": False, "message": fail_msg, "error": res.stderr.strip() or fail_msg}
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                return {"success": False, "message": "프로세스 종료에 실패했습니다.", "error": str(e)}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "message": "프로세스 종료에 실패했습니다.", "error": str(e)}
 
 def set_process_priority(pid, priority):
-    """Change process priority (Windows specific classes) with Win32 fallback."""
+    """Change process priority (Windows specific classes) with Win32 fallback.
+
+    Zero-Risk Shield:
+    - process_guard 가 시스템 필수 프로세스 / APEX CARE 자신을 차단한다.
+    - 'realtime' 은 프론트 노출 API 에서 지원하지 않는다 (입력 스택까지 멈출 수 있음).
+    - 알 수 없는 값을 조용히 NORMAL 로 낮추지 않고 명시적으로 거절한다.
+    """
+    bad_value_msg = "지원하지 않는 우선순위 값입니다. (낮음/보통/높음 중에서 선택해 주세요)"
+    if not isinstance(priority, str):
+        return {"success": False, "message": bad_value_msg, "error": bad_value_msg}
+
+    key = priority.strip().lower()
+    if key == 'realtime':
+        msg = ("'실시간(Realtime)' 우선순위는 마우스·키보드 입력까지 멈추게 만들 수 있어 "
+               "APEX CARE에서는 지원하지 않습니다. '높음(High)'을 사용해 주세요.")
+        log.warning(f"set_process_priority blocked: realtime is not exposed (pid={pid})")
+        return {"success": False, "message": msg, "error": msg}
+
+    if key not in process_guard.ALLOWED_PRIORITIES:
+        return {"success": False, "message": bad_value_msg, "error": bad_value_msg}
+
+    ok, safe_pid, proc_name, error = process_guard.check_controllable(pid, action="priority")
+    if not ok:
+        log.warning(f"set_process_priority blocked: pid={pid} name={proc_name} reason={error}")
+        return {"success": False, "message": error, "error": error}
+
+    done_msg = f"'{proc_name}' 프로세스의 우선순위를 변경했습니다."
     try:
         pri_map = {
             'high': (psutil.HIGH_PRIORITY_CLASS, 0x0080),
             'low': (psutil.IDLE_PRIORITY_CLASS, 0x0040),
-            'realtime': (psutil.REALTIME_PRIORITY_CLASS, 0x0100),
             'normal': (psutil.NORMAL_PRIORITY_CLASS, 0x0020)
         }
-        target_psutil, target_win32 = pri_map.get(priority.lower(), (psutil.NORMAL_PRIORITY_CLASS, 0x0020))
-        
+        target_psutil, target_win32 = pri_map[key]
+
         try:
-            p = psutil.Process(pid)
+            p = psutil.Process(safe_pid)
             p.nice(target_psutil)
-            return {"success": True}
+            return {"success": True, "message": done_msg}
         except psutil.AccessDenied:
             # Fallback: Win32 SetPriorityClass
             PROCESS_SET_INFORMATION = 0x0200
-            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, safe_pid)
             if handle:
                 res = ctypes.windll.kernel32.SetPriorityClass(handle, target_win32)
                 ctypes.windll.kernel32.CloseHandle(handle)
                 if res:
-                    return {"success": True}
-            return {"success": False, "error": "우선순위 변경 권한이 거부되었습니다."}
+                    return {"success": True, "message": done_msg}
+            msg = "우선순위 변경 권한이 거부되었습니다."
+            return {"success": False, "message": msg, "error": msg}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "message": "우선순위 변경에 실패했습니다.", "error": str(e)}
 

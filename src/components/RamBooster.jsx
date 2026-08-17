@@ -97,15 +97,18 @@ export default function RamBooster({ addToast }) {
     setProcesses(prev => prev.filter(p => (p.id || p.pid) !== id && p.pid !== pid));
 
     if (window.pywebview?.api && window.pywebview?.api.killProcess && pid) {
+      let res = null;
       try {
-        const res = await window.pywebview?.api.killProcess(pid);
-        if (!res?.success) {
-          throw new Error('Failed to kill');
-        }
-        if (addToast) addToast('프로세스가 성공적으로 종료되었습니다.', 'success');
+        res = await window.pywebview?.api.killProcess(pid);
       } catch (e) {
-        alert("프로세스 종료에 실패했습니다. (액세스 거부됨)");
-        if (addToast) addToast('프로세스 종료에 실패했습니다.', 'error');
+        res = null;
+      }
+
+      if (res?.success) {
+        if (addToast) addToast('프로세스가 성공적으로 종료되었습니다.', 'success');
+      } else {
+        // 시스템 보호 프로세스 차단 사유를 백엔드 한국어 메시지 그대로 보여준다
+        if (addToast) addToast(res?.message || '프로세스 종료에 실패했습니다.', 'error');
         if (processToRemove) {
           setProcesses(prev => [...prev, processToRemove]);
         }

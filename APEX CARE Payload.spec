@@ -10,6 +10,7 @@ a = Analysis(
         'backend.uninstaller', 'backend.optimizer', 'backend.system_repair', 
         'backend.system_monitor', 'backend.file_finder', 'backend.debloater', 
         'backend.game_booster', 'backend.config_manager', 'backend.api',
+        'backend.process_guard',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
         'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time',
         'win32pdh', 'pythoncom', 'win32com'

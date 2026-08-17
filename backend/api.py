@@ -115,8 +115,13 @@ class Api:
     def setOptimizationMode(self, mode):
         return optimizer.set_optimization_mode(mode)
         
-    def applyHardwareTuning(self, cpu_cores, ram_gb):
-        return optimizer.apply_hardware_tailored_tuning(cpu_cores, ram_gb)
+    def applyHardwareTuning(self, cpu_cores, ram_gb, consent=False):
+        # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).
+        # 기본값이 False 라 프론트가 옛 버전이어도 영구 변경이 들어가지 않는다.
+        return optimizer.apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=consent)
+
+    def restoreTailoredServiceConfig(self):
+        return optimizer.restore_tailored_service_config()
 
     # --- Uninstaller Features ---
     def getUninstallerApps(self):

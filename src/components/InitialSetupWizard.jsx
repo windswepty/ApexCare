@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders, MemoryStick } from 'lucide-react';
 
 export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
-  const [step, setStep] = useState('scanning'); // 'scanning' | 'result' | 'applying'
+  const [step, setStep] = useState('scanning'); // 'scanning' | 'result' | 'consent' | 'applying'
   const [scanProgress, setScanProgress] = useState(0);
   const [tuningTier, setTuningTier] = useState('HighEnd');
+  const [pendingChanges, setPendingChanges] = useState([]);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   useEffect(() => {
     // Determine tuning tier for UI text
@@ -33,13 +35,29 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
     return () => clearInterval(interval);
   }, [stats]);
 
+  // 1단계: 무엇이 영구 변경되는지 백엔드에서 받아와 보여준다 (시스템은 건드리지 않음)
+  const handlePreview = async () => {
+    if (window.pywebview?.api?.applyHardwareTuning) {
+      try {
+        const res = await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, false);
+        setPendingChanges((res && res.changes) || []);
+      } catch (e) {
+        console.error("Failed to preview hardware tuning:", e);
+        setPendingChanges([]);
+      }
+    }
+    setConsentChecked(false);
+    setStep('consent');
+  };
+
+  // 2단계: 사용자가 항목을 확인하고 동의한 경우에만 실제 적용
   const handleApply = async () => {
     setStep('applying');
-    
+
     // Call the actual backend tailored tuning API
     if (window.pywebview?.api?.applyHardwareTuning) {
       try {
-        await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB);
+        await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, true);
       } catch (e) {
         console.error("Failed to apply hardware tuning:", e);
       } finally {
@@ -102,6 +120,61 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
               ></div>
             </div>
             <div className="mt-3 font-mono text-xs text-cyan-400 font-bold">{scanProgress}%</div>
+          </div>
+        ) : step === 'consent' ? (
+          <div className="flex flex-col animate-fade-in-up">
+            <div className={`p-8 pb-6 border-b ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+              <h2 className="text-2xl font-black tracking-tight mb-2">적용 전 확인: 아래 항목이 영구적으로 변경됩니다</h2>
+              <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                아래 변경 사항은 재부팅 후에도 그대로 유지됩니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다.
+              </p>
+            </div>
+
+            <div className="p-8 space-y-3">
+              {pendingChanges.length === 0 ? (
+                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  변경 항목을 불러오지 못했습니다. '건너뛰기'를 눌러 아무것도 적용하지 않고 진행할 수 있습니다.
+                </div>
+              ) : pendingChanges.map((change, idx) => (
+                <div key={idx} className={`flex items-start gap-3 p-4 rounded-xl border ${isDarkMode ? 'bg-black/40 border-white/10' : 'bg-gray-50 border-black/10'}`}>
+                  <Sliders className="w-4 h-4 mt-0.5 text-amber-400 flex-shrink-0" />
+                  <span className="text-xs leading-relaxed">{change}</span>
+                </div>
+              ))}
+
+              <label className="flex items-center gap-3 pt-4 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  className="w-4 h-4 accent-cyan-400"
+                />
+                <span className="text-xs font-semibold">위 변경 사항을 이해했으며 적용에 동의합니다.</span>
+              </label>
+            </div>
+
+            <div className={`p-6 border-t flex justify-end gap-3 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+              <button
+                onClick={() => onComplete('standard')}
+                className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-600'}`}
+              >
+                건너뛰기 (적용 안함)
+              </button>
+              <button
+                onClick={handleApply}
+                disabled={!consentChecked || pendingChanges.length === 0}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg active:scale-95 ${
+                  (!consentChecked || pendingChanges.length === 0)
+                    ? 'bg-gray-400 text-white cursor-not-allowed opacity-50'
+                    : isDarkMode
+                      ? 'bg-white text-black hover:bg-gray-200 shadow-white/10'
+                      : 'bg-black text-white hover:bg-gray-800 shadow-black/10'
+                }`}
+              >
+                동의하고 적용
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         ) : step === 'applying' ? (
           <div className="flex flex-col items-center justify-center py-32 px-10">
@@ -220,14 +293,14 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
               </button>
               
               <button 
-                onClick={handleApply}
+                onClick={handlePreview}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg active:scale-95 ${
-                  isDarkMode 
-                    ? 'bg-white text-black hover:bg-gray-200 shadow-white/10' 
+                  isDarkMode
+                    ? 'bg-white text-black hover:bg-gray-200 shadow-white/10'
                     : 'bg-black text-white hover:bg-gray-800 shadow-black/10'
                 }`}
               >
-                내 PC 맞춤형 최적화 즉시 적용
+                변경 내용 확인하기
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>

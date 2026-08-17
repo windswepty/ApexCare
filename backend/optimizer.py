@@ -808,11 +808,14 @@ def _tune_power_params(mode):
         _powercfg("/setactive", "scheme_current")
 
 
-def set_optimization_mode(mode):
+def set_optimization_mode(mode, user_set=True):
     """Switch optimization mode with real OS-level tuning for measurable performance impact.
-    
+
     Goes beyond just switching power plans: applies CPU scheduling, core parking,
     MMCSS, USB latency, and GPU scheduling parameters.
+
+    user_set=False 는 게임 자동감지/시작 시 재적용 등 내부 호출용이다.
+    자동 부스트를 '사용자가 직접 선택한 모드'로 기록하지 않는다.
     """
     try:
         is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
@@ -820,18 +823,19 @@ def set_optimization_mode(mode):
             return {"success": False, "error": "UAC_REQUIRED"}
     except Exception:
         return {"success": False, "error": "UAC_REQUIRED"}
-        
+
     try:
         try:
             from backend import config_manager
-            config_manager.set_optimization_mode(mode)
+            config_manager.set_optimization_mode(mode, user_set=user_set)
         except Exception:
             pass
 
-        # [공통 최적화] 모든 모드에 적용 (온도 감소 및 기본 성능 확보)
+        # [공통 최적화] 모든 모드에 적용
+        # 주의: Windows 서비스(wuauserv / DiagTrack)는 이 함수에서 절대 건드리지 않는다.
+        # 텔레메트리 차단은 디블로터의 명시적 선택 항목(telemetry)에서만 수행한다.
         purge_res = purge_ram()
         freed_mb = purge_res.get("freed_mb", 0)
-        _stop_service("DiagTrack") # 윈도우 원격 분석(텔레메트리) 중지하여 백그라운드 CPU 사용량/온도 감소
 
         from backend import game_booster
 
@@ -855,8 +859,10 @@ def set_optimization_mode(mode):
                 plan_ko = "고성능"
                 
             _set_power_plan(target_guid)
-            _stop_service("wuauserv") # 게임 중 윈도우 업데이트 중지
-            
+            # [보안] Windows Update(wuauserv) 중지 로직 제거됨.
+            # 보안 패치 경로를 임의로 끊는 동작은 상용 제품에서 허용되지 않으며,
+            # 실제 프레임 향상도 측정되지 않는다. 옵션으로도 부활시키지 말 것.
+
             # Boost foreground app immediately
             game_booster.boost_foreground_app()
             
@@ -866,12 +872,10 @@ def set_optimization_mode(mode):
             priority_ko = "IDLE (Backgrounds)"
             target_guid = POWER_PLAN_POWER_SAVER
             _set_power_plan(target_guid)
-            _stop_service("wuauserv") # 에코 모드 시 윈도우 업데이트 중지 (배터리/온도 절약)
         else:  # standard
             target_guid = POWER_PLAN_BALANCED
             _set_power_plan(target_guid)
-            _start_service("wuauserv") # 표준 모드에서는 업데이트 허용
-            
+
             # Rollback foreground app boost
             game_booster.restore_foreground_app()
 
@@ -913,25 +917,155 @@ def set_optimization_mode(mode):
         return {"success": False, "error": str(e)}
 
 def init_optimization_mode():
-    """Enforce user's saved optimization mode on app launch."""
+    """Re-apply the saved optimization mode on app launch.
+
+    ONLY runs when the user explicitly picked a mode in the UI before.
+    앱을 실행한 것만으로 OS 설정이 바뀌면 안 된다.
+    """
     try:
         from backend import config_manager
+        if not config_manager.get_optimization_mode_user_set():
+            log.info("[Optimizer] 사용자가 선택한 모드가 없어 시작 시 자동 튜닝을 건너뜁니다.")
+            return {"success": True, "applied": False, "message": "사용자가 선택한 최적화 모드가 없어 자동 적용하지 않았습니다."}
         saved_mode = config_manager.get_optimization_mode()
         if saved_mode:
-            set_optimization_mode(saved_mode)
+            set_optimization_mode(saved_mode, user_set=False)
+            return {"success": True, "applied": True, "message": f"저장된 최적화 모드({saved_mode})를 적용했습니다."}
     except Exception as e:
         log.warning(f"Failed to init optimization mode: {e}")
+    return {"success": False, "applied": False, "message": "최적화 모드 초기화에 실패했습니다."}
 
 
-def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
+def _get_service_start_type(service_name):
+    """Read a service start type from the registry. 2=Auto, 3=Manual, 4=Disabled."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Services\%s" % service_name,
+            0, winreg.KEY_READ
+        )
+        value, _ = winreg.QueryValueEx(key, "Start")
+        winreg.CloseKey(key)
+        return int(value)
+    except Exception as e:
+        log.debug(f"Failed to read start type for {service_name}: {e}")
+        return None
+
+
+def _get_service_delayed_auto(service_name):
+    """True if the service is 'Automatic (Delayed Start)'."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Services\%s" % service_name,
+            0, winreg.KEY_READ
+        )
+        value, _ = winreg.QueryValueEx(key, "DelayedAutostart")
+        winreg.CloseKey(key)
+        return int(value) == 1
+    except Exception:
+        return False
+
+
+def restore_tailored_service_config():
+    """Undo the permanent 'sc config' changes made by apply_hardware_tailored_tuning."""
+    # (start type, delayed auto) — Windows 기본값. 백업이 없는 구버전 사용자용 폴백.
+    WINDOWS_DEFAULT_START = {"SysMain": (2, False), "WSearch": (2, True)}
+    START_TYPE_ARG = {2: "auto", 3: "demand", 4: "disabled"}
+    CREATE_NO_WINDOW = 0x08000000
+    try:
+        from backend import config_manager
+        cfg = config_manager.load_config()
+        backup = cfg.get("service_start_backup") or {}
+        used_default = not backup
+
+        restored = []
+        for svc, (def_start, def_delayed) in WINDOWS_DEFAULT_START.items():
+            saved = backup.get(svc) if isinstance(backup.get(svc), dict) else None
+            start_type = (saved or {}).get("start") or def_start
+            delayed = (saved or {}).get("delayed", def_delayed)
+            arg = START_TYPE_ARG.get(int(start_type), "auto")
+            if arg == "auto" and delayed:
+                arg = "delayed-auto"
+            try:
+                subprocess.run(f'sc config {svc} start= {arg}', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+                if arg != "disabled":
+                    _start_service(svc)
+                restored.append(svc)
+            except Exception as e:
+                log.warning(f"Failed to restore service {svc}: {e}")
+
+        cfg.pop("service_start_backup", None)
+        config_manager.save_config(cfg)
+
+        base_msg = f"서비스 설정을 복구했습니다: {', '.join(restored) if restored else '없음'}"
+        if used_default:
+            base_msg += " (백업 정보가 없어 Windows 기본값으로 복구했습니다.)"
+        return {"success": True, "restored": restored, "message": base_msg}
+    except Exception as e:
+        return {"success": False, "message": "서비스 설정 복구에 실패했습니다.", "error": str(e)}
+
+
+def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
     """
     Applies permanent hardware-tailored OS level tuning based on specs.
     Low-end gets aggressive background service suppression.
     High-end gets caching optimization and full performance unlock.
+
+    consent=False 는 '미리보기' 모드다. 실제로 아무것도 바꾸지 않고
+    무엇이 영구적으로 바뀌는지 항목만 돌려준다. 프론트에서 사용자가
+    항목을 확인하고 동의한 뒤 consent=True 로 다시 호출해야 적용된다.
     """
     try:
+        try:
+            cpu_cores = int(cpu_cores)
+            ram_gb = float(ram_gb)
+        except (TypeError, ValueError):
+            return {"success": False, "applied": False, "message": "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다."}
+
         CREATE_NO_WINDOW = 0x08000000
-        if cpu_cores <= 4 or ram_gb < 8:
+        is_low_end = (cpu_cores <= 4 or ram_gb < 8)
+
+        # 사용자에게 그대로 보여줄 '영구 변경' 항목 목록
+        if is_low_end:
+            permanent_changes = [
+                "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 변경합니다 — 재부팅 후에도 유지됩니다.",
+                "Windows Search(WSearch) 서비스를 '사용 안 함'으로 변경합니다 — 시작 메뉴 검색, 파일 탐색기 검색, Outlook 검색 색인이 중지됩니다.",
+                "전원 관리 프로필을 '균형 조정'으로 변경합니다."
+            ]
+        else:
+            permanent_changes = [
+                "SysMain(수퍼패치) 서비스를 '자동 시작'으로 변경합니다.",
+                "Windows Search(WSearch) 서비스를 '자동 시작'으로 변경합니다.",
+                "전원 관리 프로필을 '고성능'으로 변경합니다."
+            ]
+
+        if not consent:
+            # 미리보기: 시스템을 전혀 건드리지 않고 변경 예정 항목만 돌려준다
+            return {
+                "success": True,
+                "applied": False,
+                "tier": "LowEnd" if is_low_end else "HighEnd",
+                "changes": permanent_changes,
+                "message": "아래 항목이 영구적으로 변경됩니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
+            }
+
+        # 되돌리기용으로 원래 시작 유형을 먼저 저장한다 (2=자동, 3=수동, 4=사용 안 함)
+        try:
+            from backend import config_manager
+            cfg = config_manager.load_config()
+            if "service_start_backup" not in cfg:
+                cfg["service_start_backup"] = {
+                    "SysMain": {"start": _get_service_start_type("SysMain"), "delayed": _get_service_delayed_auto("SysMain")},
+                    "WSearch": {"start": _get_service_start_type("WSearch"), "delayed": _get_service_delayed_auto("WSearch")}
+                }
+                config_manager.save_config(cfg)
+        except Exception as e:
+            log.warning(f"Failed to backup service start types: {e}")
+
+        if is_low_end:
             # 저사양: 백그라운드 강제 억제 및 가용 리소스 확보 (영구적)
             try:
                 subprocess.run('sc config SysMain start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
@@ -953,13 +1087,14 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
             try:
                 subprocess.run('sc config SysMain start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
                 subprocess.run('sc config WSearch start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-                subprocess.run('sc config DiagTrack start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
+                # [제거됨] DiagTrack 영구 비활성화.
+                # 마법사의 고사양 설명 문구에 텔레메트리 언급이 전혀 없어 미고지 영구 변경이었다.
+                # 텔레메트리 차단은 디블로터의 명시적 선택 항목(telemetry)에서만 수행한다.
             except Exception as e:
                 log.warning(f"Failed to config services: {e}")
                 
             _start_service("SysMain") # 즉시 시작
             _start_service("WSearch")
-            _stop_service("DiagTrack")
             
             # 고성능 프로필 베이스
             _set_power_plan(POWER_PLAN_HIGH_PERF)
@@ -969,11 +1104,13 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb):
             
         return {
             "success": True,
+            "applied": True,
             "tier": tier,
+            "changes": permanent_changes,
             "message": msg
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "applied": False, "message": "맞춤 튜닝 적용에 실패했습니다.", "error": str(e)}
 
 # ─────────────────────────────────────────────
 # Service Control (pure Win32 API, ZERO net stop/start)

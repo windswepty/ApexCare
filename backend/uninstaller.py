@@ -2,6 +2,9 @@ import os
 import winreg
 import subprocess
 import shutil
+import logging
+
+log = logging.getLogger('Uninstaller')
 
 def get_installed_apps():
     """Retrieve installed applications from the Windows Registry."""
