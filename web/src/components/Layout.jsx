@@ -9,6 +9,7 @@ const NAV = [
   { to: '/mouse-polling-rate', label: '마우스 폴링레이트' },
   { to: '/monitor-test', label: '모니터 테스트' },
   { to: '/keyboard-test', label: '키보드 테스트' },
+  { to: '/gamepad-test', label: '게임패드' },
   { to: '/system-check', label: '내 PC 진단' }
 ]
 

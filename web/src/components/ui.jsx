@@ -112,6 +112,7 @@ export function RelatedTools({ current }) {
     { to: '/mouse-polling-rate', label: '마우스 폴링레이트 측정' },
     { to: '/monitor-test', label: '모니터 불량화소·잔상 테스트' },
     { to: '/keyboard-test', label: '키보드 동시입력 테스트' },
+    { to: '/gamepad-test', label: '게임패드 드리프트 테스트' },
     { to: '/system-check', label: '내 PC 사양·성능 진단' }
   ].filter((t) => t.to !== current)
 

@@ -39,6 +39,14 @@ export const ROUTES = [
     priority: '0.9'
   },
   {
+    path: '/gamepad-test',
+    title: `게임패드 스틱 드리프트 테스트 — ${SITE.name}`,
+    description:
+      '컨트롤러 스틱 드리프트를 브라우저에서 바로 측정합니다. 엑스박스·듀얼센스·조이콘 등 대부분의 패드를 지원하며 버튼·트리거·진동까지 확인합니다. 중고 검수에 쓰세요.',
+    changefreq: 'monthly',
+    priority: '0.9'
+  },
+  {
     path: '/system-check',
     title: `내 PC 사양·성능 진단 — ${SITE.name}`,
     description:

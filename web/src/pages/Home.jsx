@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { MousePointer2, Monitor, Keyboard, Gauge, ShieldCheck } from 'lucide-react'
+import { MousePointer2, Monitor, Keyboard, Gamepad2, Gauge, ShieldCheck } from 'lucide-react'
 import { KofiSupport, useMeta } from '../components/ui.jsx'
 import { SITE } from '../config.js'
 
@@ -24,6 +24,13 @@ const TOOLS = [
     title: '키보드 동시입력 테스트',
     desc: '모든 키가 인식되는지 확인하고, 동시에 몇 개까지 눌리는지(N키 롤오버) 측정합니다.',
     tag: '눌림 불량 확인'
+  },
+  {
+    to: '/gamepad-test',
+    icon: Gamepad2,
+    title: '게임패드 스틱 드리프트 테스트',
+    desc: '스틱을 놓았는데 캐릭터가 혼자 움직이나요? 드리프트를 수치로 재고 버튼·트리거·진동까지 확인합니다.',
+    tag: '중고 검수용'
   },
   {
     to: '/system-check',

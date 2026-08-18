@@ -20,45 +20,56 @@ npm run preview --prefix web   # 빌드 결과물을 실제로 서빙해 확인
    후원 버튼이 아예 렌더링되지 않는다(빈 링크 노출 방지). `ko-fi.com/<사용자명>` 의
    `<사용자명>` 부분을 넣으면 결과 화면 하단에 후원 카드가 나타난다.
 2. **도메인 확정** — `src/config.js` 의 `SITE.url` 을 실제 주소로 바꾼다.
-   공유 스코어카드 이미지 하단에 이 주소가 찍힌다.
+   canonical·OG·sitemap·공유 이미지에 모두 들어간다.
 
-## 배포
+### 후원 배치 원칙
 
-Cloudflare Pages 기준:
+먼저 주고, 결과가 나온 뒤에 조용히 묻는다.
 
-- 빌드 명령: `npm run build`
-- 빌드 출력 디렉터리: `dist`
-- 루트 디렉터리: `web`
+- 랜딩과 측정 중에는 후원을 언급하지 않는다. 도구를 써보기도 전에 돈 얘기를 하면 이탈한다.
+- Ko-fi 팝업 위젯을 쓰지 않는다. 이탈률만 올린다.
+- "광고 없음 / 로그인 없음 / 측정값 서버 전송 없음" 이 후원의 명분이므로, 이걸 어기는
+  변경(애널리틱스 추가 등)은 후원 전환율을 직접 깎는다는 걸 알고 결정해야 한다.
 
-`public/_redirects` 가 모든 경로를 `index.html` 로 넘긴다. 이게 없으면
-`/mouse-polling-rate` 같은 주소로 직접 들어왔을 때 404 가 난다.
+## 배포 (Cloudflare Pages)
 
-## 프리렌더 — 이게 왜 있는가
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → Workers & Pages → Create → Pages →
+   Connect to Git → `windswepty/ApexCare` 선택
+2. 빌드 설정
 
-SPA 는 모든 주소에 같은 빈 `index.html` 을 준다. 그대로 두면
+   | 항목 | 값 |
+   |---|---|
+   | 프레임워크 프리셋 | None |
+   | 빌드 명령 | `npm install && npm run build` |
+   | 빌드 출력 디렉터리 | `dist` |
+   | 루트 디렉터리 | `web` |
 
-1. 카카오톡·디스코드·커뮤니티에 어느 페이지를 공유하든 미리보기가 홈 문구로 뜬다.
-2. JS 실행이 약한 크롤러(특히 네이버)에는 본문이 아예 보이지 않는다.
+3. Save and Deploy
 
-공유와 검색이 이 사이트의 주 유입 경로라 둘 다 치명적이다. 그래서 빌드 시
-`scripts/prerender.mjs` 가 라우트마다 실제 HTML 을 뽑는다.
+무료 플랜으로 충분하다. 대역폭 무제한, 월 500회 빌드. **서버비 0원이라 후원이 곧 순이익이다.**
 
-- 라우트별 `<title>`, `description`, `canonical`, OG, Twitter 카드
-- JSON-LD 구조화 데이터
-- 본문이 들어간 실제 마크업 (JS 없이도 읽힌다)
-- `sitemap.xml`, `robots.txt` 자동 생성
+`main` 에 푸시하면 자동으로 다시 배포된다.
 
-라우트를 추가할 때는 **`src/routes.js` 에만** 메타를 적는다. 클라이언트의 `useMeta` 와
-프리렌더가 같은 출처를 쓰므로 두 곳에 따로 적으면 반드시 어긋난다.
+### 도메인을 붙일 때
 
-각 라우트는 `<경로>.html` 과 `<경로>/index.html` 두 형태로 저장된다. 정적 호스트마다
-슬래시 없는 주소를 푸는 방식이 달라서, 하나만 만들면 호스트에 따라 SPA 폴백(=홈 HTML)이
-나가면서 라우트별 메타가 무의미해진다.
+`src/config.js` 의 `SITE.url` 을 실제 주소로 바꿔야 한다. 이 값이 canonical·OG·sitemap 에
+모두 들어가므로, 안 바꾸면 검색엔진이 엉뚱한 주소를 정본으로 인식한다.
+바꾼 뒤 다시 빌드·배포한다.
+
+### 리다이렉트 설정이 없는 이유
+
+`_redirects` 로 모든 미매칭 경로를 `index.html` 200 으로 넘기는 흔한 SPA 설정을
+일부러 쓰지 않는다. 그건 검색엔진에 "이 주소는 정상 페이지"라고 거짓말하는 것(soft 404)이라
+오타 주소가 홈 내용으로 색인될 수 있다. 실제 라우트는 전부 프리렌더되므로 매칭되지 않는
+주소는 진짜 404 가 맞고, 그 용도로 `404.html` 을 생성한다. Cloudflare Pages 와 Netlify 는
+이 파일을 미매칭 경로에 404 상태로 서빙한다.
 
 ## 구조
 
 ```
 src/routes.js  라우트 메타데이터 단일 출처 (클라이언트 + 프리렌더 공용)
+               도구를 추가하면 여기 + App.jsx + Layout.jsx(내비) + ui.jsx(관련도구)
+               + Home.jsx(카드) 다섯 곳을 함께 고친다
 src/entry-server.jsx  프리렌더 전용 진입점
 scripts/prerender.mjs 빌드 후 정적 HTML·sitemap 생성
 src/lib/       측정 로직 (UI 와 분리되어 있어 Node 에서 단독 검증 가능)
@@ -67,6 +78,7 @@ src/lib/       측정 로직 (UI 와 분리되어 있어 Node 에서 단독 검�
   bench.js         단일/멀티코어(워커) + WebGL2 그래픽 벤치
   hardware.js      사양 감지 + GPU 이름 정리
   scorecard.js     공유용 1200x630 PNG 생성
+  gamepad.js       스틱 드리프트 판정 (축별이 아니라 반경으로 봐야 대각선을 놓치지 않는다)
   storage.js       측정 이력 (localStorage 전용, 서버 전송 없음)
 src/pages/     도구 1개 = 페이지 1개 = 검색 키워드 1개
 ```

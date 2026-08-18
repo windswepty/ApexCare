@@ -4,6 +4,7 @@ import Home from './pages/Home.jsx'
 import MousePolling from './pages/MousePolling.jsx'
 import MonitorTest from './pages/MonitorTest.jsx'
 import KeyboardTest from './pages/KeyboardTest.jsx'
+import GamepadTest from './pages/GamepadTest.jsx'
 import SystemCheck from './pages/SystemCheck.jsx'
 import NotFound from './pages/NotFound.jsx'
 
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/mouse-polling-rate" element={<MousePolling />} />
         <Route path="/monitor-test" element={<MonitorTest />} />
         <Route path="/keyboard-test" element={<KeyboardTest />} />
+        <Route path="/gamepad-test" element={<GamepadTest />} />
         <Route path="/system-check" element={<SystemCheck />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

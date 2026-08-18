@@ -102,6 +102,21 @@ for (const route of ROUTES) {
   console.log(`  prerendered ${route.path.padEnd(22)} ${(html.length / 1024).toFixed(1)} KB`)
 }
 
+// 404 페이지.
+// 예전에는 _redirects 로 모든 미매칭 경로에 홈 HTML 을 200 으로 내보냈다.
+// 그건 검색엔진에 '이 주소는 정상 페이지'라고 거짓말하는 것(soft 404)이고,
+// 오타 주소가 홈 내용으로 색인될 수 있다. 실제 라우트는 전부 프리렌더되므로
+// 매칭되지 않는 주소는 진짜 404 가 맞다.
+// Cloudflare Pages·Netlify 는 404.html 을 미매칭 경로에 404 상태로 서빙한다.
+writeFileSync(
+  join(distDir, '404.html'),
+  template
+    .replace(/<title>[\s\S]*?<\/title>/, `<title>페이지를 찾을 수 없습니다 — ${SITE.name}</title>`)
+    .replace('<div id="root"></div>', `<div id="root">${render('/__not_found__')}</div>`),
+  'utf-8'
+)
+console.log('  prerendered 404.html')
+
 const today = new Date().toISOString().slice(0, 10)
 const urls = ROUTES.map((r) =>
   [
