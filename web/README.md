@@ -7,8 +7,12 @@
 ```bash
 npm install --prefix web
 npm run dev --prefix web       # http://localhost:5173
-npm run build --prefix web     # web/dist 에 정적 파일 생성
+npm run build --prefix web     # 클라이언트 빌드 + SSR 빌드 + 프리렌더
+npm run preview --prefix web   # 빌드 결과물을 실제로 서빙해 확인
 ```
+
+`build` 는 세 단계다. 마지막 프리렌더 단계가 빠지면 SEO 와 링크 미리보기가
+통째로 죽으므로 `build:client` 만 돌려서 배포하면 안 된다.
 
 ## 배포하기 전에 해야 할 일
 
@@ -29,9 +33,34 @@ Cloudflare Pages 기준:
 `public/_redirects` 가 모든 경로를 `index.html` 로 넘긴다. 이게 없으면
 `/mouse-polling-rate` 같은 주소로 직접 들어왔을 때 404 가 난다.
 
+## 프리렌더 — 이게 왜 있는가
+
+SPA 는 모든 주소에 같은 빈 `index.html` 을 준다. 그대로 두면
+
+1. 카카오톡·디스코드·커뮤니티에 어느 페이지를 공유하든 미리보기가 홈 문구로 뜬다.
+2. JS 실행이 약한 크롤러(특히 네이버)에는 본문이 아예 보이지 않는다.
+
+공유와 검색이 이 사이트의 주 유입 경로라 둘 다 치명적이다. 그래서 빌드 시
+`scripts/prerender.mjs` 가 라우트마다 실제 HTML 을 뽑는다.
+
+- 라우트별 `<title>`, `description`, `canonical`, OG, Twitter 카드
+- JSON-LD 구조화 데이터
+- 본문이 들어간 실제 마크업 (JS 없이도 읽힌다)
+- `sitemap.xml`, `robots.txt` 자동 생성
+
+라우트를 추가할 때는 **`src/routes.js` 에만** 메타를 적는다. 클라이언트의 `useMeta` 와
+프리렌더가 같은 출처를 쓰므로 두 곳에 따로 적으면 반드시 어긋난다.
+
+각 라우트는 `<경로>.html` 과 `<경로>/index.html` 두 형태로 저장된다. 정적 호스트마다
+슬래시 없는 주소를 푸는 방식이 달라서, 하나만 만들면 호스트에 따라 SPA 폴백(=홈 HTML)이
+나가면서 라우트별 메타가 무의미해진다.
+
 ## 구조
 
 ```
+src/routes.js  라우트 메타데이터 단일 출처 (클라이언트 + 프리렌더 공용)
+src/entry-server.jsx  프리렌더 전용 진입점
+scripts/prerender.mjs 빌드 후 정적 HTML·sitemap 생성
 src/lib/       측정 로직 (UI 와 분리되어 있어 Node 에서 단독 검증 가능)
   pollingRate.js   폴링레이트 계산 + 타임스탬프 정밀도 감지
   refreshRate.js   rAF 간격으로 실제 주사율 실측

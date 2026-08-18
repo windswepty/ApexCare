@@ -1,12 +1,24 @@
 import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Info, AlertTriangle, Coffee } from 'lucide-react'
 import { KOFI_USERNAME, SITE } from '../config.js'
+import { routeMeta } from '../routes.js'
 
-/** 라우트별 title/description. SPA 라도 검색엔진과 공유 미리보기가 이걸 읽는다. */
-export function useMeta(title, description) {
+/**
+ * 라우트별 title/description 을 현재 주소에 맞춰 갱신한다.
+ *
+ * 문구는 routes.js 에서만 가져온다. 페이지마다 따로 적으면 빌드 시 프리렌더가
+ * 넣는 값과 클라이언트가 넣는 값이 갈라져, 크롤러가 본 제목과 사용자가 본 제목이
+ * 달라진다. 오버라이드는 routes.js 에 없는 페이지(404)용이다.
+ */
+export function useMeta(overrideTitle, overrideDescription) {
+  const { pathname } = useLocation()
+  const meta = routeMeta(pathname)
+  const title = overrideTitle || meta?.title || `${SITE.name} — ${SITE.tagline}`
+  const description = overrideDescription || meta?.description
+
   useEffect(() => {
-    document.title = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE.tagline}`
+    document.title = title
     if (description) {
       let tag = document.querySelector('meta[name="description"]')
       if (!tag) {

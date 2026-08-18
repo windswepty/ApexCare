@@ -123,10 +123,7 @@ function GhostingStage({ onExit }) {
 }
 
 export default function MonitorTest() {
-  useMeta(
-    '모니터 불량화소·잔상 테스트',
-    '전체화면 단색 화면으로 불량화소와 백라이트 블리딩을 찾고, 움직이는 블록으로 잔상(고스팅)을 확인합니다. 실제 주사율도 실측합니다.'
-  )
+  useMeta()
 
   const [mode, setMode] = useState(null) // null | 'color' | 'ghost'
   const [colorIndex, setColorIndex] = useState(0)

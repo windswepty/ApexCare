@@ -18,10 +18,7 @@ const fmtOps = (opsPerMs) => {
 const yieldFrame = () => new Promise((r) => setTimeout(r, 60))
 
 export default function SystemCheck() {
-  useMeta(
-    '내 PC 사양·성능 진단',
-    'CPU 코어, GPU 모델, 화면 주사율을 자동으로 감지하고 단일코어·멀티코어·그래픽 성능을 측정해 종합 점수를 냅니다. 설치 없이 브라우저에서 바로.'
-  )
+  useMeta()
 
   const [specs, setSpecs] = useState(null)
   const [refresh, setRefresh] = useState(null)

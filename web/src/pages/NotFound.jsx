@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
 import { useMeta } from '../components/ui.jsx'
+import { SITE } from '../config.js'
 
 export default function NotFound() {
-  useMeta('페이지를 찾을 수 없습니다')
+  useMeta(`페이지를 찾을 수 없습니다 — ${SITE.name}`)
   return (
     <>
       <h1>404</h1>

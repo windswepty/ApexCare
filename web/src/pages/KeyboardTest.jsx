@@ -48,10 +48,7 @@ const LAYOUT = [
 const ALL_CODES = LAYOUT.flat().filter(([code]) => code).map(([code]) => code)
 
 export default function KeyboardTest() {
-  useMeta(
-    '키보드 동시입력·눌림 테스트',
-    '키보드의 모든 키가 정상 인식되는지, 동시에 몇 개까지 눌리는지(N키 롤오버) 브라우저에서 바로 확인합니다.'
-  )
+  useMeta()
 
   const [down, setDown] = useState(() => new Set())
   const [tested, setTested] = useState(() => new Set())

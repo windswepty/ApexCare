@@ -11,10 +11,7 @@ import {
 const MAX_SAMPLES = 20000
 
 export default function MousePolling() {
-  useMeta(
-    '마우스 폴링레이트 측정',
-    '마우스의 실제 폴링레이트(Hz)를 브라우저에서 바로 측정합니다. 합쳐지기 전 원본 입력 샘플을 읽어 125Hz부터 8000Hz까지 정확하게 잽니다.'
-  )
+  useMeta()
 
   const [result, setResult] = useState(null)
   const [active, setActive] = useState(false)

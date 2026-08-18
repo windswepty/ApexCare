@@ -35,7 +35,7 @@ const TOOLS = [
 ]
 
 export default function Home() {
-  useMeta(null, '마우스 폴링레이트, 모니터 불량화소, 키보드 동시입력, PC 사양·성능을 브라우저에서 바로 측정합니다. 설치도 로그인도 없습니다.')
+  useMeta()
 
   return (
     <>
