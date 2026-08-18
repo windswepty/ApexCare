@@ -3,7 +3,7 @@ import { Play, Share2, Trash2 } from 'lucide-react'
 import { detectAll } from '../lib/hardware.js'
 import { measureRefreshRate } from '../lib/refreshRate.js'
 import { benchSingleCore, benchMultiCore, benchGPU, compositeScore } from '../lib/bench.js'
-import { drawScorecard, shareOrDownload } from '../lib/scorecard.js'
+import Scorecard from '../components/Scorecard.jsx'
 import { historyFor, saveResult, clearHistory } from '../lib/storage.js'
 import {
   Breadcrumb, Callout, KofiSupport, Readout, RelatedTools, Stat, useMeta
@@ -25,6 +25,7 @@ export default function SystemCheck() {
   const [scores, setScores] = useState(null)
   const [phase, setPhase] = useState(null)
   const [history, setHistory] = useState([])
+  const [card, setCard] = useState(null)
 
   useEffect(() => {
     detectAll().then(setSpecs)
@@ -34,6 +35,7 @@ export default function SystemCheck() {
 
   const runBenchmark = useCallback(async () => {
     setScores(null)
+    setCard(null)
 
     setPhase('단일 코어 측정 중...')
     await yieldFrame()
@@ -66,9 +68,9 @@ export default function SystemCheck() {
     setHistory(historyFor('system-check'))
   }, [])
 
-  const share = async () => {
+  const showCard = () => {
     if (!scores) return
-    const canvas = drawScorecard({
+    setCard({
       title: '내 PC 성능 점수',
       score: scores.total,
       scoreLabel: '종합 점수 (상대 지표)',
@@ -80,7 +82,6 @@ export default function SystemCheck() {
         ['주사율', refresh ? `${(refresh.snapped || refresh.raw).toFixed(0)} Hz` : '—']
       ]
     })
-    await shareOrDownload(canvas, 'pc-score.png')
   }
 
   const wipe = () => {
@@ -154,7 +155,13 @@ export default function SystemCheck() {
                 {scores.efficiency != null && (
                   <Stat
                     k="병렬 효율"
-                    v={`${scores.efficiency.toFixed(1)}× (워커 ${scores.multi.workers}개)`}
+                    v={
+                      `${scores.efficiency.toFixed(1)}× (워커 ${scores.multi.workers}개` +
+                      // 일부 워커가 응답하지 않았으면 숨기지 않고 그대로 알린다
+                      (scores.multi.requested > scores.multi.workers
+                        ? ` / 요청 ${scores.multi.requested}개)`
+                        : ')')
+                    }
                   />
                 )}
                 <Stat
@@ -173,13 +180,17 @@ export default function SystemCheck() {
               <Play size={16} /> {phase ? '측정 중...' : scores ? '다시 측정' : '성능 측정 시작'}
             </button>
             {scores && (
-              <button className="btn" onClick={share}>
+              <button className="btn" onClick={showCard}>
                 <Share2 size={16} /> 결과 이미지
               </button>
             )}
           </div>
         </div>
       </div>
+
+      {card && (
+        <Scorecard spec={card} filename="pc-score.png" onClose={() => setCard(null)} />
+      )}
 
       {history.length > 1 && (
         <div className="card section">

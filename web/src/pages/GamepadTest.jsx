@@ -4,7 +4,7 @@ import {
   STICKS, ANALOG_TRIGGERS, analyzeStick, buttonLabel,
   readGamepads, supportsVibration, vibrate
 } from '../lib/gamepad.js'
-import { drawScorecard, shareOrDownload } from '../lib/scorecard.js'
+import Scorecard from '../components/Scorecard.jsx'
 import { saveResult } from '../lib/storage.js'
 import {
   Breadcrumb, Callout, KofiSupport, RelatedTools, Stat, useMeta
@@ -107,6 +107,7 @@ export default function GamepadTest() {
   const [restProgress, setRestProgress] = useState(0)
   const [drift, setDrift] = useState(null)
   const [rumbling, setRumbling] = useState(false)
+  const [card, setCard] = useState(null)
 
   // 60fps 로 React 상태를 갱신하면 페이지 전체가 초당 60번 리렌더된다.
   // 부드러움이 필요한 스틱 그림은 canvas 가 ref 를 직접 읽어 매 프레임 그리고,
@@ -218,6 +219,7 @@ export default function GamepadTest() {
     }
     setTestedButtons(new Set())
     setDrift(null)
+    setCard(null)
   }
 
   const doVibrate = async () => {
@@ -227,13 +229,13 @@ export default function GamepadTest() {
     setRumbling(false)
   }
 
-  const share = async () => {
+  const showCard = () => {
     if (!drift) return
     const worst = Math.max(drift.left?.radius ?? 0, drift.right?.radius ?? 0)
     const level = drift.left && drift.right
       ? (drift.left.radius > drift.right.radius ? drift.left.level : drift.right.level)
       : null
-    const canvas = drawScorecard({
+    setCard({
       title: '게임패드 드리프트 검사',
       score: level?.label ?? '—',
       scoreLabel: '판정',
@@ -246,7 +248,6 @@ export default function GamepadTest() {
         ['확인한 버튼', `${testedButtons.size} 개`]
       ]
     })
-    await shareOrDownload(canvas, 'gamepad-drift.png')
   }
 
   if (!pad) {
@@ -341,7 +342,7 @@ export default function GamepadTest() {
             <Play size={16} /> {resting ? '측정 중...' : drift ? '다시 검사' : '드리프트 검사 시작'}
           </button>
           {drift && (
-            <button className="btn" onClick={share}>
+            <button className="btn" onClick={showCard}>
               <Share2 size={16} /> 결과 이미지
             </button>
           )}
@@ -450,6 +451,10 @@ export default function GamepadTest() {
           <RotateCcw size={16} /> 초기화
         </button>
       </div>
+
+      {card && (
+        <Scorecard spec={card} filename="gamepad-drift.png" onClose={() => setCard(null)} />
+      )}
 
       <KofiSupport context="컨트롤러 상태를 확인하셨나요?" />
       <RelatedTools current="/gamepad-test" />

@@ -217,6 +217,24 @@ h3 { font-size: 15px; margin: 0 0 8px; font-weight: 700; }
 .kofi-btn:active { transform: translateY(1px); }
 .kofi-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
+/* ── 결과 이미지 미리보기 ─────────────────────────────────── */
+.scorecard {
+  margin-top: 18px; padding: 20px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-elev);
+}
+.scorecard-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.scorecard-head h3 { margin: 0; font-size: 15px; }
+.scorecard-img {
+  display: block; width: 100%; max-width: 620px; height: auto;
+  aspect-ratio: 1200 / 630; border-radius: 12px; border: 1px solid var(--border);
+}
+.scorecard-loading {
+  display: grid; place-items: center; color: var(--text-dim); font-size: 14px;
+  background: var(--bg);
+}
+/* 이미지가 아직 안 만들어졌을 때 링크가 눌리지 않게 한다 */
+.btn.is-disabled { opacity: .45; pointer-events: none; }
+
 /* ── 히스토그램 ───────────────────────────────────────────── */
 .histogram { display: flex; align-items: flex-end; gap: 2px; height: 90px; margin-top: 6px; }
 .histogram .hb { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .75; }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { MousePointer2, RotateCcw, Share2 } from 'lucide-react'
 import { analyze, extractSamples, COMMON_POLLING_RATES } from '../lib/pollingRate.js'
 import { histogram } from '../lib/stats.js'
-import { drawScorecard, shareOrDownload } from '../lib/scorecard.js'
+import Scorecard from '../components/Scorecard.jsx'
 import { saveResult } from '../lib/storage.js'
 import {
   Breadcrumb, Callout, Histogram, KofiSupport, Readout, RelatedTools, Stat, useMeta
@@ -16,6 +16,7 @@ export default function MousePolling() {
   const [result, setResult] = useState(null)
   const [active, setActive] = useState(false)
   const [sampleCount, setSampleCount] = useState(0)
+  const [card, setCard] = useState(null)
   const timestamps = useRef([])
   const rafRef = useRef(0)
   const saved = useRef(false)
@@ -55,11 +56,13 @@ export default function MousePolling() {
     setResult(null)
     setSampleCount(0)
     setActive(false)
+    setCard(null)
   }
 
-  const share = async () => {
+  // spec 을 state 에 담아 넘겨야 Scorecard 가 매 렌더마다 이미지를 다시 그리지 않는다
+  const showCard = () => {
     if (!result?.ready) return
-    const canvas = drawScorecard({
+    setCard({
       title: '마우스 폴링레이트',
       score: Math.round(result.average),
       scoreLabel: '측정된 폴링레이트 (Hz)',
@@ -70,7 +73,6 @@ export default function MousePolling() {
         ['샘플 수', `${result.sampleCount.toLocaleString()} 개`]
       ]
     })
-    await shareOrDownload(canvas, 'polling-rate.png')
   }
 
   const limited = result?.precision?.limited
@@ -159,13 +161,17 @@ export default function MousePolling() {
           </div>
 
           <div className="btn-row section">
-            <button className="btn primary" onClick={share}>
-              <Share2 size={16} /> 결과 이미지 저장
+            <button className="btn primary" onClick={showCard}>
+              <Share2 size={16} /> 결과 이미지 만들기
             </button>
             <button className="btn" onClick={reset}>
               <RotateCcw size={16} /> 다시 측정
             </button>
           </div>
+
+          {card && (
+            <Scorecard spec={card} filename="polling-rate.png" onClose={() => setCard(null)} />
+          )}
 
           <KofiSupport context="마우스가 제 성능을 내는지 확인하셨나요?" />
         </>
