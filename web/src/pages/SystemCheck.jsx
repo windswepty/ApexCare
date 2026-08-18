@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Play, Share2, Trash2 } from 'lucide-react'
+import { Play, Share2, Trash2, X } from 'lucide-react'
 import { detectAll } from '../lib/hardware.js'
 import { measureRefreshRate } from '../lib/refreshRate.js'
+import * as bench from '../lib/bench.js'
 import { benchSingleCore, benchMultiCore, benchGPU, compositeScore } from '../lib/bench.js'
 import Scorecard from '../components/Scorecard.jsx'
 import { historyFor, saveResult, clearHistory } from '../lib/storage.js'
@@ -17,6 +18,104 @@ const fmtOps = (opsPerMs) => {
 /** 렌더를 한 프레임 양보한다. 벤치 사이에 UI가 갱신될 틈을 준다. */
 const yieldFrame = () => new Promise((r) => setTimeout(r, 60))
 
+/**
+ * 측정 이력 막대 그래프.
+ *
+ * 0 을 바닥으로 잡으면 1100 과 1180 의 막대 높이가 거의 같아 보여 그래프가 무의미해진다.
+ * 실제 값의 범위만 잘라내 보여주고, 대신 눈금 숫자를 함께 적어 왜곡을 상쇄한다.
+ */
+function HistoryChart({ entries }) {
+  const [selected, setSelected] = useState(null)
+
+  // 기록이 지워지거나 줄어들면 선택 인덱스가 범위를 벗어난다
+  const active = selected != null && selected < entries.length ? selected : null
+
+  if (!entries.length) return null
+
+  const values = entries.map((e) => e.total || 0)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  // 값이 전부 같으면 0 으로 나누게 되므로 최소 폭을 준다
+  const span = Math.max(max - min, Math.max(1, max * 0.02))
+  const floor = min - span * 0.25
+  const ceil = max + span * 0.15
+  const best = values.lastIndexOf(max)
+
+  return (
+    <div className="history">
+      <div className="history-bars">
+        {entries.map((e, i) => {
+          const v = e.total || 0
+          const pct = ((v - floor) / (ceil - floor)) * 100
+          const isBest = i === best
+          const isOn = i === active
+          return (
+            <button
+              type="button"
+              className={`history-col${isOn ? ' is-selected' : ''}`}
+              key={i}
+              onClick={() => setSelected(isOn ? null : i)}
+              aria-pressed={isOn}
+              title={`${new Date(e.at).toLocaleString('ko-KR')} — 눌러서 자세히 보기`}
+            >
+              <span className={`history-num${isBest ? ' is-best' : ''}`}>{v}</span>
+              <div
+                className={`history-bar${isBest ? ' is-best' : ''}`}
+                style={{ height: `${Math.max(4, pct)}%` }}
+              />
+            </button>
+          )
+        })}
+      </div>
+      <div className="history-axis">
+        <span>{new Date(entries[0].at).toLocaleDateString('ko-KR')}</span>
+        <span>{active == null ? '막대를 누르면 그때 측정값이 나옵니다' : `최저 ${min} · 최고 ${max}`}</span>
+        <span>{new Date(entries[entries.length - 1].at).toLocaleDateString('ko-KR')}</span>
+      </div>
+
+      {active != null && <HistoryDetail entry={entries[active]} onClose={() => setSelected(null)} />}
+    </div>
+  )
+}
+
+/** 막대 하나를 눌렀을 때 그때 측정값을 펼쳐 보여준다. */
+function HistoryDetail({ entry, onClose }) {
+  // 예전 기록에는 원값이 없다. 없는 항목은 점수만 보여주고 조용히 넘어간다.
+  const line = (score, raw) =>
+    score == null ? '기록 없음' : raw != null ? `${score} · ${raw}` : String(score)
+
+  return (
+    <div className="history-detail">
+      <div className="history-detail-head">
+        <strong>{new Date(entry.at).toLocaleString('ko-KR')}</strong>
+        <button className="icon-btn" onClick={onClose} aria-label="닫기" title="닫기">
+          <X size={15} />
+        </button>
+      </div>
+      <Stat k="종합 점수" v={entry.total ?? '기록 없음'} />
+      <Stat k="단일 코어" v={line(entry.single, entry.singleOps && fmtOps(entry.singleOps))} />
+      <Stat
+        k="멀티 코어"
+        v={
+          entry.multi == null
+            ? '측정 불가'
+            : line(entry.multi, entry.multiOps && fmtOps(entry.multiOps)) +
+              (entry.workers
+                ? ` (워커 ${entry.workers}개${
+                    entry.requested > entry.workers ? ` / 요청 ${entry.requested}개` : ''
+                  })`
+                : '')
+        }
+      />
+      <Stat
+        k="그래픽"
+        v={line(entry.gpu, entry.gpuPass && `${entry.gpuPass.toFixed(2)} pass/ms`)}
+      />
+      {entry.refreshHz != null && <Stat k="주사율" v={`${entry.refreshHz} Hz`} />}
+    </div>
+  )
+}
+
 export default function SystemCheck() {
   useMeta()
 
@@ -31,7 +130,7 @@ export default function SystemCheck() {
     detectAll().then(setSpecs)
     measureRefreshRate(1000).then(setRefresh)
     setHistory(historyFor('system-check'))
-  }, [])
+  }, [refresh])
 
   const runBenchmark = useCallback(async () => {
     setScores(null)
@@ -50,6 +149,10 @@ export default function SystemCheck() {
     let gpu = null
     try { gpu = benchGPU(700) } catch { gpu = null }
 
+    // 멀티코어가 실패했다면 원인을 함께 들고 간다. '측정 불가' 네 글자만으로는
+    // 사용자도 나도 뭐가 문제인지 알 수 없다.
+    const multiFailure = multi ? null : bench.lastFailure
+
     const total = compositeScore({ single, multi, gpu })
 
     // 병렬 효율은 워커 수를 넘을 수 없다. 넘는다면 단일코어 측정이 경합으로
@@ -60,13 +163,23 @@ export default function SystemCheck() {
       if (ratio > 0 && ratio <= multi.workers * 1.15) efficiency = ratio
     }
 
-    const result = { single, multi, gpu, total, efficiency }
+    const result = { single, multi, gpu, total, efficiency, multiFailure }
     setScores(result)
     setPhase(null)
 
-    saveResult({ tool: 'system-check', total, single: single?.score, multi: multi?.score, gpu: gpu?.score })
+    // 점수뿐 아니라 실측 원값도 남긴다. 점수는 기준값을 바꾸면 의미가 달라지지만
+    // ops/s 같은 원값은 언제 봐도 그대로다.
+    saveResult({
+      tool: 'system-check',
+      total,
+      single: single?.score, singleOps: single?.opsPerMs,
+      multi: multi?.score, multiOps: multi?.opsPerMs,
+      workers: multi?.workers, requested: multi?.requested,
+      gpu: gpu?.score, gpuPass: gpu?.passesPerMs,
+      refreshHz: refresh ? Number((refresh.snapped || refresh.raw).toFixed(1)) : null
+    })
     setHistory(historyFor('system-check'))
-  }, [])
+  }, [refresh])
 
   const showCard = () => {
     if (!scores) return
@@ -150,7 +263,12 @@ export default function SystemCheck() {
                 />
                 <Stat
                   k="멀티 코어"
-                  v={scores.multi ? `${scores.multi.score} · ${fmtOps(scores.multi.opsPerMs)}` : '측정 불가'}
+                  v={
+                    scores.multi
+                      ? `${scores.multi.score} · ${fmtOps(scores.multi.opsPerMs)}`
+                      : '측정 불가'
+                  }
+                  title={scores.multiFailure ? JSON.stringify(scores.multiFailure) : undefined}
                 />
                 {scores.efficiency != null && (
                   <Stat
@@ -197,23 +315,10 @@ export default function SystemCheck() {
           <h2>내 기록 ({history.length}회)</h2>
           <p className="muted" style={{ fontSize: 13.5, marginTop: -6 }}>
             이 기기의 브라우저에만 저장됩니다. 시간이 지나며 점수가 떨어진다면 발열, 전원 설정,
-            백그라운드 프로그램을 의심해볼 수 있습니다.
+            백그라운드 프로그램을 의심해볼 수 있습니다. 막대는 차이가 보이도록 실제 값 구간만
+            잘라 그린 것이라, 높이보다 숫자를 보세요.
           </p>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80, marginTop: 12 }}>
-            {history.slice(-24).map((h, i) => {
-              const max = Math.max(...history.slice(-24).map((x) => x.total || 0), 1)
-              return (
-                <div
-                  key={i}
-                  style={{
-                    flex: 1, background: 'var(--accent)', opacity: .75,
-                    height: `${((h.total || 0) / max) * 100}%`, borderRadius: '3px 3px 0 0', minHeight: 2
-                  }}
-                  title={`${h.total}점 · ${new Date(h.at).toLocaleString('ko-KR')}`}
-                />
-              )
-            })}
-          </div>
+          <HistoryChart entries={history.slice(-12)} />
           <button className="btn" style={{ marginTop: 14 }} onClick={wipe}>
             <Trash2 size={16} /> 기록 지우기
           </button>
@@ -221,6 +326,26 @@ export default function SystemCheck() {
       )}
 
       <div className="section" style={{ display: 'grid', gap: 12 }}>
+        {scores?.multiFailure && (
+          <Callout kind="warn">
+            <strong>멀티 코어를 측정하지 못했습니다.</strong>{' '}
+            워커 {scores.multiFailure.requested}개를 요청해 {scores.multiFailure.created}개가 만들어졌고{' '}
+            {scores.multiFailure.replied}개가 응답했습니다
+            {scores.multiFailure.timedOut && ' (시간 초과)'}.
+            {scores.multiFailure.errors?.length > 0 && (
+              <> 오류: <span className="mono">{scores.multiFailure.errors.join(' / ')}</span></>
+            )}
+            {' '}브라우저 확장 프로그램이 워커를 막는 경우가 가장 흔합니다. 시크릿 창에서
+            다시 시도해 보시고, 그래도 같으면 F12 콘솔의 경고 내용을 알려주세요.
+          </Callout>
+        )}
+        {scores?.multi?.reducedFrom && (
+          <Callout kind="warn">
+            <strong>워커 {scores.multi.reducedFrom}개로는 실패해 {scores.multi.workers}개로 다시 측정했습니다.</strong>{' '}
+            그래서 멀티 코어 점수가 실제 성능보다 낮게 나옵니다. 이 기기에서 워커를 많이
+            띄우지 못하는 원인이 따로 있다는 뜻입니다.
+          </Callout>
+        )}
         <Callout kind="warn">
           <strong>브라우저가 알려주지 않는 것들이 있습니다.</strong> 메모리 용량은 크로미움 계열에서만,
           그것도 2의 거듭제곱으로 반올림된 근사치로 알려줍니다. CPU 모델명은 어떤 브라우저도
