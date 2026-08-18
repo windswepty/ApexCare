@@ -82,6 +82,10 @@ export function Histogram({ buckets }) {
  * 후원 요청. 측정이 끝난 뒤에만 노출한다 — 들어오자마자 돈 얘기를 하면
  * 도구를 써보기도 전에 이탈한다.
  * KOFI_USERNAME 이 비어 있으면 아무것도 그리지 않는다(빈 링크 방지).
+ *
+ * 운영 비용을 명분으로 쓰지 않는다. 호스팅이 실제로 무료라 '서버비가 나간다'는
+ * 말은 거짓이고, 확인하면 바로 드러난다. 광고·추적을 넣지 않겠다는 약속과
+ * 만든 노력에 대해 부탁하는 것이 사실이면서 명분도 강하다.
  */
 export function KofiSupport({ context }) {
   if (!KOFI_USERNAME) return null
@@ -90,8 +94,8 @@ export function KofiSupport({ context }) {
       <div className="kofi-text">
         <strong>이 도구가 도움이 됐다면</strong>
         <p>
-          {context || '광고도 로그인도 없이 운영합니다.'} 서버비와 도메인 비용만 나가고 있어서,
-          커피 한 잔이면 계속 굴러갑니다.
+          {context || '광고도 로그인도 없이 운영합니다.'} 앞으로도 광고 없이,
+          측정값을 팔지 않고 유지하려 합니다. 커피 한 잔이면 다음 도구를 만드는 데 큰 힘이 됩니다.
         </p>
       </div>
       <a

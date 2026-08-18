@@ -3,8 +3,10 @@
 // 비워두면 후원 버튼이 렌더링되지 않습니다(빈 링크 노출 방지).
 export const KOFI_USERNAME = ''
 
-// 월 운영 목표. Ko-fi Goal 대신 사이트에서 직접 보여줄 때 사용.
-export const KOFI_GOAL = { label: '월 서버·도메인 비용', current: 0, target: 30000 }
+// 운영 비용을 후원 명분으로 쓰지 않는다.
+// Cloudflare Pages 무료 플랜 + 브라우저에서만 측정하는 구조라 서버비가 실제로 0원이다.
+// 없는 비용을 지어내면 '광고 없음·추적 없음' 이라는 이 사이트의 신뢰가 통째로 무너진다.
+// 실제로 비용이 생기면(도메인 등) 그때 실제 금액으로 Ko-fi Goal 을 쓰면 된다.
 
 export const SITE = {
   name: 'APEX CARE',
