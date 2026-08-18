@@ -104,7 +104,7 @@ export function KofiSupport({ context }) {
         target="_blank"
         rel="noopener noreferrer"
       >
-        <Coffee size={17} /> Ko-fi로 후원하기
+        <Coffee size={18} strokeWidth={2.25} /> Buy me a coffee
       </a>
     </div>
   )

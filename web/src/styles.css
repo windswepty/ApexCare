@@ -50,6 +50,15 @@
   --bad: #fb7185;
 }
 
+/* 테마를 바꾸는 그 순간에만 모든 전환 효과를 끈다.
+   color / border-color 에 transition 이 걸려 있으면 CSS 변수가 바뀌어도
+   브라우저가 이전 색을 붙들고 갱신하지 않는다. 밝은 테마로 바꿨는데 흰 글자가
+   흰 배경 위에 그대로 남는 식이다. 자세한 내용은 Layout.jsx 의 applyTheme 참고. */
+.theme-switching, .theme-switching *,
+.theme-switching *::before, .theme-switching *::after {
+  transition: none !important;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body {
@@ -192,12 +201,21 @@ h3 { font-size: 15px; margin: 0 0 8px; font-weight: 700; }
 .kofi-text { flex: 1; min-width: 240px; }
 .kofi-text p { margin: 0; font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 .kofi-text strong { color: var(--text); display: block; margin-bottom: 3px; font-size: 15px; }
+/* 테두리만 있는 고스트 버튼.
+   흰색으로 고정하면 밝은 테마에서 사라지므로 글자색(--text)을 따라가게 한다.
+   그러면 어두운 테마에선 흰 테두리, 밝은 테마에선 검은 테두리로 알아서 뒤집힌다. */
 .kofi-btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px;
-  border-radius: 11px; font-weight: 800; font-size: 14.5px;
-  background: #ff5e5b; color: #fff; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 9px; padding: 10px 20px;
+  border-radius: 10px; font-weight: 700; font-size: 15px;
+  background: transparent; color: var(--text);
+  /* 1.5px 는 배율 1 화면에서 1px 로 반올림돼 얇아 보인다 */
+  border: 2px solid var(--text);
+  white-space: nowrap;
+  transition: background .16s, color .16s, transform .16s;
 }
-.kofi-btn:hover { filter: brightness(1.06); }
+.kofi-btn:hover { background: var(--text); color: var(--bg-elev); }
+.kofi-btn:active { transform: translateY(1px); }
+.kofi-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* ── 히스토그램 ───────────────────────────────────────────── */
 .histogram { display: flex; align-items: flex-end; gap: 2px; height: 90px; margin-top: 6px; }

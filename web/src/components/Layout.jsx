@@ -17,17 +17,44 @@ const NAV = [
 // 렌더 도중 이것들을 만지면 빌드가 통째로 죽는다.
 const isBrowser = typeof window !== 'undefined'
 
+/**
+ * 테마를 바꿀 때 전환 효과를 잠깐 껐다 켠다.
+ *
+ * color 나 border-color 에 transition 이 걸린 요소는, CSS 변수가 바뀌어도
+ * 브라우저가 이전 색을 붙들고 갱신하지 않는다(전환이 시작되면서 값이 고착된다).
+ * 그래서 밝은 테마로 바꿔도 흰 글자가 흰 배경 위에 그대로 남는다.
+ * 전환이 아예 시작되지 않게 만든 뒤 강제 리플로우로 새 색을 확정하고 되돌린다.
+ */
+function applyTheme(theme) {
+  const root = document.documentElement
+  root.classList.add('theme-switching')
+  if (theme === 'auto') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', theme)
+  void root.offsetHeight // 강제 리플로우 — 이 시점에 새 색이 확정된다
+  root.classList.remove('theme-switching')
+}
+
 function useTheme() {
   const [theme, setTheme] = useState(() => {
     if (!isBrowser) return 'auto'
     try { return localStorage.getItem('apexcare.theme') || 'auto' } catch { return 'auto' }
   })
+
   useEffect(() => {
-    const root = document.documentElement
-    if (theme === 'auto') root.removeAttribute('data-theme')
-    else root.setAttribute('data-theme', theme)
+    applyTheme(theme)
     try { localStorage.setItem('apexcare.theme', theme) } catch { /* 사파리 프라이빗 모드 */ }
   }, [theme])
+
+  // 'auto' 일 때 운영체제 테마가 바뀌면 우리 JS 를 거치지 않고 변수만 바뀐다.
+  // 같은 고착 문제가 생기므로 여기서도 전환을 끄고 다시 칠한다.
+  useEffect(() => {
+    if (!isBrowser || theme !== 'auto') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => applyTheme('auto')
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [theme])
+
   return [theme, setTheme]
 }
 
