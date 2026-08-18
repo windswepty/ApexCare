@@ -126,11 +126,15 @@ export default function SystemCheck() {
   const [history, setHistory] = useState([])
   const [card, setCard] = useState(null)
 
+  // 마운트 때 한 번만. refresh 를 의존성에 넣으면
+  //   measureRefreshRate -> setRefresh -> refresh 변경 -> 효과 재실행 -> ...
+  // 무한 루프가 되고, 매 회 detectAll() 이 WebGL 컨텍스트와 WebGPU 어댑터를
+  // 새로 만들어 자원이 고갈된다(브라우저는 살아있는 WebGL 컨텍스트 수를 제한한다).
   useEffect(() => {
     detectAll().then(setSpecs)
     measureRefreshRate(1000).then(setRefresh)
     setHistory(historyFor('system-check'))
-  }, [refresh])
+  }, [])
 
   const runBenchmark = useCallback(async () => {
     setScores(null)
