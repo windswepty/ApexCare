@@ -11,6 +11,11 @@ a = Analysis(
         'backend.system_monitor', 'backend.file_finder', 'backend.debloater', 
         'backend.game_booster', 'backend.config_manager', 'backend.api',
         'backend.process_guard',
+        # 아래 모듈들은 순환 참조를 피하려고 함수 안에서 지연 import 한다.
+        # hiddenimports 에 없으면 exe 로 묶였을 때만 import 에 실패한다
+        # (개발 중에는 드러나지 않는다).
+        'backend.safe_delete', 'backend.system_state', 'backend.perf_modes',
+        'backend.process_boost', 'backend.storage',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
         'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time',
         'win32pdh', 'pythoncom', 'win32com'
