@@ -15,6 +15,7 @@ import logging
 import sys
 import stat
 from backend import system_repair
+from backend import system_state
 
 log = logging.getLogger('Optimizer')
 
@@ -654,297 +655,52 @@ POWER_PLAN_HIGH_PERF = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
 POWER_PLAN_POWER_SAVER = "a1841308-3541-4fab-bc81-f71556f20b4a"
 
 
-def _set_power_plan(guid_str):
-    """Set active power plan via Win32 PowerSetActiveScheme, with subprocess fallback."""
-    success = False
-    # Method 1: Win32 API (preferred)
-    try:
-        powrprof = ctypes.WinDLL('powrprof', use_last_error=True)
-        guid = _guid_from_string(guid_str)
-        result = powrprof.PowerSetActiveScheme(None, ctypes.byref(guid))
-        if result == 0:
-            success = True
-            log.info(f"[Optimizer] ✓ Power plan set via Win32 API: {guid_str}")
-    except Exception as e:
-        log.warning(f"[Optimizer] Win32 power plan error: {e}")
-    
-    # Method 2: subprocess fallback with shell=True
-    if not success:
-        try:
-            CREATE_NO_WINDOW = 0x08000000
-            result = subprocess.run(
-                f'powercfg /setactive {guid_str}',
-                shell=True, capture_output=True, text=True,
-                creationflags=CREATE_NO_WINDOW, timeout=10
-            )
-            if result.returncode == 0:
-                success = True
-                log.info(f"[Optimizer] ✓ Power plan set via powercfg subprocess: {guid_str}")
-            else:
-                log.warning(f"[Optimizer] ✗ powercfg /setactive failed: {result.stderr.strip()}")
-        except Exception as e:
-            log.warning(f"[Optimizer] ✗ powercfg subprocess error: {e}")
-    
-    return success
-
-
-def _get_active_power_plan_guid():
-    """Query current active Windows Power Scheme GUID via Win32 PowerGetActiveScheme."""
-    try:
-        powrprof = ctypes.WinDLL('powrprof', use_last_error=True)
-        class GUID(ctypes.Structure):
-            _fields_ = [
-                ("Data1", ctypes.c_uint32),
-                ("Data2", ctypes.c_uint16),
-                ("Data3", ctypes.c_uint16),
-                ("Data4", ctypes.c_uint8 * 8),
-            ]
-        p_guid = ctypes.POINTER(GUID)()
-        res = powrprof.PowerGetActiveScheme(None, ctypes.byref(p_guid))
-        if res == 0 and p_guid:
-            g = p_guid.contents
-            import struct, uuid
-            u = uuid.UUID(bytes_le=struct.pack('<IHH', g.Data1, g.Data2, g.Data3) + bytes(g.Data4))
-            guid_str = str(u).lower()
-            ctypes.WinDLL('kernel32').LocalFree(p_guid)
-            return guid_str
-    except Exception as e:
-        log.warning(f"[Optimizer] Get active power plan error: {e}")
-    return None
-
-
 def get_optimization_mode():
-    """Determine optimization mode from current active Windows power plan."""
-    active_guid = _get_active_power_plan_guid()
-    if active_guid == POWER_PLAN_HIGH_PERF:
-        mode = 'gaming'
-    elif active_guid == POWER_PLAN_POWER_SAVER:
-        mode = 'eco'
-    else:
-        mode = 'standard'
-    return {
-        "mode": mode,
-        "activePlanGuid": active_guid or POWER_PLAN_BALANCED,
-        "verified": True
-    }
+    """현재 성능 모드. 실제 구현은 backend/perf_modes.py 에 있다.
 
-
-def _tune_power_params(mode):
-    """Apply detailed power plan sub-parameters via powercfg for real performance impact."""
-    CREATE_NO_WINDOW = 0x08000000
-    
-    def _powercfg(*args):
-        cmd = 'powercfg ' + ' '.join(str(a) for a in args)
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                creationflags=CREATE_NO_WINDOW, timeout=10
-            )
-            if result.returncode != 0:
-                log.warning(f"[Optimizer] powercfg failed: {cmd} -> {result.stderr.strip()}")
-            return result.returncode == 0
-        except Exception as e:
-            log.warning(f"[Optimizer] powercfg error: {cmd} -> {e}")
-            return False
-    
-    def _reg_set(path, name, value, vtype="REG_DWORD"):
-        cmd = f'reg add "{path}" /v "{name}" /t {vtype} /d {value} /f'
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                creationflags=CREATE_NO_WINDOW, timeout=10
-            )
-            if result.returncode != 0:
-                log.warning(f"[Optimizer] reg set failed: {name} -> {result.stderr.strip()}")
-            return result.returncode == 0
-        except Exception as e:
-            log.warning(f"[Optimizer] reg set error: {name} -> {e}")
-            return False
-    
-    if mode == 'gaming':
-        # === CPU: Min/Max processor state = 100% (prevent frequency throttling) ===
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "100")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "100")
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
-        
-        # === Disable CPU Core Parking (prevent cores from sleeping) ===
-        # CPMINCORES = 0cc5b647... ; value = 100 means all cores stay active
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "100")
-        
-        # === Disable USB Selective Suspend (prevent USB device latency) ===
-        # 2a737441-1930-4402-8d77-b2bebba308a3 = USB settings, 48e6b7a6... = selective suspend
-        _powercfg("/setacvalueindex", "scheme_current", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "0")
-        
-        # === MMCSS: SystemResponsiveness = 0 (give games maximum CPU time) ===
-        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 0)
-        
-        # === Network: Disable Nagle (reduce online game latency) ===
-        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "NetworkThrottlingIndex", 0xFFFFFFFF)
-        
-        # === GPU: Hardware Accelerated GPU Scheduling ===
-        _reg_set(r"HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "HwSchMode", 2)
-        
-        # Apply changes
-        _powercfg("/setactive", "scheme_current")
-        
-    elif mode == 'eco':
-        # === CPU: Max processor state = 70% (save power/reduce heat) ===
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "70")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "70")
-        
-        # === Enable Core Parking (let cores sleep) ===
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "50")
-        
-        # === MMCSS: SystemResponsiveness = 40 (balance) ===
-        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 40)
-        
-        _powercfg("/setactive", "scheme_current")
-        
-    else:  # standard
-        # === Balanced defaults ===
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "5")
-        _powercfg("/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
-        _powercfg("/setdcvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMAX", "100")
-        
-        # === Moderate Core Parking ===
-        _powercfg("/setacvalueindex", "scheme_current", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "70")
-        
-        # === Enable USB Selective Suspend (default behavior) ===
-        _powercfg("/setacvalueindex", "scheme_current", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "1")
-        
-        # === MMCSS: SystemResponsiveness = 20 (Windows default) ===
-        _reg_set(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", 20)
-        
-        _powercfg("/setactive", "scheme_current")
+    기존에는 활성 전원 플랜 GUID 만 보고 모드를 역산했는데 두 가지로 틀렸다.
+    (1) 게이밍이 '최고의 성능' 플랜을 쓰면 그 GUID 를 몰라 '표준'으로 읽혔고,
+    (2) 사용자가 윈도우에서 직접 플랜을 바꾸면 앱 기록과 조용히 어긋났다.
+    이제 저장된 모드를 정답으로 쓰되 실제 상태와 어긋나면 inSync=False 로 알린다.
+    """
+    from backend import perf_modes
+    info = perf_modes.get_mode()
+    # 기존 프론트엔드가 쓰던 키 이름을 유지한다
+    info['activePlanGuid'] = info.get('activePlan')
+    info['verified'] = info.get('inSync', False)
+    return info
 
 
 def set_optimization_mode(mode, user_set=True):
-    """Switch optimization mode with real OS-level tuning for measurable performance impact.
+    """성능 모드 적용. 실제 구현은 backend/perf_modes.py 에 있다.
 
-    Goes beyond just switching power plans: applies CPU scheduling, core parking,
-    MMCSS, USB latency, and GPU scheduling parameters.
-
-    user_set=False 는 게임 자동감지/시작 시 재적용 등 내부 호출용이다.
-    자동 부스트를 '사용자가 직접 선택한 모드'로 기록하지 않는다.
+    기존 구현은 (1) 이전 모드의 변경을 되돌리지 않아 설정이 겹쳐 쌓였고,
+    (2) 표준 모드가 짐작한 기본값으로 사용자 커스텀 플랜을 덮어썼으며,
+    (3) powercfg/reg 하위 명령이 전부 실패해도 success=True 를 돌려줬다.
+    perf_modes.apply_mode 는 '이전 모드 복구 → 적용 → 되읽어 검증' 순서로 돌고
+    항목별 성패를 steps 로 그대로 돌려준다.
     """
-    try:
-        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-        if not is_admin:
-            return {"success": False, "error": "UAC_REQUIRED"}
-    except Exception:
-        return {"success": False, "error": "UAC_REQUIRED"}
+    from backend import perf_modes
+    return perf_modes.apply_mode(mode, user_set=user_set)
 
-    try:
-        try:
-            from backend import config_manager
-            config_manager.set_optimization_mode(mode, user_set=user_set)
-        except Exception:
-            pass
-
-        # [공통 최적화] 모든 모드에 적용
-        # 주의: Windows 서비스(wuauserv / DiagTrack)는 이 함수에서 절대 건드리지 않는다.
-        # 텔레메트리 차단은 디블로터의 명시적 선택 항목(telemetry)에서만 수행한다.
-        purge_res = purge_ram()
-        freed_mb = purge_res.get("freed_mb", 0)
-
-        from backend import game_booster
-
-        target_guid = POWER_PLAN_BALANCED
-        mode_ko = "균형 조정"
-        plan_ko = "균형"
-        priority_ko = "NORMAL"
-        
-        if mode == 'gaming':
-            mode_ko = "게이밍 울트라"
-            plan_ko = "고성능/최고의 성능"
-            priority_ko = "HIGH"
-            # Check for Ultimate Performance plan
-            CREATE_NO_WINDOW = 0x08000000
-            res = subprocess.run('powercfg /l', shell=True, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-            if 'e9a42b02-d5df-448d-aa00-03f14749eb61' in res.stdout:
-                target_guid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
-                plan_ko = "최고의 성능"
-            else:
-                target_guid = POWER_PLAN_HIGH_PERF
-                plan_ko = "고성능"
-                
-            _set_power_plan(target_guid)
-            # [보안] Windows Update(wuauserv) 중지 로직 제거됨.
-            # 보안 패치 경로를 임의로 끊는 동작은 상용 제품에서 허용되지 않으며,
-            # 실제 프레임 향상도 측정되지 않는다. 옵션으로도 부활시키지 말 것.
-
-            # Boost foreground app immediately
-            game_booster.boost_foreground_app()
-            
-        elif mode == 'eco':
-            mode_ko = "에코 배터리 세이버"
-            plan_ko = "절전"
-            priority_ko = "IDLE (Backgrounds)"
-            target_guid = POWER_PLAN_POWER_SAVER
-            _set_power_plan(target_guid)
-        else:  # standard
-            target_guid = POWER_PLAN_BALANCED
-            _set_power_plan(target_guid)
-
-            # Rollback foreground app boost
-            game_booster.restore_foreground_app()
-
-        # Apply detailed sub-parameters (CPU state, core parking, MMCSS, etc.)
-        _tune_power_params(mode)
-        
-        # Manage Eco background suppression loop
-        if mode == 'eco':
-            game_booster.start_eco_suppression_loop()
-        else:
-            game_booster.stop_eco_suppression_loop()
-            game_booster.restore_background_apps()
-
-        # OS 전원 플랜 적용 여부 검증 (Cross-Validation)
-        CREATE_NO_WINDOW = 0x08000000
-        res = subprocess.run('powercfg /getactivescheme', shell=True, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-        actual_active = res.stdout.strip()
-        verified = target_guid.lower() in actual_active.lower()
-        
-        # Determine format for RAM
-        ram_formatted = f"{freed_mb:.1f}MB" if freed_mb < 1024 else f"{(freed_mb/1024):.1f}GB"
-        
-        # Backend explicit logging
-        log.info(f"[BOOST] {mode_ko} 모드 적용 완료! (전원 옵션: {plan_ko} / RAM 확보: {ram_formatted} / 우선순위: {priority_ko})")
-        
-        # Frontend UI message
-        ui_msg = f"{mode_ko} 적용 완료: {ram_formatted} 메모리 반환 및 {plan_ko} 세팅됨"
-            
-        return {
-            "success": True, 
-            "mode": mode, 
-            "targetGuid": target_guid, 
-            "activeGuid": actual_active, 
-            "verified": verified,
-            "message": ui_msg
-        }
-    except Exception as e:
-        log.error(f"Error in set_optimization_mode: {e}")
-        return {"success": False, "error": str(e)}
 
 def init_optimization_mode():
-    """Re-apply the saved optimization mode on app launch.
+    """앱 시작 시 저장된 모드를 재적용한다.
 
-    ONLY runs when the user explicitly picked a mode in the UI before.
+    사용자가 UI 에서 직접 모드를 고른 적이 있을 때만 동작한다.
     앱을 실행한 것만으로 OS 설정이 바뀌면 안 된다.
     """
     try:
-        from backend import config_manager
+        from backend import config_manager, perf_modes
         if not config_manager.get_optimization_mode_user_set():
             log.info("[Optimizer] 사용자가 선택한 모드가 없어 시작 시 자동 튜닝을 건너뜁니다.")
-            return {"success": True, "applied": False, "message": "사용자가 선택한 최적화 모드가 없어 자동 적용하지 않았습니다."}
-        saved_mode = config_manager.get_optimization_mode()
-        if saved_mode:
-            set_optimization_mode(saved_mode, user_set=False)
-            return {"success": True, "applied": True, "message": f"저장된 최적화 모드({saved_mode})를 적용했습니다."}
+            return {"success": True, "applied": False,
+                    "message": "사용자가 선택한 최적화 모드가 없어 자동 적용하지 않았습니다."}
+        saved = config_manager.get_optimization_mode()
+        if saved in perf_modes.MODES:
+            res = perf_modes.apply_mode(saved, user_set=False)
+            return {"success": res.get("success", False), "applied": True,
+                    "message": res.get("message", ""), "steps": res.get("steps", [])}
     except Exception as e:
         log.warning(f"Failed to init optimization mode: {e}")
     return {"success": False, "applied": False, "message": "최적화 모드 초기화에 실패했습니다."}
@@ -1092,7 +848,8 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             purge_ram() # 강력한 램 클리어 즉시 실행
             
             # 저사양 맞춤 전원 프로필 세팅
-            _set_power_plan(POWER_PLAN_BALANCED)
+            system_state.set_active_plan(POWER_PLAN_BALANCED,
+                                         group='hw_tuning', why='저사양 맞춤 튜닝')
             
             msg = "저사양 맞춤 튜닝 적용 완료: 불필요한 백그라운드 서비스(SysMain, WSearch)를 영구 차단하여 CPU/RAM 점유율을 대폭 낮추었습니다."
             tier = "LowEnd"
@@ -1111,7 +868,8 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             _start_service("WSearch")
             
             # 고성능 프로필 베이스
-            _set_power_plan(POWER_PLAN_HIGH_PERF)
+            system_state.set_active_plan(POWER_PLAN_HIGH_PERF,
+                                         group='hw_tuning', why='고사양 맞춤 튜닝')
             
             msg = "고성능 맞춤 튜닝 적용 완료: 넉넉한 하드웨어 자원을 활용하여 시스템 캐시를 켜고, CPU 성능을 100% 개방하도록 영구 튜닝했습니다."
             tier = "HighEnd"

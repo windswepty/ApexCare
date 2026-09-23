@@ -10,6 +10,8 @@ from backend import file_finder
 from backend import debloater
 from backend import game_booster
 from backend import config_manager
+from backend import perf_modes
+from backend import system_state
 
 log = logging.getLogger('API')
 
@@ -118,7 +120,32 @@ class Api:
         return optimizer.get_optimization_mode()
 
     def setOptimizationMode(self, mode):
-        return optimizer.set_optimization_mode(mode)
+        """성능 모드 적용.
+
+        반환값의 steps 에 항목별 성패가 들어 있다. 프론트는 이것을 반드시 확인해야 한다.
+        예전에는 버튼을 누른 즉시 성공 토스트를 띄워, 실제로는 아무것도 적용되지 않아도
+        사용자가 알 수 없었다.
+        """
+        return perf_modes.apply_mode(mode)
+
+    def listOptimizationModes(self):
+        """모드 카드에 표시할 정보. 무엇이 바뀌는지 미리 보여주기 위한 것."""
+        return perf_modes.list_modes()
+
+    def revertAllSystemChanges(self):
+        """이 앱이 바꾼 모든 시스템 설정을 원래대로 되돌린다."""
+        return perf_modes.revert_everything()
+
+    def getPendingSystemChanges(self):
+        """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼 노출 여부를 판단한다."""
+        changes = system_state.pending_changes()
+        by_group = {}
+        for key, e in changes.items():
+            by_group.setdefault(e.get('group', '기타'), []).append({
+                'what': e.get('why') or key,
+                'kind': e.get('kind'),
+            })
+        return {'count': len(changes), 'groups': by_group}
         
     def applyHardwareTuning(self, cpu_cores, ram_gb, consent=False):
         # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).

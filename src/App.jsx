@@ -81,23 +81,12 @@ export default function App() {
     document.body.classList.add('dark');
   }, []);
 
-  const modeInitialized = useRef(false);
-  useEffect(() => {
-    if (!modeInitialized.current) {
-      modeInitialized.current = true;
-      return; // Skip first render - initial mode is loaded from backend
-    }
-    const applyMode = async () => {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.setOptimizationMode === 'function') {
-        try {
-          await window.pywebview.api.setOptimizationMode(currentMode);
-        } catch (e) {
-          console.error('Error setting optimization mode:', e);
-        }
-      }
-    };
-    applyMode();
-  }, [currentMode]);
+  // 모드 적용은 PerformanceModes 컴포넌트가 직접 한다.
+  //
+  // 예전에는 currentMode 가 바뀌면 이 useEffect 가 백엔드를 호출했는데,
+  // 반환값을 await 만 하고 버려서 실패를 알 방법이 없었다. 게다가 상태 변경을
+  // 부수효과로 시스템을 바꾸는 구조라 어디서 setCurrentMode 를 불러도
+  // 의도치 않게 OS 설정이 바뀌었다. 이제 setCurrentMode 는 화면 표시만 담당한다.
 
   useEffect(() => {
     if (!scrollWrapperRef.current || !scrollContentRef.current) return;
@@ -131,9 +120,26 @@ export default function App() {
             <InitialSetupWizard 
               stats={systemStats} 
               isDarkMode={isDarkMode} 
-              onComplete={(selectedMode) => {
-                setCurrentMode(selectedMode);
+              onComplete={async (selectedMode) => {
                 setShowInitialWizard(false);
+                // 마법사에서 고른 모드를 실제로 적용하고 결과를 알린다.
+                // 예전에는 setCurrentMode 만 해서 화면만 바뀌고 적용은 안 될 수 있었다.
+                const a = window.pywebview && window.pywebview.api;
+                if (a && typeof a.setOptimizationMode === 'function') {
+                  try {
+                    const res = await a.setOptimizationMode(selectedMode);
+                    if (res?.success) {
+                      setCurrentMode(selectedMode);
+                      addToast(res.message || '성능 모드를 적용했습니다.', 'success');
+                    } else if (res?.error === 'UAC_REQUIRED') {
+                      addToast('관리자 권한이 없어 성능 모드를 적용하지 못했습니다.', 'error');
+                    } else {
+                      addToast(res?.message || '성능 모드 적용에 실패했습니다.', 'error');
+                    }
+                  } catch (e) {
+                    addToast(`성능 모드 적용 중 오류: ${e}`, 'error');
+                  }
+                }
               }} 
             />
           ) : showLoading ? (
