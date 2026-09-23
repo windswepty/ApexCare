@@ -13,6 +13,7 @@ from backend import config_manager
 from backend import perf_modes
 from backend import system_state
 from backend import process_boost
+from backend import storage
 
 log = logging.getLogger('API')
 
@@ -184,6 +185,11 @@ class Api:
 
     def cleanAppLeftovers(self, paths):
         return uninstaller.clean_leftovers(paths)
+
+    # --- 저장공간 현황 ---
+    def getStorageOverview(self):
+        """드라이브별 용량과 매체 종류(SSD/HDD). 읽기만 한다."""
+        return storage.get_overview()
 
     # --- File Finder Features ---
     def findLargeFiles(self, min_mb=500):

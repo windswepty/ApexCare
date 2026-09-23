@@ -2,7 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+/* 외부 폰트를 런타임에 불러오지 않는다.
+   이 앱은 관리자 권한으로 실행되고, 오프라인에서도 동작해야 한다.
+   Tailwind CDN 을 제거한 것과 같은 이유다. Windows 기본 폰트로 대체한다. */
 
 :root {
   --bg-primary: #ffffff; 
@@ -15,8 +17,8 @@
   --text-muted: #475569;
   --text-dim: #94a3b8;
 
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Pretendard', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Malgun Gothic', sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, 'D2Coding', ui-monospace, monospace;
 }
 
 .dark {

@@ -44,12 +44,12 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
   const menuItems = [
     { id: 'dashboard', label: '대시보드 (Dashboard)', icon: LayoutDashboard },
-    { id: 'cleaner', label: '정크 파일 세척 (Junk Clean)', icon: Trash2 },
+    // 정크·대용량 탐색·조각모음을 하나의 '저장공간' 탭으로 합쳤다.
+    // 세 곳에 흩어져 있어 사용자가 '지금 디스크 상태가 어떤지' 볼 방법이 없었다.
+    { id: 'storage', label: '저장공간 정리', icon: HardDrive },
     { id: 'ram', label: 'RAM 메모리 최적화', icon: Cpu },
     { id: 'startup', label: '시작 프로그램 관리', icon: Rocket },
     { id: 'uninstaller', label: '프로그램 완전 삭제', icon: PackageMinus },
-    { id: 'fileFinder', label: '대용량/중복 탐색기', icon: SearchCode },
-    { id: 'defrag', label: '디스크 조각모음 & TRIM', icon: HardDrive },
     { id: 'modes', label: '성능 부스트 모드', icon: Zap },
     { id: 'gamebooster', label: '스마트 게임 부스터', icon: Crosshair },
     { id: 'drivers', label: 'OS 코어 복구 (SFC/DISM)', icon: ShieldCheck },

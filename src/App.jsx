@@ -5,19 +5,16 @@ import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
-import JunkCleaner from './components/JunkCleaner';
+import StorageCenter from './components/StorageCenter';
 import RamBooster from './components/RamBooster';
 import StartupManager from './components/StartupManager';
-import DiskDefrag from './components/DiskDefrag';
 import PerformanceModes from './components/PerformanceModes';
 import DriverUpdater from './components/DriverUpdater';
 import Uninstaller from './components/Uninstaller';
-import FileFinder from './components/FileFinder';
 import Debloater from './components/Debloater';
 import GameBooster from './components/GameBooster';
 import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
-import { JunkProvider } from './context/JunkContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
 
@@ -113,7 +110,6 @@ export default function App() {
   }, []);
   return (
     <ErrorBoundary>
-      <JunkProvider addToast={addToast}>
         <div className="h-screen w-screen bg-white dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
           
           {showInitialWizard ? (
@@ -186,17 +182,14 @@ export default function App() {
               <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
                 <Dashboard onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />
               </div>
-              <div style={{ display: activeTab === 'cleaner' ? 'block' : 'none', height: '100%' }}>
-                <JunkCleaner addToast={addToast} />
+              <div style={{ display: activeTab === 'storage' ? 'block' : 'none', height: '100%' }}>
+                <StorageCenter addToast={addToast} />
               </div>
               <div style={{ display: activeTab === 'ram' ? 'block' : 'none', height: '100%' }}>
                 <RamBooster addToast={addToast} />
               </div>
               <div style={{ display: activeTab === 'startup' ? 'block' : 'none', height: '100%' }}>
                 <StartupManager addToast={addToast} />
-              </div>
-              <div style={{ display: activeTab === 'defrag' ? 'block' : 'none', height: '100%' }}>
-                <DiskDefrag addToast={addToast} />
               </div>
               <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
                 <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />
@@ -206,9 +199,6 @@ export default function App() {
               </div>
               <div style={{ display: activeTab === 'uninstaller' ? 'block' : 'none', height: '100%' }}>
                 <Uninstaller addToast={addToast} />
-              </div>
-              <div style={{ display: activeTab === 'fileFinder' ? 'block' : 'none', height: '100%' }}>
-                <FileFinder addToast={addToast} />
               </div>
               <div style={{ display: activeTab === 'debloater' ? 'block' : 'none', height: '100%' }}>
                 <Debloater addToast={addToast} />
@@ -241,7 +231,6 @@ export default function App() {
       </div>
 
     </div>
-    </JunkProvider>
     </ErrorBoundary>
   );
 }
