@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
 
 :root {
@@ -280,3 +284,15 @@ body {
     transform: scale(1.15) translateY(-10px);
   }
 }
+
+
+/* 여러 화면이 쓰지만 어디에도 정의돼 있지 않던 클래스.
+   Tailwind 유틸리티가 아니라서 CDN 시절에도 아무 효과가 없었다. */
+.custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(34, 211, 238, 0.3);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.5); }
+.preserve-3d { transform-style: preserve-3d; }

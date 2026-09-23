@@ -8,6 +8,7 @@ log = logging.getLogger('FileFinder')
 
 # Import shared protection constants from optimizer
 from backend.optimizer import PROTECTED_ROOTS, DANGER_EXTS
+from backend import safe_delete
 
 def get_local_drives():
     import psutil
@@ -179,39 +180,39 @@ def scan_duplicates():
     return duplicates
 
 def delete_files(paths):
-    """Delete multiple files safely with strict system folder protection.
-    
-    Uses module-level PROTECTED_ROOTS and DANGER_EXTS from optimizer.
-    Allows deletion of user-selected files (large files, duplicates) as long as
-    they are NOT in protected directories and NOT system-critical extensions.
+    """선택한 파일을 휴지통으로 보낸다.
+
+    예전에는 os.unlink 로 영구 삭제했다. 스캔 범위에 사용자의 문서·사진·동영상·
+    소스코드·VM 디스크가 전부 포함되므로, 잘못 고른 파일 하나가 곧바로
+    복구 불가능한 손실이 됐다. 휴지통을 거치면 되돌릴 수 있다.
     """
-    deleted_mb = 0
-    failed = 0
-    
+    if not paths:
+        return {"success": True, "freedMB": 0, "deleted": 0, "failed": [],
+                "message": "선택된 항목이 없습니다."}
+
+    targets, rejected = [], []
     for p in paths:
-        if not os.path.exists(p) or not os.path.isfile(p):
-            failed += 1
+        if not isinstance(p, str) or not os.path.exists(p):
+            rejected.append({"path": p, "reason": "파일이 존재하지 않습니다"})
             continue
-            
-        # Zero-Risk Shield: prevent deletion inside protected zones
-        p_lower = p.lower()
-        is_protected = any(pr in p_lower for pr in PROTECTED_ROOTS)
-        if is_protected:
-            failed += 1
+        # 시스템 보호 구역과 위험 확장자는 그대로 유지한다
+        if any(pr in p.lower() for pr in PROTECTED_ROOTS):
+            rejected.append({"path": p, "reason": "보호된 시스템 폴더"})
             continue
-            
-        # Zero-Risk Shield: block system-critical extensions
-        ext = os.path.splitext(p)[1].lower()
-        if ext in DANGER_EXTS:
-            failed += 1
+        if os.path.splitext(p)[1].lower() in DANGER_EXTS:
+            rejected.append({"path": p, "reason": "시스템에 필요한 파일 형식"})
             continue
-        
-        try:
-            size = os.path.getsize(p)
-            os.unlink(p)
-            deleted_mb += (size / (1024*1024))
-        except Exception as e:
-            log.warning(f"Failed to delete {p}: {e}")
-            failed += 1
-                
-    return {"success": True, "freedMB": round(deleted_mb, 2), "failed": failed}
+        targets.append(p)
+
+    res = safe_delete.to_recycle_bin(targets)
+    failed = rejected + res['failed']
+
+    return {
+        "success": bool(res['ok']) or not targets,
+        "freedMB": round(res['bytes'] / (1024 ** 2), 2),
+        "deleted": len(res['ok']),
+        "failed": failed,
+        "message": (f"{len(res['ok'])}개 파일을 휴지통으로 보냈습니다."
+                    + (f" {len(failed)}개는 건너뛰었습니다." if failed else "")
+                    + " 휴지통에서 복구할 수 있습니다."),
+    }

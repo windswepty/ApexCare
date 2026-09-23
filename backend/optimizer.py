@@ -268,7 +268,13 @@ def scan_junk_background():
             {"id": 2, "name": "웹 브라우저 캐시 및 쿠키 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지, 스크립트 캐시 데이터"},
             {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
-            {"id": 5, "name": "휴지통 비우기", "sizeMB": recycle_size, "category": "System", "selected": True, "description": "휴지통에 버려진 파일들을 완전히 삭제합니다"},
+            # 기본 체크 해제. 이 목록에서 유일하게 복구가 불가능한 항목이다.
+            # 다른 항목은 임시·캐시 파일이라 OS 가 다시 만들지만, 휴지통을 비우면
+            # 사용자가 '나중에 확인하려고' 넣어둔 파일이 영영 사라진다.
+            # 사용자가 직접 체크해야만 실행된다.
+            {"id": 5, "name": "휴지통 비우기", "sizeMB": recycle_size, "category": "System",
+             "selected": False, "irreversible": True,
+             "description": "휴지통 안의 파일을 완전히 삭제합니다. 되돌릴 수 없습니다."},
         ]
         _junk_scan_state["progress"] = 100
         _junk_scan_state["eta_seconds"] = 0
