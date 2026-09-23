@@ -98,6 +98,11 @@ def _run_deep_optimization():
     }
     _cancel_event.clear()
     
+    # 단계별 성패를 모은다. 예전에는 하위 단계가 전부 실패해도 마지막에
+    # "완료! 시스템이 완벽하게 최적화되었습니다." 로 끝냈다.
+    steps = []
+    _optimization_state["steps"] = steps
+
     try:
         # Step 1: Deep Junk Clean (synchronous within this thread)
         _optimization_state["current_task"] = "브라우저 캐시, 임시 파일, 업데이트 잔여물 삭제 중..."
@@ -106,12 +111,19 @@ def _run_deep_optimization():
         # 실제 상태 키는 'freed_mb'. 예전엔 'freedMB' 를 읽어서 항상 0MB 로 보고됐다.
         freed = _junk_clean_state.get("freed_mb", 0)
         _optimization_state["freed_mb"] += freed
+        junk_ok = _junk_clean_state.get("status") in ("success", "cancelled")
+        steps.append({"name": "정크 파일 정리", "ok": junk_ok,
+                      "detail": f"{freed}MB 확보" if junk_ok
+                                else _junk_clean_state.get("error", "실패")})
         _optimization_state["progress_pct"] = 40
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
-        
+
         # Step 2: RAM Purge
         _optimization_state["current_task"] = "유휴 프로세스 정리 및 가용 메모리 확보 중..."
-        purge_ram()
+        ram_res = purge_ram()
+        steps.append({"name": "대기 메모리 해제", "ok": bool(ram_res.get("success")),
+                      "detail": "" if ram_res.get("success")
+                                else ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
         _optimization_state["progress_pct"] = 60
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
@@ -119,7 +131,9 @@ def _run_deep_optimization():
         # 여기서는 캐시만 비운다. Winsock 초기화/TCP 튜닝 같은 영구 변경은
         # 사용자 동의 없이 원클릭 최적화에 섞어 넣지 않는다.
         _optimization_state["current_task"] = "DNS 캐시 초기화 중..."
-        system_repair.run_network_optimization_sync()
+        dns_res = system_repair.run_network_optimization_sync()
+        steps.append({"name": "DNS 캐시 초기화", "ok": bool(dns_res.get("success")),
+                      "detail": "" if dns_res.get("success") else dns_res.get("message", "실패")})
         _optimization_state["progress_pct"] = 80
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
@@ -128,20 +142,31 @@ def _run_deep_optimization():
         # 아직 돌고 있는데 화면에는 '완료'가 떠 버린다.
         _optimization_state["current_task"] = "물리 디스크 응답속도 최적화(TRIM) 중..."
         trim_res = system_repair.run_trim()
+        trim_ok = False
         if trim_res.get("success"):
             trim_deadline = time.time() + 300
             while time.time() < trim_deadline:
-                if system_repair.get_trim_status().get("status") != "running":
+                st = system_repair.get_trim_status().get("status")
+                if st != "running":
+                    trim_ok = (st == "success")
                     break
                 if _cancel_event.is_set():
                     # TRIM 자체는 중간에 끊지 않는다(디스크 작업). 대기만 그만둔다.
                     break
                 time.sleep(1)
+        steps.append({"name": "디스크 최적화(TRIM)", "ok": trim_ok,
+                      "detail": "" if trim_ok
+                                else system_repair.get_trim_status().get("error", "완료 확인 실패")})
 
+        failed = [s for s in steps if not s["ok"]]
         _optimization_state["progress_pct"] = 100
         _optimization_state["eta_seconds"] = 0
-        _optimization_state["current_task"] = "완료! 시스템이 완벽하게 최적화되었습니다."
-        
+        _optimization_state["failedCount"] = len(failed)
+        _optimization_state["current_task"] = (
+            f"완료 — {len(steps) - len(failed)}개 단계 성공"
+            + (f", {len(failed)}개 실패" if failed else "")
+        )
+
     except Exception as e:
         _optimization_state["error"] = str(e)
         _optimization_state["current_task"] = f"취소/오류: {str(e)}"
@@ -1014,51 +1039,117 @@ def get_startup_apps():
     return apps
 
 def toggle_startup_app(name, enabled):
-    """Enable or disable a startup app by moving it between Run keys and APEXCARE\\DisabledStartup."""
-    registry_locations = [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+    """시작 프로그램을 켜고 끈다.
+
+    기존 구현의 문제:
+      1. 항목을 어느 Run 키에서도 찾지 못해도 success=True 를 돌려줬다.
+         found 플래그를 만들어 놓고 한 번도 검사하지 않았다.
+         사용자는 '껐다' 고 생각하지만 실제로는 아무 일도 없었다.
+      2. 다시 켤 때 무조건 HKCU 의 Run 키에 복원했다. 원래 HKLM(모든 사용자)에
+         있던 항목이 HKCU(현재 사용자)로 옮겨져 적용 범위가 조용히 바뀐다.
+      3. 복원 경로 전체가 except: pass 로 감싸여 실패해도 성공으로 보고됐다.
+
+    이제 끌 때 '어느 하이브의 어느 경로에 있었는지' 를 함께 기록하고,
+    켤 때 정확히 그 자리로 되돌린다.
+    """
+    RUN_LOCATIONS = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 'HKCU'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 'HKLM'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", 'HKLM32'),
     ]
-    
+    HIVE_BY_TAG = {'HKCU': winreg.HKEY_CURRENT_USER,
+                   'HKLM': winreg.HKEY_LOCAL_MACHINE,
+                   'HKLM32': winreg.HKEY_LOCAL_MACHINE}
+    BACKUP = r"Software\APEXCARE\DisabledStartup"
+    ORIGIN = r"Software\APEXCARE\DisabledStartup\_origin"
+
+    if not name or not isinstance(name, str):
+        return {"success": False, "message": "프로그램 이름이 올바르지 않습니다."}
+
     try:
-        try:
-            backup_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup")
-        except Exception:
-            backup_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup", 0, winreg.KEY_ALL_ACCESS)
-            
         if not enabled:
-            # Look in all Run registry paths to disable
-            found = False
-            for hkey, path in registry_locations:
+            # ── 끄기: 원래 위치를 기록한 뒤 Run 키에서 제거 ──
+            for hive, path, tag in RUN_LOCATIONS:
                 try:
-                    run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_ALL_ACCESS)
-                    try:
-                        val, vtype = winreg.QueryValueEx(run_key, name)
-                        # Save value in backup_key
-                        winreg.SetValueEx(backup_key, name, 0, vtype, val)
-                        # Delete from original Run key
+                    with winreg.OpenKey(hive, path, 0, winreg.KEY_ALL_ACCESS) as run_key:
+                        try:
+                            val, vtype = winreg.QueryValueEx(run_key, name)
+                        except FileNotFoundError:
+                            continue
+                        # 먼저 백업한다. 백업에 실패하면 삭제하지 않는다.
+                        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, BACKUP, 0,
+                                                winreg.KEY_SET_VALUE) as bk:
+                            winreg.SetValueEx(bk, name, 0, vtype, val)
+                        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, ORIGIN, 0,
+                                                winreg.KEY_SET_VALUE) as ok_:
+                            winreg.SetValueEx(ok_, name, 0, winreg.REG_SZ, f"{tag}|{path}")
                         winreg.DeleteValue(run_key, name)
-                        found = True
-                    except FileNotFoundError:
-                        pass
-                    finally:
-                        winreg.CloseKey(run_key)
-                    if found: break
-                except Exception:
-                    pass
-        else:
-            # Move back from DisabledStartup to HKCU Run key
-            try:
-                val, vtype = winreg.QueryValueEx(backup_key, name)
-                run_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+                        log.info(f"시작 프로그램 비활성화: {name} ({tag})")
+                        return {"success": True, "enabled": False, "origin": tag,
+                                "message": f"'{name}' 을 시작 프로그램에서 제외했습니다."}
+                except PermissionError:
+                    return {"success": False,
+                            "message": f"'{name}' 은 관리자 권한이 있어야 끌 수 있습니다."}
+                except FileNotFoundError:
+                    continue
+                except Exception as e:
+                    log.debug(f"{tag} 확인 실패: {e}")
+
+            # 어느 Run 키에도 없었다. 이것을 성공이라고 하면 안 된다.
+            return {"success": False,
+                    "message": f"'{name}' 을 시작 프로그램 목록에서 찾지 못했습니다. "
+                               "이미 제거되었거나 다른 방식(작업 스케줄러 등)으로 "
+                               "등록된 항목일 수 있습니다."}
+
+        # ── 켜기: 기록해둔 원래 자리로 되돌린다 ──
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, BACKUP, 0, winreg.KEY_READ) as bk:
+                val, vtype = winreg.QueryValueEx(bk, name)
+        except FileNotFoundError:
+            return {"success": False,
+                    "message": f"'{name}' 의 백업을 찾지 못했습니다. "
+                               "이 프로그램으로 끈 항목만 다시 켤 수 있습니다."}
+
+        tag, path = 'HKCU', RUN_LOCATIONS[0][1]
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, ORIGIN, 0, winreg.KEY_READ) as ok_:
+                origin = winreg.QueryValueEx(ok_, name)[0]
+                tag, path = origin.split('|', 1)
+        except Exception:
+            # 구버전에서 끈 항목은 출처 기록이 없다. HKCU 로 복원하고 그 사실을 알린다.
+            pass
+
+        hive = HIVE_BY_TAG.get(tag, winreg.HKEY_CURRENT_USER)
+        access = winreg.KEY_SET_VALUE
+        if tag == 'HKLM32':
+            access |= winreg.KEY_WOW64_32KEY
+        try:
+            with winreg.CreateKeyEx(hive, path, 0, access) as run_key:
                 winreg.SetValueEx(run_key, name, 0, vtype, val)
-                winreg.CloseKey(run_key)
-                winreg.DeleteValue(backup_key, name)
+        except PermissionError:
+            return {"success": False,
+                    "message": f"'{name}' 을 원래 위치({tag})로 되돌리려면 관리자 권한이 필요합니다."}
+
+        # 되읽어 확인한다
+        try:
+            with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | (winreg.KEY_WOW64_32KEY if tag == 'HKLM32' else 0)) as run_key:
+                back = winreg.QueryValueEx(run_key, name)[0]
+            if back != val:
+                return {"success": False, "message": "복원 후 값이 일치하지 않습니다."}
+        except Exception as e:
+            return {"success": False, "message": f"복원 확인에 실패했습니다: {e}"}
+
+        for key_path in (BACKUP, ORIGIN):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as k:
+                    winreg.DeleteValue(k, name)
             except Exception:
                 pass
-        
-        winreg.CloseKey(backup_key)
-        return {"success": True}
+
+        log.info(f"시작 프로그램 활성화: {name} -> {tag}")
+        return {"success": True, "enabled": True, "origin": tag,
+                "message": f"'{name}' 을 원래 위치({tag})로 되돌렸습니다."}
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        log.error(f"시작 프로그램 전환 실패 {name}: {e}")
+        return {"success": False, "message": f"시작 프로그램 설정 변경에 실패했습니다: {e}"}

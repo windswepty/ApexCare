@@ -10,8 +10,29 @@ export default function TitleBar({ onOpenSettings }) {
     if (window.pywebview?.api) window.pywebview?.api.maximizeWindow();
   };
 
-  const handleClose = () => {
-    if (window.pywebview?.api) window.pywebview?.api.closeWindow();
+  /**
+   * 창 닫기.
+   *
+   * 백엔드가 진행 중인 작업을 확인해 busy 를 돌려준다. 예전에는 즉시
+   * os._exit(0) 으로 프로세스를 죽여서, 파일을 지우는 중이거나 시스템 변경
+   * 기록을 디스크에 쓰기 직전이었다면 그대로 끊겼다.
+   */
+  const handleClose = async () => {
+    const api = window.pywebview?.api;
+    if (!api?.closeWindow) return;
+    try {
+      const res = await api.closeWindow();
+      if (res?.busy) {
+        const ok = window.confirm(
+          `${res.reason} 작업이 진행 중입니다.\n\n` +
+          '지금 종료하면 작업이 중간에 끊기고, 되돌리기 정보가 저장되지 않을 수 있습니다.\n\n' +
+          '그래도 종료할까요?'
+        );
+        if (ok) await api.closeWindow(true);
+      }
+    } catch (e) {
+      console.error('종료 실패:', e);
+    }
   };
 
   return (

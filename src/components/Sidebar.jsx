@@ -12,7 +12,8 @@ import {
   PackageMinus,
   SearchCode,
   ServerCrash,
-  Crosshair
+  Crosshair,
+  History
 } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
@@ -54,6 +55,9 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'gamebooster', label: '스마트 게임 부스터', icon: Crosshair },
     { id: 'drivers', label: 'OS 코어 복구 (SFC/DISM)', icon: ShieldCheck },
     { id: 'debloater', label: '윈도우 하드코어 적출', icon: ServerCrash },
+    // 이 프로그램이 바꾼 모든 것을 확인하고 되돌리는 곳.
+    // 복구 기능이 백엔드에만 있고 UI 가 없으면 사실상 되돌릴 수 없는 것과 같다.
+    { id: 'restore', label: '변경 내역 · 되돌리기', icon: History },
   ];
 
   return (

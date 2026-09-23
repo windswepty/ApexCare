@@ -244,15 +244,58 @@ class Api:
         return {'count': process_boost.adjusted_count()}
 
 
-    def closeWindow(self):
+    def _busy_reason(self):
+        """지금 끄면 안 되는 작업이 돌고 있는지."""
+        try:
+            if optimizer.get_deep_optimization_status().get('running'):
+                return '원클릭 최적화'
+            if optimizer.get_junk_clean_status().get('status') == 'running':
+                return '정크 파일 정리'
+            for name, getter in (('SFC 검사', system_repair.get_sfc_status),
+                                 ('DISM 복구', system_repair.get_dism_status),
+                                 ('디스크 최적화', system_repair.get_trim_status)):
+                if getter().get('status') == 'running':
+                    return name
+        except Exception:
+            pass
+        return None
+
+    def getShutdownBlockers(self):
+        """창을 닫기 전에 프론트가 물어볼 수 있게 한다."""
+        reason = self._busy_reason()
+        return {'busy': bool(reason), 'reason': reason}
+
+    def closeWindow(self, force=False):
+        """창을 닫는다.
+
+        os._exit(0) 는 정리 코드를 하나도 실행하지 않고 프로세스를 즉시 죽인다.
+        파일을 지우는 중이었다면 그 순간에 끊기고, 시스템 변경 저널이 디스크에
+        기록되기 전이었다면 '되돌리기' 정보가 통째로 사라진다.
+        진행 중인 작업이 있으면 알리고, 정상 종료 경로를 먼저 시도한다.
+        """
+        reason = self._busy_reason()
+        if reason and not force:
+            return {'success': False, 'busy': True, 'reason': reason,
+                    'message': f'{reason} 작업이 진행 중입니다. 완료 후 종료하거나 먼저 중단해 주세요.'}
+
+        try:
+            game_booster.toggle_booster(False)   # 부스트가 바꾼 것을 되돌린다
+        except Exception as e:
+            log.warning(f"종료 중 부스터 정리 실패: {e}")
+        try:
+            process_boost.restore_all()          # 우선순위를 원래대로
+        except Exception as e:
+            log.warning(f"종료 중 우선순위 복구 실패: {e}")
+
         if self._window:
-            self._window.destroy()
-        import os
-        os._exit(0)
-            
-    def quitApplication(self):
-        import os
-        os._exit(0)
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+        return {'success': True}
+
+    def quitApplication(self, force=False):
+        return self.closeWindow(force=force)
 
     def minimizeWindow(self):
         if self._window:

@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import StorageCenter from './components/StorageCenter';
+import RestoreCenter from './components/RestoreCenter';
 import RamBooster from './components/RamBooster';
 import StartupManager from './components/StartupManager';
 import PerformanceModes from './components/PerformanceModes';
@@ -182,6 +183,10 @@ export default function App() {
               <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
                 <Dashboard onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />
               </div>
+              <div style={{ display: activeTab === 'restore' ? 'block' : 'none', height: '100%' }}>
+                <RestoreCenter addToast={addToast} />
+              </div>
+
               <div style={{ display: activeTab === 'storage' ? 'block' : 'none', height: '100%' }}>
                 <StorageCenter addToast={addToast} />
               </div>
