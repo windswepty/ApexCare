@@ -38,9 +38,12 @@ MODE_GROUP = 'perf_mode'      # 이 그룹의 변경만 모드 전환 시 되돌
 MODES = {
     'standard': {
         'label': '표준',
-        'summary': 'Windows 기본 상태로 되돌립니다. 이 앱이 바꾼 성능 설정을 모두 원상복구합니다.',
-        'plan': ss.PLAN_BALANCED,
-        'power': [],          # 아무것도 쓰지 않는다. 복구가 곧 표준이다.
+        'summary': '이 앱의 성능 모드가 바꾼 설정을 모두 원래대로 되돌립니다. 새로 바꾸는 것은 없습니다.',
+        # 전원 플랜도 바꾸지 않는다. 예전에는 '균형 조정' 으로 전환했는데, 사용자가
+        # 원래 고성능 플랜을 쓰고 있었다면 '표준 = 원상복구' 라는 설명과 달리
+        # 새 변경을 만드는 셈이었다. 복구가 곧 표준이다.
+        'plan': None,
+        'power': [],
         'registry': [],
     },
     'gaming': {
@@ -101,10 +104,12 @@ def _plan_fallback(wanted):
             '사용 가능한 전원 플랜을 찾지 못했습니다.')
 
 
-def apply_mode(mode, user_set=True):
+def apply_mode(mode, user_set=True, persist=True):
     """성능 모드를 적용한다.
 
     반환값에 항목별 성패가 그대로 들어간다. 호출부는 이것을 사용자에게 보여줘야 한다.
+    persist=False 는 '저장된 모드' 를 바꾸지 않는다. 게임 부스트가 게임 동안만
+    게이밍 모드를 쓰고 끝나면 사용자가 쓰던 모드로 돌아가기 위한 것이다.
     """
     if mode not in MODES:
         return {'success': False, 'error': 'UNKNOWN_MODE',
@@ -132,19 +137,21 @@ def apply_mode(mode, user_set=True):
         notes.append('일부 이전 설정을 되돌리지 못했습니다. 관리자 권한을 확인하세요.')
 
     # ── 2단계: 전원 플랜 ──────────────────────────────────────────
-    target_plan, fallback_note = _plan_fallback(spec['plan'])
-    if fallback_note:
-        notes.append(fallback_note)
+    target_plan = None
+    if spec['plan']:
+        target_plan, fallback_note = _plan_fallback(spec['plan'])
+        if fallback_note:
+            notes.append(fallback_note)
 
-    if target_plan:
-        r = ss.set_active_plan(target_plan, group=MODE_GROUP, why=f'{spec["label"]} 모드')
-        steps.append({
-            'name': f"전원 플랜 → {ss.KNOWN_PLANS.get(target_plan, target_plan)}",
-            'ok': r['ok'], 'detail': '' if r['ok'] else r.get('reason', ''),
-        })
-    else:
-        steps.append({'name': '전원 플랜 전환', 'ok': False,
-                      'detail': '사용 가능한 플랜 없음'})
+        if target_plan:
+            r = ss.set_active_plan(target_plan, group=MODE_GROUP, why=f'{spec["label"]} 모드')
+            steps.append({
+                'name': f"전원 플랜 → {ss.KNOWN_PLANS.get(target_plan, target_plan)}",
+                'ok': r['ok'], 'detail': '' if r['ok'] else r.get('reason', ''),
+            })
+        else:
+            steps.append({'name': '전원 플랜 전환', 'ok': False,
+                          'detail': '사용 가능한 플랜 없음'})
 
     # ── 3단계: 전원 세부값 (AC/DC 모두) ──────────────────────────
     for sub, setting, value, label in spec['power']:
@@ -163,12 +170,16 @@ def apply_mode(mode, user_set=True):
     applied = [s for s in steps if s['ok']]
     failed = [s for s in steps if not s['ok']]
 
-    # 전원 플랜조차 못 바꿨으면 모드가 적용됐다고 말할 수 없다
-    plan_step = next((s for s in steps if s['name'].startswith('전원 플랜')), None)
-    plan_ok = bool(plan_step and plan_step['ok'])
+    # 전원 플랜조차 못 바꿨으면 모드가 적용됐다고 말할 수 없다.
+    # 표준 모드는 플랜을 바꾸지 않으므로 '되돌리기' 가 성공했는지가 기준이다.
+    if spec['plan']:
+        plan_step = next((s for s in steps if s['name'].startswith('전원 플랜')), None)
+        plan_ok = bool(plan_step and plan_step['ok'])
+    else:
+        plan_ok = reverted['ok']
     success = plan_ok and not failed
 
-    if success or plan_ok:
+    if persist and (success or plan_ok):
         try:
             from backend import config_manager
             config_manager.set_optimization_mode(mode, user_set=user_set)
@@ -219,8 +230,13 @@ def get_mode():
     if saved not in MODES:
         saved = 'standard'
 
-    expected_plan, _ = _plan_fallback(MODES[saved]['plan'])
-    in_sync = (active == expected_plan) if (active and expected_plan) else False
+    if MODES[saved]['plan']:
+        expected_plan, _ = _plan_fallback(MODES[saved]['plan'])
+        in_sync = (active == expected_plan) if (active and expected_plan) else False
+    else:
+        # 표준은 특정 플랜이 정답이 아니다. 성능 모드가 남긴 변경이 없으면 맞는 상태다.
+        expected_plan = None
+        in_sync = not any(e.get('group') == MODE_GROUP for e in ss.pending_changes().values())
 
     return {
         'mode': saved,
@@ -231,47 +247,61 @@ def get_mode():
         'expectedPlan': expected_plan,
         # 앱 밖에서 전원 플랜이 바뀌었을 때 UI 가 사용자에게 알릴 수 있게 한다
         'inSync': in_sync,
+        # 게임 부스트가 게임 동안만 게이밍 모드를 적용 중이면, 불일치 경고 대신 그 사실을 알린다
+        'boostOverride': _boost_override(),
         'pendingChanges': len(ss.pending_changes()),
     }
+
+
+def _boost_override():
+    try:
+        from backend import game_booster
+        return game_booster.power_mode_overridden()
+    except Exception:
+        return False
 
 
 def revert_everything():
     """이 앱이 바꾼 모든 시스템 설정을 원래대로. 사용자가 언제든 누를 수 있어야 한다.
 
-    system_state 저널뿐 아니라, 그 이전부터 있던 별도 복구 경로도 함께 부른다.
-    네트워크 튜닝과 하드웨어 맞춤 서비스 설정은 각자 자기 백업을 들고 있는데,
-    프론트엔드 어디에서도 호출되지 않아 사실상 되돌릴 방법이 없는 상태였다.
-    '전부 원래대로' 가 일부만 되돌린다면 그 이름이 거짓말이 된다.
+    system_state 저널을 전부 되돌리고, 구버전이 settings.json 에 따로 남긴 백업
+    (네트워크 튜닝, 하드웨어 튜닝 서비스 설정)이 있으면 그것도 되돌린다.
+
+    예전에는 구버전 복구 함수를 무조건 불렀고, 그 함수들은 백업이 없으면
+    'Windows 기본값' 을 추측해 써넣었다. 그래서 그 기능을 한 번도 쓰지 않은 사용자가
+    '전부 원래대로' 를 누르면 일부러 꺼 둔 Windows Search 가 다시 켜지고, 모든
+    네트워크 어댑터의 Nagle 설정이 지워졌다. 복구 버튼이 새 변경을 만든 것이다.
     """
     if not is_admin():
         return {'success': False, 'error': 'UAC_REQUIRED',
                 'message': '되돌리려면 관리자 권한이 필요합니다.'}
 
     parts = []
+    # 저널이 먼저다. 구버전 백업은 저널보다 오래된 원본이므로 뒤에서 덮어쓰는 게 맞다.
     r = ss.restore_all()
-    parts.append({'name': '성능 모드 설정', 'ok': r['ok'],
+    parts.append({'name': '시스템 설정 (성능 모드·튜닝·부스트)', 'ok': r['ok'],
+                  'detail': f"{r['restored']}개 복구"
+                            + (f", {len(r['failed'])}개 실패" if r['failed'] else ''),
                   'restored': r['restored'], 'failed': r['failed']})
 
-    # 네트워크 영구 튜닝 (Winsock/TCP/Nagle/스로틀링)
-    try:
-        from backend import system_repair
-        if hasattr(system_repair, 'restore_network_tweaks'):
+    from backend import system_repair, optimizer
+    if system_repair.has_legacy_network_backup():
+        try:
             n = system_repair.restore_network_tweaks()
-            parts.append({'name': '네트워크 설정', 'ok': bool(n.get('success')),
+            parts.append({'name': '구버전 네트워크 튜닝', 'ok': bool(n.get('success')),
                           'detail': n.get('message', '')})
-    except Exception as e:
-        parts.append({'name': '네트워크 설정', 'ok': False, 'detail': str(e)})
+        except Exception as e:
+            parts.append({'name': '구버전 네트워크 튜닝', 'ok': False, 'detail': str(e)})
 
-    # 하드웨어 맞춤 튜닝이 바꾼 서비스 시작 유형 (SysMain/WSearch)
-    try:
-        from backend import optimizer
-        if hasattr(optimizer, 'restore_tailored_service_config'):
-            s = optimizer.restore_tailored_service_config()
-            parts.append({'name': '서비스 시작 설정', 'ok': bool(s.get('success')),
+    if optimizer.has_legacy_service_backup():
+        try:
+            s = optimizer.restore_legacy_service_backup()
+            parts.append({'name': '구버전 서비스 시작 설정', 'ok': bool(s.get('success')),
                           'detail': s.get('message', '')})
-    except Exception as e:
-        parts.append({'name': '서비스 시작 설정', 'ok': False, 'detail': str(e)})
+        except Exception as e:
+            parts.append({'name': '구버전 서비스 시작 설정', 'ok': False, 'detail': str(e)})
 
+    # 성능 모드 기록을 '표준' 으로. 저널을 비웠으니 실제 상태도 모드가 없는 상태다.
     try:
         from backend import config_manager
         config_manager.set_optimization_mode('standard', user_set=False)
@@ -280,13 +310,13 @@ def revert_everything():
 
     failed_parts = [p for p in parts if not p['ok']]
     ok = not failed_parts
-
+    total = r['restored']
     return {
         'success': ok,
-        'message': (f"{r['restored']}개 설정을 원래대로 되돌렸습니다."
-                    if ok else
-                    f"{r['restored']}개 복구했지만 {len(failed_parts)}개 항목이 실패했습니다."),
-        'restored': r['restored'],
+        'message': (f"{total}개 설정을 원래대로 되돌렸습니다." if ok else
+                    f"{total}개 복구했지만 {len(failed_parts)}개 영역에서 실패가 있습니다. "
+                    "실패한 항목은 기록에 남아 다시 시도할 수 있습니다."),
+        'restored': total,
         'failed': r['failed'],
         'parts': parts,
     }
@@ -297,15 +327,20 @@ def list_modes():
     plans = ss.available_plans()
     out = []
     for key, spec in MODES.items():
-        target, note = _plan_fallback(spec['plan'])
         changes = [label for *_, label in spec['power']]
         changes += [label for *_, label in spec['registry']]
+        if spec['plan']:
+            target, note = _plan_fallback(spec['plan'])
+            plan_name = plans.get(target, ss.KNOWN_PLANS.get(spec['plan'], '?'))
+            plan_available = spec['plan'] in plans
+        else:
+            note, plan_name, plan_available = None, '원래 플랜 유지', True
         out.append({
             'id': key,
             'label': spec['label'],
             'summary': spec['summary'],
-            'planName': plans.get(target, ss.KNOWN_PLANS.get(spec['plan'], '?')),
-            'planAvailable': spec['plan'] in plans,
+            'planName': plan_name,
+            'planAvailable': plan_available,
             'note': note,
             'changes': changes,
             'reversible': True,

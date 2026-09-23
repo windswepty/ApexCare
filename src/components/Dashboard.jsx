@@ -193,7 +193,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
                     }
                     setIsScanning(false);
                   } else {
-                    finishOptimization(status.freed_mb);
+                    finishOptimization(status);
                   }
                 }
               }
@@ -216,8 +216,16 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     }
   };
 
-  const finishOptimization = (freedMB) => {
-    
+  /**
+   * 백엔드가 돌려준 단계별 성패를 그대로 보여준다.
+   * 예전에는 steps/failedCount 를 보지 않고 항상 '성공적으로 완료' 토스트와 폭죽을 띄웠다.
+   * 부분 실패는 성공이 아니다.
+   */
+  const finishOptimization = (status) => {
+    const freedMB = Number(status?.freed_mb) || 0;
+    const steps = Array.isArray(status?.steps) ? status.steps : [];
+    const failed = steps.filter(s => !s.ok);
+
     const now = new Date().toLocaleDateString('ko-KR');
     localStorage.setItem('apex_last_optimized', now);
     setLastOptimized(now);
@@ -226,12 +234,20 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     localStorage.setItem('apex_total_freed', newTotalFreed);
     setTotalFreed(newTotalFreed);
 
-    try {
-      confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
-    } catch (e) {}
-    
-    if (addToast) {
-      addToast('원클릭 최적화가 성공적으로 완료되었습니다!', 'success');
+    if (steps.length > 0 && failed.length === 0) {
+      try {
+        confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
+      } catch (e) {}
+      addToast?.(`원클릭 최적화를 마쳤습니다. (${steps.length}개 단계 성공, ${freedMB.toFixed(1)}MB 확보)`, 'success');
+    } else {
+      setModalMessage({
+        title: failed.length === steps.length ? '최적화하지 못했습니다' : '일부 단계가 실패했습니다',
+        text: steps.length === 0
+          ? '단계별 결과를 받지 못했습니다.'
+          : `${steps.length - failed.length}개 단계 성공, ${failed.length}개 실패. 관리자 권한으로 실행하면 해결되는 경우가 많습니다.`,
+        steps,
+        isError: true,
+      });
     }
     setIsScanning(false);
   };
@@ -262,6 +278,18 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <div>
                 <h3 className="text-lg font-bold text-black dark:text-white">{modalMessage.title}</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{modalMessage.text}</p>
+                {modalMessage.steps?.length > 0 && (
+                  <ul className="mt-3 space-y-1.5 text-left">
+                    {modalMessage.steps.map((s, i) => (
+                      <li key={i} className="text-xs flex items-start gap-2">
+                        <span className={s.ok ? 'text-emerald-500' : 'text-rose-500'}>{s.ok ? '✓' : '✗'}</span>
+                        <span className="text-gray-600 dark:text-gray-300">
+                          {s.name}{s.detail ? ` — ${s.detail}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <button
                 onClick={() => setModalMessage(null)}

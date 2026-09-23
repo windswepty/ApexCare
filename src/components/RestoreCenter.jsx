@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   History, RotateCcw, ShieldCheck, Loader2, CheckCircle2,
-  AlertTriangle, Cpu, Zap, Network, Server, HardDrive
+  AlertTriangle, Cpu, Zap, Network, Server, HardDrive, Gamepad2, ShieldOff
 } from 'lucide-react';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
@@ -9,8 +9,11 @@ const api = () => (typeof window !== 'undefined' && window.pywebview && window.p
 /** 백엔드가 쓰는 그룹 키를 사람이 읽을 이름으로. */
 const GROUP_META = {
   perf_mode: { label: '성능 모드', icon: Zap, desc: '전원 플랜과 CPU 동작 설정' },
-  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스·전원 설정' },
-  network: { label: '네트워크 튜닝', icon: Network, desc: 'TCP·Winsock 설정' },
+  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정·전원 플랜' },
+  boost: { label: '게임 부스트', icon: Gamepad2, desc: 'Nagle 끄기 (네트워크 어댑터 레지스트리)' },
+  debloat: { label: '원격 분석·Cortana 정책', icon: ShieldOff, desc: '디블로터가 바꾼 정책 레지스트리와 서비스' },
+  legacy_network: { label: '이전 버전의 네트워크 튜닝', icon: Network, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
+  legacy_service: { label: '이전 버전의 서비스 설정', icon: Server, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
   기타: { label: '기타 변경', icon: HardDrive, desc: '' },
 };
 
@@ -47,8 +50,8 @@ export default function RestoreCenter({ addToast }) {
     if (!a?.revertAllSystemChanges) return;
     if (!window.confirm(
       '이 프로그램이 바꾼 모든 시스템 설정을 원래대로 되돌립니다.\n\n' +
-      '전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정, 네트워크 튜닝이\n' +
-      '프로그램을 쓰기 전 상태로 복구됩니다.\n\n계속할까요?'
+      '위 목록에 있는 전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정이\n' +
+      '바꾸기 전에 기록해 둔 값으로 복구됩니다. 기록이 없는 설정은 건드리지 않습니다.\n\n계속할까요?'
     )) return;
 
     setBusy(true);

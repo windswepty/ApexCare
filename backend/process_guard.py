@@ -76,8 +76,7 @@ def normalize_pid(pid):
     """Coerce a PID that arrived from JS into a safe positive int, or None.
 
     pywebview 는 JS 값을 그대로 넘기므로 float / str / bool 이 들어올 수 있다.
-    kill_process 의 taskkill 폴백이 f-string + shell=True 이므로
-    여기서 정수화에 실패한 값은 반드시 버려야 한다.
+    정수화에 실패한 값은 반드시 버린다. PID 는 Win32 호출과 taskkill 인자로 그대로 쓰인다.
     """
     if isinstance(pid, bool):          # bool 은 int 의 서브클래스라 먼저 걸러야 한다
         return None

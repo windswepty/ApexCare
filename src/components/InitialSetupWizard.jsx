@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders, MemoryStick } from 'lucide-react';
+import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, ChevronRight, Loader2, Sparkles, Sliders, MemoryStick, AlertTriangle } from 'lucide-react';
+
+/**
+ * 초기 설정 마법사.
+ *
+ * onComplete() 는 '마법사를 닫는다' 는 뜻일 뿐 시스템을 바꾸지 않는다.
+ * 예전에는 onComplete('standard') 가 App 에서 표준 모드를 적용했다. 그래서
+ * '건너뛰기 (적용 안함)' 을 눌러도 전원 플랜이 바뀌었고, 마법사가 매 실행마다 떴기 때문에
+ * 사용자가 고른 게이밍·에코 모드가 앱을 켤 때마다 풀렸다.
+ */
 
 export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   const [step, setStep] = useState('scanning'); // 'scanning' | 'result' | 'consent' | 'applying'
@@ -7,6 +16,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   const [tuningTier, setTuningTier] = useState('HighEnd');
   const [pendingChanges, setPendingChanges] = useState([]);
   const [consentChecked, setConsentChecked] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
 
   useEffect(() => {
     // Determine tuning tier for UI text
@@ -50,33 +60,29 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
     setStep('consent');
   };
 
-  // 2단계: 사용자가 항목을 확인하고 동의한 경우에만 실제 적용
+  // 2단계: 사용자가 항목을 확인하고 동의한 경우에만 실제 적용하고, 항목별 결과를 그대로 보여준다.
+  // 예전에는 반환값을 버리고 1.5초 뒤 닫았다. 권한이 없어 아무것도 안 바뀌어도 알 수 없었다.
   const handleApply = async () => {
     setStep('applying');
-
-    // Call the actual backend tailored tuning API
-    if (window.pywebview?.api?.applyHardwareTuning) {
-      try {
-        await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, true);
-      } catch (e) {
-        console.error("Failed to apply hardware tuning:", e);
-      } finally {
-        setTimeout(() => {
-          onComplete('standard'); // Return to standard mode as base for dashboard
-        }, 1500);
+    let res;
+    try {
+      if (!window.pywebview?.api?.applyHardwareTuning) {
+        res = { success: false, message: '백엔드가 준비되지 않아 적용하지 못했습니다.' };
+      } else {
+        res = await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, true);
       }
-    } else {
-      setTimeout(() => {
-        onComplete('standard'); // Return to standard mode as base for dashboard
-      }, 1500);
+    } catch (e) {
+      res = { success: false, message: `적용 중 오류가 발생했습니다: ${e}` };
     }
+    setApplyResult(res || { success: false, message: '결과를 받지 못했습니다.' });
+    setStep('applied');
   };
 
   const getTuningInfo = (tier) => {
     if (tier === 'LowEnd') {
       return {
-        title: '저사양 맞춤형 다이내믹 튜닝',
-        desc: '백그라운드 서비스(SysMain, WSearch 등)를 억제하여 제한된 자원을 영끌하고 CPU/RAM 점유율을 대폭 낮춥니다.',
+        title: '저사양 맞춤 튜닝',
+        desc: '상시 실행되는 백그라운드 서비스(SysMain, Windows Search)를 꺼서 메모리와 디스크 사용을 줄이고, 전원 플랜을 균형 조정으로 맞춥니다.',
         icon: Sliders,
         color: 'text-amber-400',
         bg: 'bg-amber-500/20',
@@ -84,8 +90,8 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
       };
     } else {
       return {
-        title: '고성능 맞춤형 한계 돌파 튜닝',
-        desc: '넉넉한 하드웨어 자원을 100% 활용합니다. 시스템 캐시를 넉넉하게 유지하고 CPU 최대 클럭 다운을 방지하여 잠재력을 폭발시킵니다.',
+        title: '고사양 맞춤 튜닝',
+        desc: '앱 실행을 빠르게 하는 캐시 서비스(SysMain)와 검색 색인(Windows Search)을 켜 두고, 전원 플랜을 고성능으로 바꿉니다.',
         icon: Sparkles,
         color: 'text-cyan-400',
         bg: 'bg-cyan-500/20',
@@ -126,7 +132,8 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             <div className={`p-8 pb-6 border-b ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
               <h2 className="text-2xl font-black tracking-tight mb-2">적용 전 확인: 아래 항목이 영구적으로 변경됩니다</h2>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                아래 변경 사항은 재부팅 후에도 그대로 유지됩니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다.
+                아래 변경 사항은 재부팅 후에도 유지됩니다. 바꾸기 전 원래 값을 기록해 두므로
+                '복구 센터' 에서 언제든 원래대로 되돌릴 수 있습니다. Windows Update 와 보안 관련 서비스는 건드리지 않습니다.
               </p>
             </div>
 
@@ -155,7 +162,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
 
             <div className={`p-6 border-t flex justify-end gap-3 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
               <button
-                onClick={() => onComplete('standard')}
+                onClick={() => onComplete()}
                 className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-600'}`}
               >
                 건너뛰기 (적용 안함)
@@ -179,10 +186,51 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
         ) : step === 'applying' ? (
           <div className="flex flex-col items-center justify-center py-32 px-10">
             <Zap className="w-16 h-16 text-yellow-400 animate-pulse mb-6" />
-            <h2 className="text-2xl font-black mb-2 tracking-tight">AI 커스텀 튜닝 적용 중...</h2>
+            <h2 className="text-2xl font-black mb-2 tracking-tight">맞춤 튜닝 적용 중...</h2>
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              레지스트리 및 OS 서비스 레벨에 맞춤형 설정을 영구적으로 적용합니다.
+              서비스 시작 설정과 전원 플랜을 바꾸고 있습니다.
             </p>
+          </div>
+        ) : step === 'applied' ? (
+          <div className="flex flex-col animate-fade-in-up">
+            <div className={`p-8 pb-6 border-b flex items-start gap-3 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+              {applyResult?.success
+                ? <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0 mt-1" />
+                : <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-1" />}
+              <div>
+                <h2 className="text-2xl font-black tracking-tight mb-1">
+                  {applyResult?.success ? '적용했습니다' : applyResult?.partial ? '일부만 적용됐습니다' : '적용하지 못했습니다'}
+                </h2>
+                <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{applyResult?.message}</p>
+              </div>
+            </div>
+
+            {applyResult?.steps?.length > 0 && (
+              <div className="p-8 space-y-2">
+                {applyResult.steps.map((st, i) => (
+                  <div key={i} className="flex items-start gap-2.5 text-sm">
+                    {st.ok
+                      ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      : <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
+                    <div className="min-w-0">
+                      <span className="text-xs leading-relaxed">{st.name}</span>
+                      {st.detail && <span className="text-gray-500 text-xs block mt-0.5">{st.detail}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className={`p-6 border-t flex justify-end ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
+              <button
+                onClick={() => onComplete()}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95 ${
+                  isDarkMode ? 'bg-white text-black hover:bg-gray-200' : 'bg-black text-white hover:bg-gray-800'
+                }`}
+              >
+                확인
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col h-full animate-fade-in-up">
@@ -199,7 +247,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                 </div>
               </div>
               <p className={`text-sm mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                PC 사양 분석 완료. 이 PC의 체급에 완벽하게 맞춰진 베이스 최적화 프로필이 준비되었습니다.
+                PC 사양을 확인했습니다. 아래 튜닝을 적용하거나, 아무것도 바꾸지 않고 건너뛸 수 있습니다.
               </p>
             </div>
 
@@ -264,7 +312,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
               {/* Right: Custom Tuning Info */}
               <div className="flex flex-col justify-center">
                 <h3 className={`text-xs font-mono font-bold mb-4 uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                  AI 스펙 맞춤형 튜닝 솔루션
+                  사양 맞춤 튜닝
                 </h3>
                 
                 <div className={`relative p-6 rounded-2xl border-2 ${TierInfo.border} ${TierInfo.bg} overflow-hidden shadow-lg`}>
@@ -286,7 +334,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             {/* Footer Buttons */}
             <div className={`p-6 border-t flex justify-end gap-3 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}>
               <button 
-                onClick={() => onComplete('standard')}
+                onClick={() => onComplete()}
                 className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-600'}`}
               >
                 건너뛰기 (적용 안함)

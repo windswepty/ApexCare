@@ -143,8 +143,20 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
         )}
       </div>
 
+      {/* 게임 부스트가 게임 동안만 게이밍 모드를 쓰는 중 */}
+      {status?.boostOverride && (
+        <div className="glass-panel p-4 flex gap-3 border border-sky-500/30">
+          <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+          <div className="text-sm text-black/80 dark:text-white/80">
+            <strong className="text-black dark:text-white">게임 부스트가 게임 동안만 게이밍 전원 모드를 쓰고 있습니다.</strong>{' '}
+            게임이 끝나면 <span className="font-mono">{status.label}</span> 모드로 돌아갑니다.
+            지금 다른 모드를 고르면 그 선택이 우선합니다.
+          </div>
+        </div>
+      )}
+
       {/* 앱 밖에서 전원 플랜이 바뀐 경우 알림 */}
-      {status && status.inSync === false && status.userSet && (
+      {status && status.inSync === false && status.userSet && !status.boostOverride && (
         <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="text-sm text-black/80 dark:text-white/80">

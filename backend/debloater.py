@@ -1,26 +1,51 @@
 """
-APEX CARE - Windows Deep Debloater
-Removes bloatware UWP apps safely using PowerShell and direct Registry policy modifications.
+APEX CARE - Windows 기본 앱 제거 · 원격 분석 정책.
+
+두 종류의 항목이 있다.
+  - 정책(원격 분석, Cortana): 레지스트리·서비스 변경. system_state 저널을 거쳐
+    원래 값을 기록하므로 복구 센터에서 되돌릴 수 있다.
+  - 앱 제거(Appx): 되돌릴 수 없다. 다시 쓰려면 Microsoft Store 에서 설치해야 한다.
+    UI 가 이 차이를 보여줄 수 있게 항목마다 reversible 을 둔다.
+
+예전 구현은 정책 항목을 'reg add' 로 셸에서 바로 썼다. 원래 값이 기록되지 않아
+되돌릴 방법이 없었고, 명령은 shell=True 로 실행됐다.
 """
+import re
 import subprocess
 import threading
 import logging
 
 log = logging.getLogger('Debloater')
 CREATE_NO_WINDOW = 0x08000000
+DEBLOAT_GROUP = 'debloat'
+
+_APPX_NOTE = '앱을 제거합니다. 되돌리려면 Microsoft Store 에서 다시 설치해야 합니다.'
 
 DEBLOAT_SAFE_LIST = [
-    {"id": "bing", "name": "Bing 앱 (News, Weather)", "pattern": "*bing*"},
-    {"id": "zune", "name": "Zune 미디어 (Video, Music)", "pattern": "*zune*"},
-    {"id": "solitaire", "name": "Solitaire Collection", "pattern": "*solitaire*"},
-    {"id": "skype", "name": "Skype", "pattern": "*skypeapp*"},
-    {"id": "maps", "name": "Windows Maps", "pattern": "*windowsmaps*"},
-    {"id": "yourphone", "name": "휴대폰과 연결 (Your Phone)", "pattern": "*yourphone*"},
-    {"id": "3dbuilder", "name": "3D Builder", "pattern": "*3dbuilder*"},
-    {"id": "feedback", "name": "피드백 허브", "pattern": "*feedbackhub*"},
-    {"id": "xbox", "name": "Xbox 관련 앱", "pattern": "*xboxapp*"},
-    {"id": "telemetry", "name": "Windows 원격 분석 (Telemetry) 차단", "pattern": "telemetry"},
-    {"id": "cortana", "name": "Cortana 비활성화", "pattern": "cortana"}
+    {"id": "bing", "name": "Bing 앱 (뉴스, 날씨, 검색 등)", "pattern": "*bing*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "zune", "name": "미디어 플레이어 · 영화 및 TV (Zune)", "pattern": "*zune*",
+     "reversible": False,
+     "note": "Windows 11 의 기본 '미디어 플레이어' 앱도 함께 제거됩니다. " + _APPX_NOTE},
+    {"id": "solitaire", "name": "Solitaire Collection", "pattern": "*solitaire*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "skype", "name": "Skype", "pattern": "*skypeapp*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "maps", "name": "Windows 지도", "pattern": "*windowsmaps*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "yourphone", "name": "휴대폰과 연결 (Phone Link)", "pattern": "*yourphone*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "3dbuilder", "name": "3D Builder", "pattern": "*3dbuilder*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "feedback", "name": "피드백 허브", "pattern": "*feedbackhub*",
+     "reversible": False, "note": _APPX_NOTE},
+    {"id": "xbox", "name": "Xbox 콘솔 도우미 (구 Xbox 앱)", "pattern": "*xboxapp*",
+     "reversible": False, "note": "Xbox Game Bar 와 새 Xbox 앱은 건드리지 않습니다. " + _APPX_NOTE},
+    {"id": "telemetry", "name": "Windows 원격 분석 (Telemetry) 줄이기", "pattern": "policy",
+     "reversible": True,
+     "note": "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 끕니다. 복구 센터에서 되돌릴 수 있습니다."},
+    {"id": "cortana", "name": "Cortana 끄기", "pattern": "policy",
+     "reversible": True, "note": "Cortana 사용 안 함 정책을 켭니다. 복구 센터에서 되돌릴 수 있습니다."},
 ]
 
 _debloat_state = {
@@ -36,35 +61,25 @@ _debloat_state = {
 # 30초는 정상 동작을 시간 초과로 오인하게 만든다.
 APPX_TIMEOUT_SEC = 180
 
+# 패턴은 위 목록의 상수뿐이지만, PowerShell 문자열에 들어가므로 모양을 한 번 더 확인한다.
+_PATTERN_RE = re.compile(r'^\*?[a-z0-9.]+\*?$')
+
 
 def _run_ps(ps_cmd, timeout):
-    """PowerShell 한 줄을 실행하고 CompletedProcess 를 돌려준다."""
+    """PowerShell 명령을 실행한다. 셸을 거치지 않고 인자 리스트로 넘긴다."""
     return subprocess.run(
-        f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps_cmd}"',
-        shell=True, capture_output=True, text=True,
+        ['powershell.exe', '-NoProfile', '-NonInteractive',
+         '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd],
+        shell=False, capture_output=True, text=True,
         creationflags=CREATE_NO_WINDOW, timeout=timeout
     )
-
-
-def _run_all(cmds, timeout):
-    """cmds 를 모두 실행하고 전부 성공했을 때만 True. 반환 코드를 실제로 확인한다."""
-    ok = True
-    for c in cmds:
-        result = subprocess.run(
-            c, shell=True, capture_output=True, text=True,
-            creationflags=CREATE_NO_WINDOW, timeout=timeout
-        )
-        if result.returncode != 0:
-            log.warning(f"Command failed (code {result.returncode}): {c} -> {result.stderr.strip()}")
-            ok = False
-    return ok
 
 
 def _count_appx(pattern):
     """패턴에 맞는 설치된 Appx 패키지 수. 조회 실패 시 None."""
     try:
         result = _run_ps(
-            f'@(Get-AppxPackage -AllUsers \'{pattern}\').Count',
+            f"@(Get-AppxPackage -AllUsers '{pattern}').Count",
             timeout=60
         )
         if result.returncode != 0:
@@ -77,6 +92,9 @@ def _count_appx(pattern):
 
 def _remove_appx(pattern):
     """Appx 패키지를 전 사용자/프로비저닝 양쪽에서 제거하고, 실제로 사라졌는지 확인한다."""
+    if not _PATTERN_RE.match(pattern or ''):
+        log.warning(f"허용되지 않는 패턴: {pattern!r}")
+        return False
     ps_cmd = (
         f"Get-AppxPackage -AllUsers '{pattern}' | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue; "
         f"Get-AppxProvisionedPackage -Online | Where-Object {{ $_.DisplayName -like '{pattern}' }} | "
@@ -90,6 +108,37 @@ def _remove_appx(pattern):
     if remaining is None:
         return False
     return remaining == 0
+
+
+def _apply_telemetry_policy():
+    """원격 분석 정책 + DiagTrack 서비스. 모두 저널에 원래 값을 기록한다. (ok, 사유)"""
+    from backend import system_state as ss, service_ctl
+    reasons = []
+    r = ss.set_registry('HKLM', r'SOFTWARE\Policies\Microsoft\Windows\DataCollection',
+                        'AllowTelemetry', 0, group=DEBLOAT_GROUP,
+                        why='디블로터: 원격 분석 수준 최소화 정책 (AllowTelemetry=0)')
+    if not r.get('ok'):
+        reasons.append(f"정책: {r.get('reason')}")
+    cur = service_ctl.read_config('DiagTrack')
+    if cur.get('exists'):
+        if cur.get('start') != service_ctl.START_DISABLED:
+            r = ss.set_service_start('DiagTrack', service_ctl.START_DISABLED, group=DEBLOAT_GROUP,
+                                     why="디블로터: 원격 분석 서비스(DiagTrack) '사용 안 함'")
+            if not r.get('ok'):
+                reasons.append(f"DiagTrack: {r.get('reason')}")
+        if not reasons:
+            st = service_ctl.stop('DiagTrack')
+            if not st.get('ok'):
+                log.info(f"DiagTrack 즉시 중지 실패(다음 부팅부터 꺼짐): {st.get('reason')}")
+    return (not reasons), '; '.join(reasons)
+
+
+def _apply_cortana_policy():
+    from backend import system_state as ss
+    r = ss.set_registry('HKLM', r'SOFTWARE\Policies\Microsoft\Windows\Windows Search',
+                        'AllowCortana', 0, group=DEBLOAT_GROUP,
+                        why='디블로터: Cortana 사용 안 함 정책 (AllowCortana=0)')
+    return bool(r.get('ok')), r.get('reason', '')
 
 def get_debloat_list():
     return DEBLOAT_SAFE_LIST
@@ -128,30 +177,18 @@ def _run_debloater(selected_ids):
             # 항목 하나가 실패하거나 시간을 초과해도 나머지 항목은 계속 처리한다.
             # 예전에는 여기서 예외가 나면 루프 전체가 중단됐다.
             try:
+                reason = ''
                 if item_id == "telemetry":
-                    # Disable Telemetry via CMD reg add directly (faster & 100% reliable)
-                    cmds = [
-                        r'reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f',
-                        r'reg add "HKLM\SYSTEM\CurrentControlSet\Services\DiagTrack" /v Start /t REG_DWORD /d 4 /f',
-                        r'sc stop DiagTrack'
-                    ]
-                    # sc stop 은 이미 멈춰 있으면 실패한다. 정책 레지스트리 2건만 성패로 본다.
-                    ok = _run_all(cmds[:2], timeout=15)
-                    _run_all(cmds[2:], timeout=15)
-
+                    ok, reason = _apply_telemetry_policy()
                 elif item_id == "cortana":
-                    ok = _run_all(
-                        [r'reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 0 /f'],
-                        timeout=15
-                    )
-
+                    ok, reason = _apply_cortana_policy()
                 else:
                     ok = _remove_appx(item["pattern"])
 
                 if ok:
                     succeeded.append(item["name"])
                 else:
-                    failed.append(item["name"])
+                    failed.append(f"{item['name']} ({reason})" if reason else item["name"])
 
             except subprocess.TimeoutExpired:
                 log.warning(f"✗ Debloat timeout: {item['name']}")

@@ -10,7 +10,6 @@ import psutil
 import concurrent.futures
 import threading
 import time
-import subprocess
 import logging
 import sys
 import stat
@@ -290,7 +289,7 @@ def scan_junk_background():
 
         _junk_scan_state["data"] = [
             {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
-            {"id": 2, "name": "웹 브라우저 캐시 및 쿠키 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지, 스크립트 캐시 데이터"},
+            {"id": 2, "name": "웹 브라우저 캐시 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지·스크립트 캐시. 쿠키와 로그인 정보는 지우지 않습니다"},
             {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
             {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
             # 기본 체크 해제. 이 목록에서 유일하게 복구가 불가능한 항목이다.
@@ -645,9 +644,15 @@ def purge_ram():
         # Capture memory after purge and calculate freed MB
         mem_after = psutil.virtual_memory().available
         freed_mb = max(0, (mem_after - mem_before) / (1024 * 1024))
-        
+
+        # 해제 호출이 실패했으면 성공이라고 하지 않는다. 예전에는 상태 코드와 상관없이
+        # success=True 를 돌려줘서 화면에 '최적화되었습니다' 가 떴다.
+        if not standby_purged:
+            return {"success": False, "standbyPurged": False,
+                    "error": f"대기 메모리 해제에 실패했습니다 (NTSTATUS 0x{status & 0xFFFFFFFF:08X})"}
+
         return {
-            "success": True, 
+            "success": True,
             "purgedProcesses": 0,
             "standbyPurged": standby_purged,
             "freed_mb": freed_mb
@@ -737,241 +742,189 @@ def init_optimization_mode():
     return {"success": False, "applied": False, "message": "최적화 모드 초기화에 실패했습니다."}
 
 
-def _get_service_start_type(service_name):
-    """Read a service start type from the registry. 2=Auto, 3=Manual, 4=Disabled."""
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Services\%s" % service_name,
-            0, winreg.KEY_READ
-        )
-        value, _ = winreg.QueryValueEx(key, "Start")
-        winreg.CloseKey(key)
-        return int(value)
-    except Exception as e:
-        log.debug(f"Failed to read start type for {service_name}: {e}")
-        return None
+# ─────────────────────────────────────────────
+# 하드웨어 맞춤 튜닝 (서비스 시작 유형 + 전원 플랜)
+# ─────────────────────────────────────────────
+# 기존 구현의 문제:
+#   1. sc config 를 shell=True 로 부르고 반환 코드를 보지 않았다. 권한이 없어
+#      아무것도 안 바뀌어도 "적용 완료" 라고 했다.
+#   2. 원래 시작 유형을 settings.json 에 따로 적었고, 백업이 없으면 복구가
+#      'Windows 기본값' 을 추측해 써넣었다. '전부 원래대로' 를 누르면, 이 기능을
+#      한 번도 쓰지 않은 사용자의 PC 에서도 일부러 꺼 둔 Windows Search 가 다시 켜졌다.
+#   3. 서비스 제어 핸들을 32비트 int 로 받아 64비트에서 잘릴 수 있었다.
+# 이제 변경은 system_state.set_service_start 를 거친다. 원래 값을 기록하고,
+# 되읽어 확인하며, 복구 센터의 '전부 원래대로' 로 되돌릴 수 있다.
+
+HW_GROUP = 'hw_tuning'
+
+# (서비스, 시작 유형, 지연 시작, 사용자에게 보여줄 설명)
+_HW_PLANS = {
+    'LowEnd': {
+        'services': [
+            ('SysMain', 4, False, "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 바꾸고 지금 중지합니다"),
+            ('WSearch', 4, False, "Windows Search(WSearch) 서비스를 '사용 안 함'으로 바꾸고 지금 중지합니다 — "
+                                  "시작 메뉴 검색, 파일 탐색기 검색, Outlook 검색 색인이 멈춥니다"),
+        ],
+        'plan': (POWER_PLAN_BALANCED, "전원 관리 프로필을 '균형 조정'으로 바꿉니다"),
+        'message': '저사양 맞춤 튜닝',
+    },
+    'HighEnd': {
+        'services': [
+            ('SysMain', 2, False, "SysMain(수퍼패치) 서비스를 '자동 시작'으로 바꾸고 지금 시작합니다"),
+            ('WSearch', 2, True, "Windows Search(WSearch) 서비스를 '자동(지연 시작)'으로 바꾸고 지금 시작합니다"),
+        ],
+        'plan': (POWER_PLAN_HIGH_PERF, "전원 관리 프로필을 '고성능'으로 바꿉니다"),
+        'message': '고사양 맞춤 튜닝',
+    },
+}
 
 
-def _get_service_delayed_auto(service_name):
-    """True if the service is 'Automatic (Delayed Start)'."""
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Services\%s" % service_name,
-            0, winreg.KEY_READ
-        )
-        value, _ = winreg.QueryValueEx(key, "DelayedAutostart")
-        winreg.CloseKey(key)
-        return int(value) == 1
-    except Exception:
-        return False
-
-
-def restore_tailored_service_config():
-    """Undo the permanent 'sc config' changes made by apply_hardware_tailored_tuning."""
-    # (start type, delayed auto) — Windows 기본값. 백업이 없는 구버전 사용자용 폴백.
-    WINDOWS_DEFAULT_START = {"SysMain": (2, False), "WSearch": (2, True)}
-    START_TYPE_ARG = {2: "auto", 3: "demand", 4: "disabled"}
-    CREATE_NO_WINDOW = 0x08000000
-    try:
-        from backend import config_manager
-        cfg = config_manager.load_config()
-        backup = cfg.get("service_start_backup") or {}
-        used_default = not backup
-
-        restored = []
-        for svc, (def_start, def_delayed) in WINDOWS_DEFAULT_START.items():
-            saved = backup.get(svc) if isinstance(backup.get(svc), dict) else None
-            start_type = (saved or {}).get("start") or def_start
-            delayed = (saved or {}).get("delayed", def_delayed)
-            arg = START_TYPE_ARG.get(int(start_type), "auto")
-            if arg == "auto" and delayed:
-                arg = "delayed-auto"
-            try:
-                subprocess.run(f'sc config {svc} start= {arg}', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-                if arg != "disabled":
-                    _start_service(svc)
-                restored.append(svc)
-            except Exception as e:
-                log.warning(f"Failed to restore service {svc}: {e}")
-
-        cfg.pop("service_start_backup", None)
-        config_manager.save_config(cfg)
-
-        base_msg = f"서비스 설정을 복구했습니다: {', '.join(restored) if restored else '없음'}"
-        if used_default:
-            base_msg += " (백업 정보가 없어 Windows 기본값으로 복구했습니다.)"
-        return {"success": True, "restored": restored, "message": base_msg}
-    except Exception as e:
-        return {"success": False, "message": "서비스 설정 복구에 실패했습니다.", "error": str(e)}
+def _hw_tier(cpu_cores, ram_gb):
+    return 'LowEnd' if (cpu_cores <= 4 or ram_gb < 8) else 'HighEnd'
 
 
 def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
-    """
-    Applies permanent hardware-tailored OS level tuning based on specs.
-    Low-end gets aggressive background service suppression.
-    High-end gets caching optimization and full performance unlock.
+    """사양에 맞춰 서비스 시작 유형과 전원 플랜을 바꾼다.
 
-    consent=False 는 '미리보기' 모드다. 실제로 아무것도 바꾸지 않고
-    무엇이 영구적으로 바뀌는지 항목만 돌려준다. 프론트에서 사용자가
-    항목을 확인하고 동의한 뒤 consent=True 로 다시 호출해야 적용된다.
+    consent=False 는 '미리보기' 다. 아무것도 바꾸지 않고 바뀔 항목만 돌려준다.
+    프론트에서 사용자가 항목을 확인하고 동의한 뒤 consent=True 로 다시 불러야 적용된다.
+    적용 결과는 항목별 성패(steps)로 돌려준다. 부분 실패를 성공이라고 하지 않는다.
     """
     try:
-        try:
-            cpu_cores = int(cpu_cores)
-            ram_gb = float(ram_gb)
-        except (TypeError, ValueError):
-            return {"success": False, "applied": False, "message": "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다."}
+        cpu_cores = int(cpu_cores)
+        ram_gb = float(ram_gb)
+    except (TypeError, ValueError):
+        return {"success": False, "applied": False,
+                "message": "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다."}
 
-        CREATE_NO_WINDOW = 0x08000000
-        is_low_end = (cpu_cores <= 4 or ram_gb < 8)
+    tier = _hw_tier(cpu_cores, ram_gb)
+    spec = _HW_PLANS[tier]
+    changes = [label for *_, label in spec['services']] + [spec['plan'][1]]
 
-        # 사용자에게 그대로 보여줄 '영구 변경' 항목 목록
-        if is_low_end:
-            permanent_changes = [
-                "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 변경합니다 — 재부팅 후에도 유지됩니다.",
-                "Windows Search(WSearch) 서비스를 '사용 안 함'으로 변경합니다 — 시작 메뉴 검색, 파일 탐색기 검색, Outlook 검색 색인이 중지됩니다.",
-                "전원 관리 프로필을 '균형 조정'으로 변경합니다."
-            ]
-        else:
-            permanent_changes = [
-                "SysMain(수퍼패치) 서비스를 '자동 시작'으로 변경합니다.",
-                "Windows Search(WSearch) 서비스를 '자동 시작'으로 변경합니다.",
-                "전원 관리 프로필을 '고성능'으로 변경합니다."
-            ]
-
-        if not consent:
-            # 미리보기: 시스템을 전혀 건드리지 않고 변경 예정 항목만 돌려준다
-            return {
-                "success": True,
-                "applied": False,
-                "tier": "LowEnd" if is_low_end else "HighEnd",
-                "changes": permanent_changes,
-                "message": "아래 항목이 영구적으로 변경됩니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
-            }
-
-        # 되돌리기용으로 원래 시작 유형을 먼저 저장한다 (2=자동, 3=수동, 4=사용 안 함)
-        try:
-            from backend import config_manager
-            cfg = config_manager.load_config()
-            if "service_start_backup" not in cfg:
-                cfg["service_start_backup"] = {
-                    "SysMain": {"start": _get_service_start_type("SysMain"), "delayed": _get_service_delayed_auto("SysMain")},
-                    "WSearch": {"start": _get_service_start_type("WSearch"), "delayed": _get_service_delayed_auto("WSearch")}
-                }
-                config_manager.save_config(cfg)
-        except Exception as e:
-            log.warning(f"Failed to backup service start types: {e}")
-
-        if is_low_end:
-            # 저사양: 백그라운드 강제 억제 및 가용 리소스 확보 (영구적)
-            try:
-                subprocess.run('sc config SysMain start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-                subprocess.run('sc config WSearch start= disabled', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-            except Exception as e:
-                log.warning(f"Failed to config services: {e}")
-                
-            _stop_service("SysMain")  # 즉시 중지
-            _stop_service("WSearch")
-            purge_ram() # 강력한 램 클리어 즉시 실행
-            
-            # 저사양 맞춤 전원 프로필 세팅
-            system_state.set_active_plan(POWER_PLAN_BALANCED,
-                                         group='hw_tuning', why='저사양 맞춤 튜닝')
-            
-            msg = "저사양 맞춤 튜닝 적용 완료: 불필요한 백그라운드 서비스(SysMain, WSearch)를 영구 차단하여 CPU/RAM 점유율을 대폭 낮추었습니다."
-            tier = "LowEnd"
-        else:
-            # 중/고사양: 최대 성능 유지 및 캐시 활용 (영구적)
-            try:
-                subprocess.run('sc config SysMain start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-                subprocess.run('sc config WSearch start= auto', shell=True, creationflags=CREATE_NO_WINDOW, timeout=10)
-                # [제거됨] DiagTrack 영구 비활성화.
-                # 마법사의 고사양 설명 문구에 텔레메트리 언급이 전혀 없어 미고지 영구 변경이었다.
-                # 텔레메트리 차단은 디블로터의 명시적 선택 항목(telemetry)에서만 수행한다.
-            except Exception as e:
-                log.warning(f"Failed to config services: {e}")
-                
-            _start_service("SysMain") # 즉시 시작
-            _start_service("WSearch")
-            
-            # 고성능 프로필 베이스
-            system_state.set_active_plan(POWER_PLAN_HIGH_PERF,
-                                         group='hw_tuning', why='고사양 맞춤 튜닝')
-            
-            msg = "고성능 맞춤 튜닝 적용 완료: 넉넉한 하드웨어 자원을 활용하여 시스템 캐시를 켜고, CPU 성능을 100% 개방하도록 영구 튜닝했습니다."
-            tier = "HighEnd"
-            
+    if not consent:
         return {
-            "success": True,
-            "applied": True,
-            "tier": tier,
-            "changes": permanent_changes,
-            "message": msg
+            "success": True, "applied": False, "tier": tier, "changes": changes,
+            "message": "아래 항목이 바뀝니다. 재부팅 후에도 유지되며, '복구 센터' 에서 언제든 "
+                       "원래대로 되돌릴 수 있습니다. Windows Update 와 보안 관련 서비스는 건드리지 않습니다.",
         }
-    except Exception as e:
-        return {"success": False, "applied": False, "message": "맞춤 튜닝 적용에 실패했습니다.", "error": str(e)}
 
-# ─────────────────────────────────────────────
-# Service Control (pure Win32 API, ZERO net stop/start)
-# ─────────────────────────────────────────────
+    if not _is_admin():
+        return {"success": False, "applied": False, "tier": tier, "error": "UAC_REQUIRED",
+                "message": "맞춤 튜닝을 적용하려면 관리자 권한으로 실행해야 합니다."}
 
-SC_MANAGER_ALL_ACCESS = 0xF003F
-SERVICE_STOP = 0x0020
-SERVICE_START = 0x0010
-SERVICE_QUERY_STATUS = 0x0004
-SERVICE_CONTROL_STOP = 0x00000001
+    from backend import service_ctl
+    steps = []
+    for svc, start, delayed, label in spec['services']:
+        cur = service_ctl.read_config(svc)
+        if not cur['exists']:
+            # 일부 에디션에는 없는 서비스다. 바꿀 것이 없으니 실패가 아니다.
+            steps.append({"name": label, "ok": True, "detail": "이 PC 에 없는 서비스라 건너뛰었습니다"})
+            continue
+        if cur['start'] == start and (start != 2 or cur['delayed'] == delayed):
+            steps.append({"name": label, "ok": True, "detail": "이미 그 상태라 바꾸지 않았습니다"})
+        else:
+            r = system_state.set_service_start(svc, start, group=HW_GROUP, delayed=delayed,
+                                               why=f'{spec["message"]}: {svc}')
+            if not r.get('ok'):
+                steps.append({"name": label, "ok": False, "detail": r.get('reason', '실패')})
+                continue
+            steps.append({"name": label, "ok": True, "detail": ""})
+        # 시작 유형을 바꿨으면 지금 상태도 맞춘다. 재부팅 전까지 효과가 없으면
+        # 사용자가 '적용했는데 그대로' 라고 느낀다.
+        act = service_ctl.stop(svc) if start == 4 else service_ctl.start(svc)
+        if not act.get('ok'):
+            steps.append({"name": f"{svc} {'중지' if start == 4 else '시작'}", "ok": False,
+                          "detail": act.get('reason', '실패') + ' (다음 부팅부터 적용됩니다)'})
 
-class SERVICE_STATUS(ctypes.Structure):
-    _fields_ = [
-        ("dwServiceType", ctypes.wintypes.DWORD),
-        ("dwCurrentState", ctypes.wintypes.DWORD),
-        ("dwControlsAccepted", ctypes.wintypes.DWORD),
-        ("dwWin32ExitCode", ctypes.wintypes.DWORD),
-        ("dwServiceSpecificExitCode", ctypes.wintypes.DWORD),
-        ("dwCheckPoint", ctypes.wintypes.DWORD),
-        ("dwWaitHint", ctypes.wintypes.DWORD),
-    ]
+    plan_guid, plan_label = spec['plan']
+    r = system_state.set_active_plan(plan_guid, group=HW_GROUP, why=spec['message'])
+    steps.append({"name": plan_label, "ok": bool(r.get('ok')),
+                  "detail": '' if r.get('ok') else r.get('reason', '실패')})
 
-def _stop_service(service_name):
-    """Stop a Windows service via advapi32."""
+    failed = [s for s in steps if not s['ok']]
+    if failed:
+        msg = (f"{spec['message']}를 적용했지만 {len(failed)}개 항목이 실패했습니다."
+               if len(failed) < len(steps) else f"{spec['message']} 적용에 실패했습니다.")
+    else:
+        msg = f"{spec['message']}를 적용했습니다. 복구 센터에서 언제든 되돌릴 수 있습니다."
+    return {"success": not failed, "partial": bool(failed) and len(failed) < len(steps),
+            "applied": len(failed) < len(steps), "tier": tier, "changes": changes,
+            "steps": steps, "failedCount": len(failed), "message": msg}
+
+
+def _is_admin():
     try:
-        advapi32 = ctypes.WinDLL('advapi32', use_last_error=True)
-        sc_manager = advapi32.OpenSCManagerW(None, None, SC_MANAGER_ALL_ACCESS)
-        if not sc_manager:
-            return False
-        sc_service = advapi32.OpenServiceW(sc_manager, service_name, SERVICE_STOP | SERVICE_QUERY_STATUS)
-        if not sc_service:
-            advapi32.CloseServiceHandle(sc_manager)
-            return False
-        status = SERVICE_STATUS()
-        result = advapi32.ControlService(sc_service, SERVICE_CONTROL_STOP, ctypes.byref(status))
-        advapi32.CloseServiceHandle(sc_service)
-        advapi32.CloseServiceHandle(sc_manager)
-        return bool(result)
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
         return False
 
-def _start_service(service_name):
-    """Start a Windows service via advapi32."""
+
+def has_legacy_service_backup():
+    """구버전이 settings.json 에 남긴 서비스 백업이 있는지."""
     try:
-        advapi32 = ctypes.WinDLL('advapi32', use_last_error=True)
-        sc_manager = advapi32.OpenSCManagerW(None, None, SC_MANAGER_ALL_ACCESS)
-        if not sc_manager:
-            return False
-        sc_service = advapi32.OpenServiceW(sc_manager, service_name, SERVICE_START)
-        if not sc_service:
-            advapi32.CloseServiceHandle(sc_manager)
-            return False
-        result = advapi32.StartServiceW(sc_service, 0, None)
-        advapi32.CloseServiceHandle(sc_service)
-        advapi32.CloseServiceHandle(sc_manager)
-        return bool(result)
+        from backend import config_manager
+        return bool(config_manager.load_config().get("service_start_backup"))
     except Exception:
         return False
+
+
+def restore_legacy_service_backup():
+    """구버전 하드웨어 튜닝이 settings.json 에 남긴 원래 값으로 되돌린다.
+
+    백업이 없으면 아무것도 하지 않는다. 예전에는 백업이 없을 때 'Windows 기본값'
+    을 추측해 썼는데, 원래 값을 모르는 상태에서 값을 쓰는 것은 복구가 아니라
+    또 하나의 변경이다. 실패한 항목은 백업에 남겨 다시 시도할 수 있게 한다.
+    """
+    from backend import config_manager, service_ctl
+    cfg = config_manager.load_config()
+    backup = cfg.get("service_start_backup")
+    if not backup or not isinstance(backup, dict):
+        return {"success": True, "restored": [], "failed": [], "message": "되돌릴 구버전 서비스 백업이 없습니다."}
+
+    restored, failed, remaining = [], [], {}
+    for svc, saved in backup.items():
+        if not isinstance(saved, dict) or saved.get("start") is None:
+            # 구버전이 원래 값을 읽지 못한 항목이다. 추측해서 쓰지 않는다.
+            failed.append({"service": svc, "reason": "원래 값이 기록되지 않아 되돌리지 않았습니다"})
+            continue
+        value = {"start": int(saved["start"]), "delayed": bool(saved.get("delayed"))}
+        r = service_ctl.set_start_type(svc, value)
+        if not r.get("ok"):
+            failed.append({"service": svc, "reason": r.get("reason", "실패")})
+            remaining[svc] = saved
+            continue
+        if value["start"] == 2:
+            service_ctl.start(svc)
+        restored.append(svc)
+
+    if remaining:
+        cfg["service_start_backup"] = remaining
+    else:
+        cfg.pop("service_start_backup", None)
+    config_manager.save_config(cfg)
+
+    retryable = [f for f in failed if f["service"] in remaining]
+    msg = f"구버전 서비스 설정 복구: {', '.join(restored) if restored else '없음'}"
+    if failed:
+        msg += " / 실패: " + ", ".join(f"{f['service']}({f['reason']})" for f in failed)
+    return {"success": not retryable, "restored": restored, "failed": failed, "message": msg}
+
+
+def restore_tailored_service_config():
+    """하드웨어 맞춤 튜닝이 바꾼 것을 되돌린다 (저널 + 구버전 백업)."""
+    if not _is_admin():
+        return {"success": False, "error": "UAC_REQUIRED",
+                "message": "되돌리려면 관리자 권한이 필요합니다."}
+    r = system_state.restore_group(HW_GROUP)
+    legacy = restore_legacy_service_backup() if has_legacy_service_backup() else None
+    ok = r['ok'] and (legacy is None or legacy['success'])
+    msg = f"{r['restored']}개 항목을 원래대로 되돌렸습니다."
+    if r['failed']:
+        msg += f" {len(r['failed'])}개 실패 — 기록은 남아 있어 다시 시도할 수 있습니다."
+    if legacy:
+        msg += " " + legacy['message']
+    return {"success": ok, "restored": r['restored'], "failed": r['failed'],
+            "legacy": legacy, "message": msg}
 
 # ─────────────────────────────────────────────
 # Startup Manager (winreg)

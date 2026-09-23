@@ -63,8 +63,21 @@ export default function Debloater({ addToast }) {
 
   const startDebloat = async () => {
     if (selectedIds.length === 0) return;
-    
-    if (!window.confirm("선택한 항목들을 정말로 윈도우에서 완전히 삭제하시겠습니까?\n(삭제 후에는 Microsoft Store를 통해 다시 설치해야 할 수 있습니다.)")) {
+
+    // 되돌릴 수 없는 항목(앱 제거)과 되돌릴 수 있는 항목(정책)을 나눠서 보여준다.
+    const chosen = items.filter(x => selectedIds.includes(x.id));
+    const irreversible = chosen.filter(x => !x.reversible);
+    const reversible = chosen.filter(x => x.reversible);
+    let msg = '';
+    if (irreversible.length > 0) {
+      msg += `아래 앱을 모든 사용자 계정에서 제거합니다. 되돌릴 수 없으며, 다시 쓰려면 Microsoft Store 에서 설치해야 합니다.\n`
+        + irreversible.map(x => `  · ${x.name}`).join('\n') + '\n\n';
+    }
+    if (reversible.length > 0) {
+      msg += `아래 정책을 바꿉니다. 원래 값을 기록해 두므로 복구 센터에서 되돌릴 수 있습니다.\n`
+        + reversible.map(x => `  · ${x.name}`).join('\n') + '\n\n';
+    }
+    if (!window.confirm(msg + '계속할까요?')) {
       return;
     }
 
@@ -174,9 +187,12 @@ export default function Debloater({ addToast }) {
                 }`}>
                   {selectedIds.includes(item.id) && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="font-bold text-sm text-black dark:text-white">{item.name}</div>
-                  <div className="text-xs text-gray-500 font-mono mt-0.5">{item.pattern}</div>
+                  <div className={`text-[11px] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {item.reversible ? '되돌리기 가능 (복구 센터)' : '되돌릴 수 없음 (Store 에서 재설치)'}
+                  </div>
+                  {item.note && <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{item.note}</div>}
                 </div>
               </div>
             ))}
@@ -190,7 +206,7 @@ export default function Debloater({ addToast }) {
               주의사항
             </h3>
             <p className="text-xs text-black/70 dark:text-white/70 leading-relaxed mb-4">
-              이 기능은 일반적인 방법으로 삭제할 수 없는 윈도우 코어 구성요소를 강제로 제거합니다. 나열된 항목은 대부분 삭제해도 안전하지만, 사용 중인 기능(예: Xbox 로그인 등)이 있다면 선택 해제해 주세요.
+              앱 제거는 되돌릴 수 없습니다. 다시 쓰려면 Microsoft Store 에서 설치해야 합니다. 쓰고 있는 앱(예: 미디어 플레이어, 휴대폰과 연결)이 있다면 선택하지 마세요. 원격 분석·Cortana 항목은 정책만 바꾸며 복구 센터에서 되돌릴 수 있습니다.
             </p>
           </div>
 

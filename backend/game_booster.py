@@ -1,32 +1,39 @@
 """
-APEX CARE - Game Booster & Process Tamer v3.0 (Hardened)
-Real performance boost via:
-- Timer resolution forcing (0.5ms for lower input latency)
-- EcoQoS for background apps (force to E-cores on hybrid CPUs)
-- Power throttling disable for games (force P-cores)
-- Nagle algorithm disable (reduce network latency)
-- Process priority elevation (with admin privilege enforcement)
-- Automatic cleanup on game exit
+APEX CARE - 게임 부스트.
+
+게임이 감지되면 사용자가 켜 둔 항목만 적용하고, 게임이 끝나거나 앱을 닫으면
+적용한 것만 정확히 되돌린다.
+
+  타이머 해상도 0.5ms      세션 한정. 우리 요청을 거두면 원래대로 돌아간다.
+  바쁜 백그라운드 앱 양보   CPU 를 많이 쓰는 백그라운드 앱만 우선순위를 낮춘다(원래 값 기록).
+  게이밍 전원 모드 자동 전환 게임 동안만. 끝나면 사용자가 쓰던 모드로 돌아간다.
+  Nagle 끄기               레지스트리. system_state 저널에 원래 값을 기록한다.
+
+게임 프로세스 자체는 HIGH 우선순위로 올리고 EcoQoS 에서 빼 준다(원래 값 기록).
 """
 import psutil
 import threading
-import time
 import ctypes
 import ctypes.wintypes
 import gc
-import os
-import subprocess
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='[GameBooster] %(message)s')
 log = logging.getLogger('GameBooster')
 
-# 에코 억제 기준: 이 % 이상 CPU 를 쓰는 프로세스만 건드린다.
+# 에코·부스트 억제 기준: 이 % 이상 CPU 를 쓰는 프로세스만 건드린다.
 # 유휴 상태인 앱의 우선순위를 낮춰봐야 얻는 것은 없고,
 # 그 앱이 깨어날 때 느려지기만 한다.
 ECO_CPU_THRESHOLD = 5.0
 ECO_INTERVAL_SEC = 10
+
+# system_state 저널에서 게임 부스트가 바꾼 레지스트리(Nagle)를 묶는 그룹
+BOOST_GROUP = 'boost'
+_NAGLE_BASE = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+
+# process_boost 에 기록할 '누가 바꿨는가'. 게임이 끝날 때 부스트가 바꾼 것만 되돌린다.
+OWNER = 'boost'
 
 # List of popular game executables to detect
 GAMES_LIST = [
@@ -71,38 +78,6 @@ GAMES_LIST = [
     "throneandliberty.exe"     # Throne & Liberty
 ]
 
-# List of background apps to tame (lower priority + EcoQoS)
-APPS_TO_TAME = [
-    "chrome.exe",
-    "msedge.exe",
-    "spotify.exe",
-    "slack.exe",
-    "kakao.exe",
-    "kakaotalk.exe",
-    "whale.exe"
-]
-
-# Strict Whitelist: NEVER touch these processes (System Core & Game Launchers)
-WHITELIST = [
-    "explorer.exe",
-    "svchost.exe",
-    "steam.exe",
-    "steamservice.exe",
-    "steamwebhelper.exe",
-    "epicgameslauncher.exe",
-    "battlenet.exe",
-    "battle.net.exe",
-    "discord.exe",
-    "csrss.exe",
-    "winlogon.exe",
-    "lsass.exe",
-    "services.exe",
-    "smss.exe",
-    "wininit.exe",
-    "dwm.exe",
-    "fontdrvhost.exe"
-]
-
 _booster_state = {
     "enabled": False,
     "active": False,
@@ -111,10 +86,18 @@ _booster_state = {
     "boost_count": 0,
     "timer_resolution_set": False,
     "nagle_disabled": False,
+    "appliedBoosts": [],
 }
+
+# 이번 게임 세션에서 '실제로 적용한 것'. 되돌릴 때는 지금 설정이 아니라 이것을 본다.
+# 예전에는 종료 시점의 설정을 다시 읽었다. 게임 도중 사용자가 Nagle 설정을 끄면
+# 켜 둔 Nagle 변경이 되돌려지지 않았고, 반대로 켜면 바꾼 적 없는 값을 지웠다.
+_applied = {}
+_tamed_pids = set()
 
 _monitor_thread = None
 _stop_event = threading.Event()
+_teardown_lock = threading.RLock()
 _admin_checked = False
 _is_admin_cached = False
 
@@ -190,373 +173,319 @@ def _enable_debug_privilege():
         return False
 
 
-# ─────────────────────────────────────────────
-# Win32 API Direct Priority Control (Fallback)
-# ─────────────────────────────────────────────
-
-# Priority class constants
-IDLE_PRIORITY_CLASS = 0x0040
-BELOW_NORMAL_PRIORITY_CLASS = 0x4000
-NORMAL_PRIORITY_CLASS = 0x0020
-ABOVE_NORMAL_PRIORITY_CLASS = 0x8000
-HIGH_PRIORITY_CLASS = 0x0080
-REALTIME_PRIORITY_CLASS = 0x0100
-
-PROCESS_SET_INFORMATION = 0x0200
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_ALL_ACCESS = 0x001FFFFF
-
-
-def _set_priority_via_win32(pid, priority_class):
-    """Directly set process priority via Win32 API (bypasses psutil AccessDenied).
-    
-    Uses OpenProcess with PROCESS_SET_INFORMATION access right.
-    With SeDebugPrivilege enabled, this works even for system processes.
-    """
-    try:
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        handle = kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
-        if not handle:
-            error = ctypes.get_last_error()
-            log.warning(f"  OpenProcess failed for PID {pid} (error={error})")
-            return False
-        
-        result = kernel32.SetPriorityClass(handle, priority_class)
-        kernel32.CloseHandle(handle)
-        
-        if result:
-            return True
-        else:
-            error = ctypes.get_last_error()
-            log.warning(f"  SetPriorityClass failed for PID {pid} (error={error})")
-            return False
-    except Exception as e:
-        log.warning(f"  Win32 priority set error for PID {pid}: {e}")
-        return False
-
-
-def _suspend_process_via_win32(pid):
-    """Suspend a process via NtSuspendProcess for aggressive background suppression."""
-    try:
-        ntdll = ctypes.WinDLL('ntdll')
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        handle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
-        if not handle:
-            return False
-        result = ntdll.NtSuspendProcess(handle)
-        kernel32.CloseHandle(handle)
-        return result == 0
-    except Exception as e:
-        log.debug(f"Suspend process failed for PID {pid}: {e}")
-        return False
-
-
-def _resume_process_via_win32(pid):
-    """Resume a suspended process via NtResumeProcess."""
-    try:
-        ntdll = ctypes.WinDLL('ntdll')
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        handle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
-        if not handle:
-            return False
-        result = ntdll.NtResumeProcess(handle)
-        kernel32.CloseHandle(handle)
-        return result == 0
-    except Exception as e:
-        log.debug(f"Resume process failed for PID {pid}: {e}")
-        return False
 
 
 # ─────────────────────────────────────────────
-# Real Performance Boost Functions
+# 타이머 해상도 · EcoQoS
 # ─────────────────────────────────────────────
+
+_TIMER_REQUEST = 5000        # 100ns 단위 = 0.5ms
+
 
 def _set_timer_resolution(enable):
-    """Force system timer resolution to 0.5ms for lower input latency.
-    
-    Windows default timer is ~15.6ms. Games benefit hugely from 0.5ms
-    as it affects Sleep() precision, input polling, and frame pacing.
+    """시스템 타이머 해상도를 0.5ms 로 요청하거나, 그 요청을 거둔다.
+
+    되돌릴 때는 SetResolution=FALSE 로 '우리 요청을 철회' 해야 한다. 예전에는
+    15.625ms 를 TRUE 로 다시 요청했는데, 그건 철회가 아니라 새 요청이다.
     """
     try:
         ntdll = ctypes.WinDLL('ntdll')
-        if enable:
-            # Set to 5000 (100ns units) = 0.5ms
-            actual = ctypes.c_ulong()
-            ntdll.NtSetTimerResolution(ctypes.c_ulong(5000), ctypes.c_bool(True), ctypes.byref(actual))
-            _booster_state["timer_resolution_set"] = True
-            log.info(f"✓ Timer resolution set to 0.5ms (actual: {actual.value/10000:.2f}ms)")
+        actual = ctypes.c_ulong()
+        status = ntdll.NtSetTimerResolution(ctypes.c_ulong(_TIMER_REQUEST),
+                                            ctypes.c_bool(bool(enable)), ctypes.byref(actual))
+        ok = (status == 0)
+        _booster_state["timer_resolution_set"] = bool(enable) and ok
+        if ok:
+            log.info(f"✓ 타이머 해상도 {'0.5ms 요청' if enable else '요청 철회'} (현재 {actual.value/10000:.2f}ms)")
         else:
-            # Restore default
-            actual = ctypes.c_ulong()
-            ntdll.NtSetTimerResolution(ctypes.c_ulong(156250), ctypes.c_bool(True), ctypes.byref(actual))
-            _booster_state["timer_resolution_set"] = False
-            log.info("✓ Timer resolution restored to default")
+            log.warning(f"⚠ NtSetTimerResolution 실패 (0x{status & 0xFFFFFFFF:08X})")
+        return ok
     except Exception as e:
         log.warning(f"⚠ Timer resolution error: {e}")
+        return False
+
+
+class _PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+    _fields_ = [
+        ("Version", ctypes.c_ulong),
+        ("ControlMask", ctypes.c_ulong),
+        ("StateMask", ctypes.c_ulong),
+    ]
 
 
 def _set_process_power_throttling(pid, throttle):
-    """Control EcoQoS / Power Throttling for a process.
-    
-    throttle=True: Force process to efficiency cores (E-cores) — saves power
-    throttle=False: Disable throttling — force to performance cores (P-cores)
-    
-    This is the real mechanism behind Windows 11's "Efficiency Mode" in Task Manager.
+    """EcoQoS(효율 모드)를 켜거나(True), 끄거나(False), 시스템에 맡긴다(None).
+
+    None 이 '원래대로' 다. 예전에는 복구할 때 False(항상 끔)를 넣어서, 원래
+    시스템이 관리하던 프로세스를 '절대 효율 모드로 가지 않는' 상태로 바꿔 놓았다.
     """
     try:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        
+        kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
         PROCESS_SET_INFORMATION = 0x0200
         ProcessPowerThrottling = 4  # PROCESS_INFORMATION_CLASS
-        
-        class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
-            _fields_ = [
-                ("Version", ctypes.c_ulong),
-                ("ControlMask", ctypes.c_ulong),
-                ("StateMask", ctypes.c_ulong),
-            ]
-        
+
         handle = kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
         if not handle:
             return False
-            
-        state = PROCESS_POWER_THROTTLING_STATE()
+        state = _PROCESS_POWER_THROTTLING_STATE()
         state.Version = 1  # PROCESS_POWER_THROTTLING_CURRENT_VERSION
-        state.ControlMask = 0x1  # PROCESS_POWER_THROTTLING_EXECUTION_SPEED
-        state.StateMask = 0x1 if throttle else 0x0  # Enable or disable throttling
-        
-        kernel32.SetProcessInformation(
-            handle, ProcessPowerThrottling,
-            ctypes.byref(state), ctypes.sizeof(state)
-        )
+        if throttle is None:
+            state.ControlMask = 0x0   # 시스템이 관리 (기본값)
+            state.StateMask = 0x0
+        else:
+            state.ControlMask = 0x1   # PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+            state.StateMask = 0x1 if throttle else 0x0
+        ok = bool(kernel32.SetProcessInformation(
+            handle, ProcessPowerThrottling, ctypes.byref(state), ctypes.sizeof(state)))
         kernel32.CloseHandle(handle)
-        return True
+        return ok
     except Exception as e:
         log.debug(f"Power throttling error for PID {pid}: {e}")
         return False
 
 
-def _disable_nagle():
-    """Disable Nagle algorithm on all network interfaces for lower latency.
-    
-    Nagle bundles small TCP packets, adding up to 200ms delay.
-    Critical for online FPS games where every ms of ping matters.
-    """
-    try:
-        import winreg
-        base_path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-        base_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path, 0, winreg.KEY_READ)
-        
+# ─────────────────────────────────────────────
+# Nagle (레지스트리 — system_state 저널 경유)
+# ─────────────────────────────────────────────
+
+def _nagle_interfaces():
+    import winreg
+    names = []
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _NAGLE_BASE, 0, winreg.KEY_READ) as base:
         i = 0
-        modified_count = 0
         while True:
             try:
-                subkey_name = winreg.EnumKey(base_key, i)
-                subkey_path = f"{base_path}\\{subkey_name}"
-                subkey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey_path, 0, winreg.KEY_ALL_ACCESS)
-                winreg.SetValueEx(subkey, "TcpAckFrequency", 0, winreg.REG_DWORD, 1)
-                winreg.SetValueEx(subkey, "TCPNoDelay", 0, winreg.REG_DWORD, 1)
-                winreg.CloseKey(subkey)
-                modified_count += 1
-                i += 1
+                names.append(winreg.EnumKey(base, i))
             except OSError:
                 break
-        winreg.CloseKey(base_key)
-        _booster_state["nagle_disabled"] = True
-        log.info(f"✓ Nagle disabled on {modified_count} network interfaces")
+            i += 1
+    return names
+
+
+def _disable_nagle():
+    """모든 네트워크 어댑터에서 Nagle 을 끈다. 원래 값은 저널에 기록된다.
+
+    예전 구현은 원래 값을 기록하지 않았고, 되돌릴 때 모든 어댑터의 값을 지웠다.
+    사용자나 다른 프로그램이 직접 넣어 둔 값까지 사라졌다. 또 어댑터 하나에서
+    권한 오류가 나면 반복문 전체가 멈췄다.
+    """
+    from backend import system_state as ss
+    try:
+        ifaces = _nagle_interfaces()
     except Exception as e:
-        log.warning(f"⚠ Nagle disable error: {e}")
+        return {'ok': False, 'changed': 0, 'failed': [f'어댑터 목록을 읽지 못했습니다: {e}']}
+    changed, failed = 0, []
+    for iface in ifaces:
+        path = f"{_NAGLE_BASE}\\{iface}"
+        for name in ("TcpAckFrequency", "TCPNoDelay"):
+            r = ss.set_registry('HKLM', path, name, 1, group=BOOST_GROUP,
+                                why=f"게임 부스트: Nagle 끄기 — {name} (어댑터 {iface})")
+            if r.get('ok'):
+                changed += 1
+            else:
+                failed.append(f"{iface} {name}: {r.get('reason', '실패')}")
+    _booster_state["nagle_disabled"] = changed > 0
+    if failed:
+        log.warning(f"⚠ Nagle 끄기 실패 {len(failed)}건: {failed[:3]}")
+    return {'ok': changed > 0 and not failed, 'changed': changed, 'failed': failed}
 
 
 def _restore_nagle():
-    """Restore default Nagle behavior on all network interfaces."""
-    try:
-        import winreg
-        base_path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-        base_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path, 0, winreg.KEY_READ)
-        
-        i = 0
-        while True:
-            try:
-                subkey_name = winreg.EnumKey(base_key, i)
-                subkey_path = f"{base_path}\\{subkey_name}"
-                subkey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey_path, 0, winreg.KEY_ALL_ACCESS)
-                try:
-                    winreg.DeleteValue(subkey, "TcpAckFrequency")
-                except FileNotFoundError:
-                    pass
-                try:
-                    winreg.DeleteValue(subkey, "TCPNoDelay")
-                except FileNotFoundError:
-                    pass
-                winreg.CloseKey(subkey)
-                i += 1
-            except OSError:
-                break
-        winreg.CloseKey(base_key)
-        _booster_state["nagle_disabled"] = False
-        log.info("✓ Nagle restored to default")
-    except Exception as e:
-        log.warning(f"⚠ Nagle restore error: {e}")
+    """저널에 기록한 원래 값으로 되돌린다. 실패한 항목은 저널에 남아 다시 시도할 수 있다."""
+    from backend import system_state as ss
+    r = ss.restore_group(BOOST_GROUP)
+    _booster_state["nagle_disabled"] = not r['ok']
+    if r['failed']:
+        log.warning(f"⚠ Nagle 복구 실패 {len(r['failed'])}건 — 복구 센터에서 다시 시도할 수 있습니다")
+    return r
 
 
 # ─────────────────────────────────────────────
-# Process Priority / Taming (Hardened with fallback)
+# 프로세스 우선순위 (process_boost 경유 — 원래 값 기록)
 # ─────────────────────────────────────────────
 
 def get_booster_status():
     return _booster_state
 
-def _is_safe_to_tame(proc_name, pid=None):
-    """Pre-Check Safety Routine: Verify process is not in whitelist, game list, or foreground.
-    
-    Zero-Risk Shield: This function is the SINGLE gate that decides whether a process
-    can have its priority lowered. If it returns False, the process is UNTOUCHABLE.
-    """
-    if not proc_name:
-        return False
-    proc_name = proc_name.lower()
-    
-    # 1. Whitelist Check — system core & game launchers
-    if proc_name in WHITELIST:
-        return False
-    
-    # 2. Game Process Check — NEVER tame running games
-    if proc_name in GAMES_LIST:
-        return False
-        
-    # 3. Foreground / UI Check (Basic heuristic: if it's a known system app)
-    # GetForegroundWindow check could be added here if needed, but whitelist covers most.
-    return True
 
-def _tame_processes(pids):
-    """백그라운드 앱의 우선순위를 낮춘다.
+def _boost_game_processes(pids):
+    """게임을 HIGH 우선순위로 올리고 EcoQoS 에서 뺀다.
 
-    실제 작업은 process_boost 가 한다. 그쪽이 바꾸기 전 원래 우선순위를 기록하므로
-    복구할 때 정확히 그 값으로 되돌릴 수 있다. 예전에는 무조건 NORMAL 로 되돌려
-    원래 BELOW_NORMAL 이던 프로세스의 설정을 잃었다.
+    예전에는 psutil 로 직접 올리고 원래 값을 기록하지 않았다. 그래서 게임 도중
+    부스터를 끄면 게임이 HIGH 로 남았다. 이제 process_boost 가 원래 값을 기록한다.
     """
     from backend import process_boost
-    tamed = 0
+    boosted = 0
     for pid in pids:
-        r = process_boost.set_priority(pid, 'idle', reason='(에코/부스트 억제)')
+        r = process_boost.set_priority(pid, 'high', reason='(게임 부스트)', owner=OWNER)
         if r.get('ok'):
-            tamed += 1
-            # EcoQoS 는 세션 한정이고 프로세스가 끝나면 사라진다
+            boosted += 1
+            _set_process_power_throttling(pid, False)
+        else:
+            log.warning(f"  ✗ 게임 우선순위를 올리지 못했습니다 (PID {pid}): {r.get('reason')}")
+    return boosted
+
+
+def _tame_processes(pids, owner=OWNER):
+    """백그라운드 앱의 우선순위를 낮추고 EcoQoS 를 켠다. 원래 우선순위는 기록된다."""
+    from backend import process_boost
+    tamed = []
+    for pid in pids:
+        r = process_boost.set_priority(pid, 'idle', reason='(부스트 억제)', owner=owner)
+        if r.get('ok'):
+            tamed.append(pid)
             _set_process_power_throttling(pid, True)
     if tamed:
-        log.info(f"백그라운드 프로세스 {tamed}개의 우선순위를 낮췄습니다")
+        log.info(f"백그라운드 프로세스 {len(tamed)}개의 우선순위를 낮췄습니다")
     return tamed
 
 
-def _boost_game_processes(pids):
-    """Elevate game to HIGH priority + disable power throttling (force P-cores).
-    
-    Uses psutil first, falls back to Win32 API on AccessDenied.
-    """
-    boosted_count = 0
-    for pid in pids:
-        try:
-            p = psutil.Process(pid)
-            proc_name = p.name().lower()
-            
-            # Strict Whitelist Check (just in case we accidentally targeted a system app)
-            if not _is_safe_to_tame(proc_name, pid) and proc_name not in GAMES_LIST:
-                continue
-            
-            # Try psutil first
-            try:
-                if p.nice() != psutil.HIGH_PRIORITY_CLASS:
-                    p.nice(psutil.HIGH_PRIORITY_CLASS)
-                boosted_count += 1
-                log.info(f"  ✓ Boosted {proc_name} (PID {pid}) to HIGH priority via psutil")
-            except psutil.AccessDenied:
-                # Fallback: Win32 API direct call
-                if _set_priority_via_win32(pid, HIGH_PRIORITY_CLASS):
-                    log.info(f"  ✓ Boosted {proc_name} (PID {pid}) to HIGH priority via Win32 API")
-                    boosted_count += 1
-                else:
-                    log.warning(f"  ✗ Failed to boost {proc_name} (PID {pid}) - AccessDenied even with Win32")
-            
-            # Disable EcoQoS so game gets performance cores
-            _set_process_power_throttling(pid, False)
-            
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            pass
-        except Exception as e:
-            log.warning(f"  ✗ Boost error for PID {pid}: {e}")
-    
-    return boosted_count
+def _restore_processes(pids, owner=OWNER):
+    """기록해둔 원래 우선순위로 되돌리고 EcoQoS 는 시스템에 맡긴다.
 
-def _restore_processes(pids):
-    """기록해둔 원래 우선순위로 되돌린다."""
+    사용자가 그 사이 게이밍 탭에서 직접 바꾼 프로세스는 건드리지 않는다.
+    """
     from backend import process_boost
     for pid in pids:
-        _set_process_power_throttling(pid, False)
+        if process_boost.owner_of(pid) != owner:
+            continue
+        _set_process_power_throttling(pid, None)
         process_boost.restore(pid)
 
 
-def _enter_boost_mode():
-    """게임이 감지됐을 때 부스트를 적용한다.
+def _pick_tame_targets(exclude_pids):
+    """'바쁜 백그라운드 앱 양보시키기' 대상. 설명대로 CPU 를 많이 쓰는 것만 고른다.
 
-    예전에는 감지되자마자 타이머 해상도, Nagle 레지스트리, 전체 게이밍 모드를
-    한꺼번에 바꿨다. 사용자는 무엇이 바뀌는지 알 수 없었고 Nagle 은 영구
-    레지스트리 변경이었다. 이제 각 항목을 설정으로 끄고 켤 수 있고,
-    기본값은 '되돌릴 수 있는 것만 켜짐' 이다.
+    예전에는 설정과 무관하게 크롬·엣지·카카오톡 등 고정 목록을 CPU 사용량과
+    상관없이 낮췄다. 화면의 설명('CPU 를 많이 쓰는 백그라운드 앱', '끄고 켤 수 있음')과
+    실제 동작이 달랐다.
     """
+    from backend import process_boost
+    candidates = process_boost.find_throttle_candidates(
+        foreground_pid=_get_foreground_pid(), cpu_threshold=ECO_CPU_THRESHOLD)
+    return [c['pid'] for c in candidates if c['pid'] not in exclude_pids]
+
+
+# ─────────────────────────────────────────────
+# 부스트 진입 / 해제
+# ─────────────────────────────────────────────
+
+def _enter_boost_mode():
+    """게임이 감지됐을 때 사용자가 켜 둔 항목만 적용한다. 적용한 것은 _applied 에 남긴다."""
     from backend import config_manager
     cfg = config_manager.load_config()
-    applied = []
+    labels = []
 
-    # 타이머 해상도: 세션 한정. 프로세스가 끝나면 원래대로 돌아간다.
+    # 타이머 해상도: 세션 한정. 우리 요청을 거두면 원래대로 돌아간다.
     if cfg.get('boost_timer_resolution', True):
-        _set_timer_resolution(True)
-        applied.append('타이머 해상도 0.5ms')
+        if _set_timer_resolution(True):
+            _applied['timer'] = True
+            labels.append('타이머 해상도 0.5ms')
 
-    # Nagle 비활성화: 레지스트리 영구 변경이므로 기본값을 꺼둔다.
+    # 바쁜 백그라운드 앱 양보: 대상은 루프가 5초마다 고른다(CPU 측정에 기준점이 필요하다).
+    if cfg.get('boost_tame_background', True):
+        from backend import process_boost
+        process_boost.prime_cpu_measurement()
+        _applied['tame'] = True
+        labels.append('바쁜 백그라운드 앱 양보')
+
+    # Nagle: 레지스트리 변경이라 기본값은 꺼져 있다.
     if cfg.get('boost_disable_nagle', False):
-        _disable_nagle()
-        applied.append('Nagle 알고리즘 비활성화')
+        r = _disable_nagle()
+        if r['changed']:
+            _applied['nagle'] = True
+            labels.append('Nagle 끄기' + ('' if r['ok'] else ' (일부 실패)'))
 
-    # 전원 모드 전환: OS 설정을 바꾸므로 기본값을 꺼둔다.
+    # 게이밍 전원 모드: 게임 동안만. 끝나면 사용자가 쓰던 모드로 돌아간다.
     if cfg.get('boost_auto_power_mode', False):
-        try:
-            from backend import perf_modes
-            res = perf_modes.apply_mode('gaming', user_set=False)
-            if res.get('success') or res.get('partial'):
-                applied.append('게이밍 전원 모드')
-        except Exception as e:
-            log.warning(f"전원 모드 전환 실패: {e}")
+        _apply_gaming_power_mode(labels)
 
-    _booster_state['appliedBoosts'] = applied
-    log.info(f"부스트 진입: {', '.join(applied) if applied else '적용 항목 없음'}")
+    _booster_state['appliedBoosts'] = labels
+    log.info(f"부스트 진입: {', '.join(labels) if labels else '적용 항목 없음'}")
+
+
+def _apply_gaming_power_mode(labels):
+    """게이밍 전원 모드를 '저장하지 않고' 적용한다.
+
+    예전에는 게임이 끝나면 무조건 표준 모드를 적용했고, 그 과정에서 저장된 모드도
+    덮어썼다. 에코 모드를 쓰던 사용자는 게임 한 판 뒤 표준 모드가 됐고, 다음 실행
+    때도 표준으로 시작했다.
+    """
+    from backend import config_manager, perf_modes
+    prev = config_manager.get_optimization_mode()
+    if prev == 'gaming':
+        return                                  # 이미 게이밍 모드다. 바꿀 것도 되돌릴 것도 없다.
+    # apply_mode 는 먼저 이전 모드를 되돌린다. 적용이 실패해도 이전 모드는 이미
+    # 풀렸을 수 있으므로, 결과와 상관없이 '돌아갈 모드' 를 먼저 기록한다.
+    _applied['power_mode_prev'] = prev
+    config_manager.set_boost_restore_mode(prev)     # 앱이 비정상 종료돼도 다음 실행 때 되돌린다
+    try:
+        res = perf_modes.apply_mode('gaming', user_set=False, persist=False)
+        if res.get('success') or res.get('partial'):
+            labels.append('게이밍 전원 모드' + ('' if res.get('success') else ' (일부 실패)'))
+        else:
+            log.warning(f"게이밍 전원 모드 전환 실패: {res.get('message')}")
+    except Exception as e:
+        log.warning(f"전원 모드 전환 실패: {e}")
+
+
+def _restore_power_mode():
+    from backend import config_manager, perf_modes
+    prev = _applied.pop('power_mode_prev', None)
+    if prev is None:
+        return
+    try:
+        res = perf_modes.apply_mode(prev, user_set=False, persist=False)
+        if res.get('success'):
+            config_manager.set_boost_restore_mode(None)
+        else:
+            log.warning(f"게임 전 모드({prev})로 되돌리지 못했습니다: {res.get('message')}")
+    except Exception as e:
+        log.warning(f"전원 모드 복구 실패: {e}")
+
+
+def forget_power_mode_restore():
+    """사용자가 게임 도중 직접 성능 모드를 고르면 부른다.
+
+    그 뒤에 게임이 끝났다고 게임 전 모드로 되돌리면 사용자의 선택을 덮어쓴다.
+    """
+    _applied.pop('power_mode_prev', None)
+    try:
+        from backend import config_manager
+        config_manager.set_boost_restore_mode(None)
+    except Exception:
+        pass
+
+
+def power_mode_overridden():
+    """게임 부스트가 지금 게이밍 전원 모드를 임시로 적용 중인지. UI 설명용."""
+    return 'power_mode_prev' in _applied
 
 
 def _exit_boost_mode():
-    """게임이 끝나면 부스트에서 적용한 것을 되돌린다."""
-    from backend import config_manager
-    cfg = config_manager.load_config()
-
-    if cfg.get('boost_timer_resolution', True):
+    """부스트에서 '실제로 적용한 것' 만 되돌린다."""
+    if _applied.pop('timer', False):
         _set_timer_resolution(False)
-    if cfg.get('boost_disable_nagle', False):
+    if _applied.pop('nagle', False):
         _restore_nagle()
-    if cfg.get('boost_auto_power_mode', False):
-        try:
-            from backend import perf_modes
-            perf_modes.apply_mode('standard', user_set=False)
-        except Exception as e:
-            log.warning(f"전원 모드 복구 실패: {e}")
-
-    # 우선순위를 낮췄던 프로세스를 전부 원래대로
-    try:
-        from backend import process_boost
-        process_boost.restore_all()
-    except Exception as e:
-        log.warning(f"프로세스 우선순위 복구 실패: {e}")
-
+    _restore_power_mode()
+    _applied.pop('tame', None)
     _booster_state['appliedBoosts'] = []
     log.info("부스트 종료: 적용했던 설정을 되돌렸습니다")
+
+
+def _teardown():
+    """게임 세션을 끝낸다. 루프, 부스터 끄기, 앱 종료가 모두 이 한 곳을 쓴다."""
+    global _tamed_pids
+    with _teardown_lock:
+        _restore_processes(list(_tamed_pids))
+        _tamed_pids = set()
+        _restore_processes(_booster_state["boosted_pids"])
+        _exit_boost_mode()
+        _booster_state["active"] = False
+        _booster_state["detected_game"] = None
+        _booster_state["boosted_pids"] = []
 
 
 # ─────────────────────────────────────────────
@@ -564,138 +493,156 @@ def _exit_boost_mode():
 # ─────────────────────────────────────────────
 
 def _booster_loop():
-    global _booster_state
-    
+    global _tamed_pids
+
     # Enable SeDebugPrivilege at thread start for maximum process control
     if _is_admin():
         _enable_debug_privilege()
-    
-    last_tamable_pids = []
-    
+
     while not _stop_event.is_set():
         try:
             if not _booster_state["enabled"]:
                 if _booster_state["active"]:
-                    _restore_processes(last_tamable_pids)
-                    _restore_processes(_booster_state["boosted_pids"])
-                    _exit_boost_mode()
-                    _booster_state["active"] = False
-                    _booster_state["detected_game"] = None
-                    _booster_state["boosted_pids"] = []
-                    last_tamable_pids = []
-                time.sleep(2)
+                    _teardown()
+                _stop_event.wait(2)
                 continue
-                
-            # Single pass scan for games and tamable apps
+
             found_games = []
             current_game_pids = []
-            current_tamable_pids = []
-            
             for proc in psutil.process_iter(['name']):
                 try:
-                    name = proc.info.get('name')
-                    if not name: continue
-                    name = name.lower()
-                    
+                    name = (proc.info.get('name') or '').lower()
                     if name in GAMES_LIST:
                         found_games.append(name)
                         current_game_pids.append(proc.pid)
-                    elif name in APPS_TO_TAME:
-                        current_tamable_pids.append(proc.pid)
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
-                    
+
             if found_games:
                 found_games.sort(key=lambda x: GAMES_LIST.index(x))
                 game_found = found_games[0]
-                
-                if not _booster_state["active"]:
-                    # Just entered boost mode
-                    _booster_state["active"] = True
-                    _booster_state["detected_game"] = game_found
-                    _booster_state["boosted_pids"] = current_game_pids
-                    _booster_state["boost_count"] += 1
-                    
-                    log.info(f"🎮 Game detected: {game_found} (PIDs: {current_game_pids})")
-                    
-                    # Apply all system-wide boosts
-                    _enter_boost_mode()
-                    _boost_game_processes(current_game_pids)
-                    _tame_processes(current_tamable_pids)
-                    
-                elif _booster_state["detected_game"] != game_found:
-                    # Game changed
-                    log.info(f"🎮 Game switched to: {game_found}")
-                    _restore_processes(_booster_state["boosted_pids"])
-                    _booster_state["detected_game"] = game_found
-                    _booster_state["boosted_pids"] = current_game_pids
-                    _boost_game_processes(current_game_pids)
-                    _tame_processes(current_tamable_pids)
-                else:
-                    # Still running, update PIDs in case the game spawned new processes
-                    new_game_pids = list(set(current_game_pids) - set(_booster_state["boosted_pids"]))
-                    if new_game_pids:
-                        _boost_game_processes(new_game_pids)
-                    
-                    # Prevent Memory Leak: explicitly reassign to currently alive PIDs only
-                    _booster_state["boosted_pids"] = current_game_pids
-                    _tame_processes(current_tamable_pids)
-                    
-                last_tamable_pids = current_tamable_pids
-                
-                found_games.clear()
-                current_game_pids.clear()
-                current_tamable_pids.clear()
+
+                with _teardown_lock:
+                    if not _booster_state["active"]:
+                        _booster_state["active"] = True
+                        _booster_state["detected_game"] = game_found
+                        _booster_state["boosted_pids"] = current_game_pids
+                        _booster_state["boost_count"] += 1
+                        log.info(f"🎮 Game detected: {game_found} (PIDs: {current_game_pids})")
+                        _enter_boost_mode()
+                        _boost_game_processes(current_game_pids)
+                    else:
+                        if _booster_state["detected_game"] != game_found:
+                            log.info(f"🎮 Game switched to: {game_found}")
+                            _booster_state["detected_game"] = game_found
+                        # 새로 뜬 게임 프로세스만 올리고, 끝난 것은 기록에서 뺀다
+                        new_pids = [p for p in current_game_pids if p not in _booster_state["boosted_pids"]]
+                        gone = [p for p in _booster_state["boosted_pids"] if p not in current_game_pids]
+                        if gone:
+                            _restore_processes(gone)
+                        if new_pids:
+                            _boost_game_processes(new_pids)
+                        _booster_state["boosted_pids"] = current_game_pids
+
+                    if _applied.get('tame'):
+                        targets = _pick_tame_targets(set(current_game_pids) | _tamed_pids)
+                        _tamed_pids |= set(_tame_processes(targets))
+
                 gc.collect()
-                time.sleep(5)
+                _stop_event.wait(5)
             else:
                 if _booster_state["active"]:
-                    # Game exited — restore everything
                     log.info("🎮 Game exited - restoring all processes")
-                    _restore_processes(last_tamable_pids)
-                    _restore_processes(_booster_state["boosted_pids"])
-                    _exit_boost_mode()
-                    _booster_state["active"] = False
-                    _booster_state["detected_game"] = None
-                    _booster_state["boosted_pids"] = []
-                    _booster_state["boosted_pids"] = []
-                    last_tamable_pids = []
-                    
+                    _teardown()
                 gc.collect()
-                time.sleep(3)
+                _stop_event.wait(3)
         except Exception as e:
             log.error(f"Booster loop crash: {e}")
-            time.sleep(5)
+            _stop_event.wait(5)
+
 
 def toggle_booster(enabled):
-    global _monitor_thread, _stop_event
+    """게임 자동 감지를 켜고 끈다(사용자 설정으로 저장된다).
+
+    끌 때는 루프가 2초 안에 적용했던 것을 되돌린다.
+    """
+    global _monitor_thread
+    enabled = bool(enabled)
     _booster_state["enabled"] = enabled
-    
+
+    saved = True
     try:
         from backend import config_manager
-        config_manager.set_booster_state(enabled)
+        saved = config_manager.set_booster_state(enabled)
     except Exception as e:
+        saved = False
         log.warning(f"Failed to save booster state: {e}")
-    
+
     if enabled and (_monitor_thread is None or not _monitor_thread.is_alive()):
         _stop_event.clear()
         _monitor_thread = threading.Thread(target=_booster_loop, daemon=True)
         _monitor_thread.start()
         log.info("✓ Game Booster ENABLED - monitoring for games...")
-        
+
     if not enabled:
-        log.info("✓ Game Booster DISABLED - delegating teardown to background thread...")
-    return {"success": True, "enabled": enabled}
+        log.info("✓ Game Booster DISABLED - 루프가 적용했던 설정을 되돌립니다")
+    return {"success": True, "enabled": enabled, "saved": saved}
+
+
+def _recover_after_crash():
+    """지난번에 게임 도중 앱이 비정상 종료됐다면, 그때 적용한 것을 되돌린다.
+
+    부스트는 세션 한정이 원칙인데 Nagle(레지스트리)과 전원 모드는 프로세스가
+    죽어도 남는다. 앱을 막 켠 시점에는 게임 세션이 없으므로 남은 것은 전부 잔여물이다.
+    """
+    from backend import config_manager, system_state as ss
+    prev = config_manager.get_boost_restore_mode()
+    if prev:
+        try:
+            from backend import perf_modes
+            res = perf_modes.apply_mode(prev, user_set=False, persist=False)
+            if res.get('success'):
+                config_manager.set_boost_restore_mode(None)
+            log.info(f"지난 게임 세션의 전원 모드를 '{prev}' 로 되돌림: {res.get('message')}")
+        except Exception as e:
+            log.warning(f"지난 세션 전원 모드 복구 실패: {e}")
+    if any(e.get('group') == BOOST_GROUP for e in ss.pending_changes().values()):
+        r = ss.restore_group(BOOST_GROUP)
+        log.info(f"지난 게임 세션의 Nagle 변경 복구: {r['restored']}건, 실패 {len(r['failed'])}건")
+
 
 def init_booster():
-    """Auto-start booster on application launch if saved state is enabled."""
+    """앱 시작 시: 지난 세션 잔여물 정리 → 저장된 설정이 켜짐이면 감지 시작."""
+    try:
+        _recover_after_crash()
+    except Exception as e:
+        log.warning(f"지난 세션 정리 실패: {e}")
     try:
         from backend import config_manager
-        saved_state = config_manager.get_booster_state()
-        if saved_state:
+        if config_manager.get_booster_state():
             toggle_booster(True)
     except Exception as e:
         log.warning(f"Failed to auto-init booster: {e}")
+
+
+def shutdown(timeout=8.0):
+    """앱을 닫을 때 부른다. 적용한 것을 '지금 이 스레드에서' 되돌린다.
+
+    예전에는 종료 경로가 toggle_booster(False) 를 불렀다. 그 결과
+    (1) booster_enabled=False 가 저장돼 다음 실행부터 게임 부스트가 꺼져 있었고,
+    (2) 되돌리기를 데몬 스레드에 맡겼는데 창이 닫히며 프로세스가 끝나 그 스레드도
+        같이 죽었다. 게임 도중 앱을 닫으면 Nagle·전원 모드가 그대로 남았다.
+    """
+    _stop_event.set()
+    t = _monitor_thread
+    if t is not None and t.is_alive() and t is not threading.current_thread():
+        t.join(timeout)
+    stop_eco_suppression_loop()
+    restore_background_apps()
+    if _booster_state["active"] or _applied or _tamed_pids:
+        _teardown()
+    return {"success": True}
+
 
 # ─────────────────────────────────────────────
 # Eco Mode Background Suppression
@@ -704,6 +651,8 @@ def init_booster():
 _eco_suppression_thread = None
 _eco_stop_event = threading.Event()
 _eco_tamed_pids = set()
+ECO_OWNER = 'eco'
+
 
 def _get_foreground_pid():
     try:
@@ -716,15 +665,11 @@ def _get_foreground_pid():
         log.debug(f"Failed to get foreground PID: {e}")
     return None
 
+
 def _eco_suppression_thread_func():
     """에코 모드에서 바쁜 백그라운드 앱의 우선순위를 낮춘다.
 
-    예전에는 포그라운드가 아닌 '모든' 사용자 프로세스를 IDLE 로 내렸다.
-    변수 이름은 current_heavy_pids 였지만 CPU 임계값이 없어서, 백신·백업·
-    음악 재생·컴파일까지 전부 굼떠졌다. 실행 중인 게임도 대상이었다
-    (CPU 를 가장 많이 쓰므로 사실상 1순위였다).
-
-    이제 process_boost.find_throttle_candidates 가 고른 것만 건드린다.
+    process_boost.find_throttle_candidates 가 고른 것만 건드린다.
     CPU 임계값을 넘고, 게임이 아니고, 보호 목록에 없고, process_guard 를
     통과한 프로세스만 후보가 된다.
     """
@@ -743,61 +688,36 @@ def _eco_suppression_thread_func():
 
             new_pids = pids - _eco_tamed_pids
             if new_pids:
-                _tame_processes(list(new_pids))
-                _eco_tamed_pids.update(new_pids)
+                _eco_tamed_pids.update(_tame_processes(list(new_pids), owner=ECO_OWNER))
 
             # 더 이상 바쁘지 않거나 종료된 프로세스는 원래대로 돌려준다.
-            # 예전에는 목록에서 빼기만 하고 복구하지 않아, 한 번 낮춘 우선순위가
-            # 에코 모드를 끌 때까지 그대로 유지됐다.
             gone = _eco_tamed_pids - pids
             if gone:
-                _restore_processes(list(gone))
+                _restore_processes(list(gone), owner=ECO_OWNER)
                 _eco_tamed_pids -= gone
 
             gc.collect()
         except Exception as e:
             log.warning(f"에코 억제 루프 오류: {e}")
 
-        for _ in range(ECO_INTERVAL_SEC):
-            if _eco_stop_event.is_set():
-                break
-            time.sleep(1)
+        _eco_stop_event.wait(ECO_INTERVAL_SEC)
 
 
 def start_eco_suppression_loop():
-    global _eco_suppression_thread, _eco_stop_event
+    global _eco_suppression_thread
     _eco_stop_event.clear()
     if _eco_suppression_thread is None or not _eco_suppression_thread.is_alive():
         _eco_suppression_thread = threading.Thread(target=_eco_suppression_thread_func, daemon=True)
         _eco_suppression_thread.start()
 
+
 def stop_eco_suppression_loop():
-    global _eco_stop_event
     _eco_stop_event.set()
+
 
 def restore_background_apps():
     global _eco_tamed_pids
     if _eco_tamed_pids:
         log.info("Restoring priority for Eco-tamed background apps...")
-        _restore_processes(list(_eco_tamed_pids))
-        _eco_tamed_pids.clear()
-
-# ─────────────────────────────────────────────
-# Foreground App Boosting (Gaming Ultra Mode)
-# ─────────────────────────────────────────────
-_fg_boosted_pid = None
-
-def boost_foreground_app():
-    global _fg_boosted_pid
-    pid = _get_foreground_pid()
-    if pid:
-        _boost_game_processes([pid])
-        _fg_boosted_pid = pid
-        log.info(f"Foreground app (PID: {pid}) boosted to HIGH priority for Gaming Ultra Mode.")
-
-def restore_foreground_app():
-    global _fg_boosted_pid
-    if _fg_boosted_pid:
-        _restore_processes([_fg_boosted_pid])
-        log.info(f"Foreground app (PID: {_fg_boosted_pid}) restored to NORMAL priority.")
-        _fg_boosted_pid = None
+        _restore_processes(list(_eco_tamed_pids), owner=ECO_OWNER)
+        _eco_tamed_pids = set()

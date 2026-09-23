@@ -27,7 +27,9 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
   const [isBackendReady, setIsBackendReady] = useState(false);
-  const [showInitialWizard, setShowInitialWizard] = useState(true);
+  // 'unknown' → 백엔드에 물어보기 전, 'show' → 첫 실행, 'done' → 이미 마침.
+  // 예전에는 true 로 시작하고 어디에도 기록하지 않아 매 실행마다 마법사가 떴다.
+  const [wizardState, setWizardState] = useState('unknown');
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -55,6 +57,18 @@ export default function App() {
           const stats = await window.pywebview.api.getSystemStats();
           if (stats && stats.cpuModel !== 'Error') {
             setSystemStats(stats);
+            // 마법사를 이미 마쳤는지 먼저 확인한다. 읽지 못하면 한 번 더 보여준다
+            // (건너뛰기는 아무것도 바꾸지 않으므로 보여줘도 안전하다).
+            let wizardDone = false;
+            if (typeof window.pywebview.api.getSetupWizardState === 'function') {
+              try {
+                const w = await window.pywebview.api.getSetupWizardState();
+                wizardDone = !!w?.done;
+              } catch (e) {
+                console.error('마법사 상태 조회 실패:', e);
+              }
+            }
+            setWizardState(wizardDone ? 'done' : 'show');
             setIsBackendReady(true);
             // Sync current active power plan mode from backend
             if (typeof window.pywebview.api.getOptimizationMode === 'function') {
@@ -113,37 +127,33 @@ export default function App() {
     <ErrorBoundary>
         <div className="h-screen w-screen bg-white dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
           
-          {showInitialWizard ? (
-            <InitialSetupWizard 
-              stats={systemStats} 
-              isDarkMode={isDarkMode} 
-              onComplete={async (selectedMode) => {
-                setShowInitialWizard(false);
-                // 마법사에서 고른 모드를 실제로 적용하고 결과를 알린다.
-                // 예전에는 setCurrentMode 만 해서 화면만 바뀌고 적용은 안 될 수 있었다.
-                const a = window.pywebview && window.pywebview.api;
-                if (a && typeof a.setOptimizationMode === 'function') {
-                  try {
-                    const res = await a.setOptimizationMode(selectedMode);
-                    if (res?.success) {
-                      setCurrentMode(selectedMode);
-                      addToast(res.message || '성능 모드를 적용했습니다.', 'success');
-                    } else if (res?.error === 'UAC_REQUIRED') {
-                      addToast('관리자 권한이 없어 성능 모드를 적용하지 못했습니다.', 'error');
-                    } else {
-                      addToast(res?.message || '성능 모드 적용에 실패했습니다.', 'error');
-                    }
-                  } catch (e) {
-                    addToast(`성능 모드 적용 중 오류: ${e}`, 'error');
-                  }
-                }
-              }} 
-            />
-          ) : showLoading ? (
+          {showLoading ? (
             <LoadingScreen 
               isAppReady={isBackendReady} 
               onComplete={() => setShowLoading(false)} 
               isDarkMode={isDarkMode}
+            />
+          ) : wizardState === 'show' ? (
+            <InitialSetupWizard 
+              stats={systemStats} 
+              isDarkMode={isDarkMode} 
+              onComplete={async () => {
+                // 마법사를 닫았다는 기록만 남긴다. 시스템은 바꾸지 않는다.
+                // 예전에는 여기서 표준 모드를 적용해서 '건너뛰기 (적용 안함)' 을 눌러도
+                // 전원 플랜이 바뀌었고, 사용자가 고른 모드가 매 실행마다 풀렸다.
+                setWizardState('done');
+                const a = window.pywebview && window.pywebview.api;
+                if (a && typeof a.completeSetupWizard === 'function') {
+                  try {
+                    const res = await a.completeSetupWizard();
+                    if (!res?.success) {
+                      addToast('설정 파일에 기록하지 못해 다음 실행 때 마법사가 다시 나타날 수 있습니다.', 'error');
+                    }
+                  } catch (e) {
+                    console.error('마법사 완료 기록 실패:', e);
+                  }
+                }
+              }} 
             />
           ) : null}
 

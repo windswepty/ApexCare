@@ -48,17 +48,25 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
 
 ### 시스템 변경 (레지스트리·전원·서비스)
 
-- 반드시 `backend/system_state` 를 거칩니다: `set_registry()`, `set_active_plan()`, `set_power_value()`.
+- 반드시 `backend/system_state` 를 거칩니다: `set_registry()`, `set_active_plan()`, `set_power_value()`, `set_service_start()`.
   이 함수들은 바꾸기 전에 원래 값을 한 번만 기록하고, 쓴 뒤 다시 읽어 확인합니다. 되돌릴 때는 `restore_group()` 을 씁니다.
+  원래 값을 읽지 못했거나 저널 저장에 실패하면 바꾸지 않습니다(되돌릴 수 없는 변경이 되므로).
+- 서비스 시작 유형은 `service_ctl` 이 서비스 관리자 API 로 바꿉니다. `service_ctl.set_start_type()` 을 직접 부르면
+  원래 값이 기록되지 않으므로, 복구 경로 밖에서는 `system_state.set_service_start()` 만 씁니다.
 - 추측한 "기본값"을 쓰는 것은 복구가 아닙니다. 원래 값이 없었으면 값을 삭제하는 것이 복구입니다.
 - 복구가 실패하면 백업이나 저널 기록을 지우지 않습니다. 그래야 다시 시도할 수 있습니다.
 - 성능 모드 전환은 `perf_modes.apply_mode()` 한 곳에서만 합니다. 새 모드를 적용하기 전에 이전 모드를 먼저 되돌립니다.
+  '표준' 은 되돌리기만 하고 전원 플랜을 바꾸지 않습니다. 게임 부스트는 `persist=False` 로 게임 동안만 게이밍 모드를 쓰고 끝나면 게임 전 모드로 돌아갑니다.
+- 구버전이 `settings.json` 에 남긴 백업(`network_tweak_backup`, `service_start_backup`)은 있을 때만 그 값으로 복구합니다. 없으면 아무것도 쓰지 않습니다.
 - 저널 위치: `%APPDATA%\APEX_CARE_DATA\system_state.json`. 설정 파일: 같은 폴더의 `settings.json`.
 
 ### 프로세스
 
 - 우선순위 변경은 `backend/process_boost` 로만 합니다 (원래 값 기록 → 복구). 건드려도 되는 프로세스인지는 `process_guard.check_controllable()` 한 곳에서 판정합니다.
-- 앱을 닫을 때 우선순위와 게임 부스트를 되돌립니다 (`Api.closeWindow`). `os._exit` 로 정리 없이 끝내지 않습니다.
+- 앱을 닫을 때 우선순위와 게임 부스트를 되돌립니다 (`Api._cleanup` → `game_booster.shutdown()`). `os._exit` 로 정리 없이 끝내지 않습니다.
+  종료 경로에서 `toggle_booster(False)` 를 부르지 않습니다. 사용자 설정(부스터 켜짐)이 꺼짐으로 저장됩니다.
+- `process_boost.set_priority()` 에는 `owner`('user'·'boost'·'eco')를 넘깁니다. 게임이 끝날 때 부스트가 바꾼 것만 되돌리고,
+  사용자가 직접 바꾼 것은 남깁니다. PID 재사용은 프로세스 생성 시각으로 걸러집니다.
 
 ### 명령 실행과 외부 자원
 
@@ -76,6 +84,7 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
   로직은 가짜 객체로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
 - 옛 테스트 스크립트는 실제 시스템을 바꿉니다. `test_performance.py` 는 성능 모드를 전환하고, `tools/test_full.py` 와 `tools/test_backend.py` 는 `purge_ram()` 을 호출합니다. 실행하지 않습니다.
 - 개발 PC 에는 구버전이 남긴 설정(`NetworkThrottlingIndex=0xFFFFFFFF`, `HwSchMode=2`)이 남아 있습니다. 이 값을 "원래 값"으로 가정하지 않습니다.
+- 초기 설정 마법사는 `settings.json` 의 `setup_wizard_done` 이 없을 때만 뜹니다. 마법사를 닫는 것(`completeSetupWizard`)은 시스템을 바꾸지 않습니다.
 
 ## 빌드 함정
 
@@ -91,6 +100,7 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
 | `api.py` | UI 가 부르는 모든 것의 진입점 |
 | `safe_delete.py` | 휴지통 삭제, 보호 경로 판정 |
 | `system_state.py` | 시스템 변경 저널 (원래 값 기록·확인·복구) |
+| `service_ctl.py` | 서비스 시작 유형·시작·중지 (서비스 관리자 API). 기록은 `system_state` 가 한다 |
 | `perf_modes.py` | 성능 모드 (표준·게이밍·에코) |
 | `process_boost.py` · `process_guard.py` | 프로세스 우선순위 변경·복구, 건드려도 되는지 판정 |
 | `game_booster.py` | 게임 감지, 부스트, 에코 억제 |

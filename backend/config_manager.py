@@ -15,6 +15,8 @@ DEFAULT_CONFIG = {
     "optimization_mode_user_set": False,
     # 구버전이 중지시킨 Windows Update 서비스 1회 복구 완료 플래그
     "wu_recovery_done": False,
+    # 초기 설정 마법사를 마쳤는지(적용했든 건너뛰었든). 없으면 매 실행마다 마법사가 뜬다.
+    "setup_wizard_done": False,
 
     # ── 게임 부스트가 무엇을 해도 되는지 ────────────────────────
     # 기본값 원칙: 되돌릴 수 있고 세션 한정인 것만 켜둔다.
@@ -37,14 +39,32 @@ def load_config():
             cfg.update(data)
             return cfg
     except Exception:
+        # 깨진 파일을 다음 저장이 덮어쓰면 그 안의 복구 백업도 함께 사라진다.
+        # 옆으로 옮겨 두고 기본값으로 계속한다.
+        try:
+            os.replace(CONFIG_FILE, CONFIG_FILE + ".corrupt")
+        except Exception:
+            pass
         return DEFAULT_CONFIG.copy()
 
 def save_config(config):
+    """원자적으로 저장한다. 성공하면 True.
+
+    예전에는 파일을 그 자리에서 덮어쓰고 실패를 삼켰다. 쓰는 도중 죽으면 설정이
+    반쯤 쓰인 채 깨지고, load_config 가 조용히 기본값으로 돌아가 구버전 복구 백업
+    (network_tweak_backup, service_start_backup)까지 사라졌다.
+    """
+    tmp = CONFIG_FILE + ".tmp"
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        os.makedirs(APPDATA_DIR, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CONFIG_FILE)
+        return True
     except Exception:
-        pass
+        return False
 
 def get_booster_state():
     return load_config().get("booster_enabled", True)
@@ -52,7 +72,24 @@ def get_booster_state():
 def set_booster_state(state):
     config = load_config()
     config["booster_enabled"] = bool(state)
-    save_config(config)
+    return save_config(config)
+
+
+def get_boost_restore_mode():
+    """게임 부스트가 게이밍 전원 모드를 켜기 전에 쓰던 모드. 없으면 None.
+
+    게임이 끝나면 지워진다. 앱을 다시 켰는데 남아 있으면 게임 도중 비정상 종료된 것이다.
+    """
+    return load_config().get("boost_restore_mode")
+
+
+def set_boost_restore_mode(mode):
+    config = load_config()
+    if mode is None:
+        config.pop("boost_restore_mode", None)
+    else:
+        config["boost_restore_mode"] = str(mode)
+    return save_config(config)
 
 def get_eula_accepted():
     return load_config().get("eula_accepted", False)
@@ -75,6 +112,16 @@ def set_optimization_mode(mode, user_set=True):
 
 def get_optimization_mode_user_set():
     return load_config().get("optimization_mode_user_set", False)
+
+def get_setup_wizard_done():
+    return bool(load_config().get("setup_wizard_done", False))
+
+
+def set_setup_wizard_done(state):
+    config = load_config()
+    config["setup_wizard_done"] = bool(state)
+    return save_config(config)
+
 
 def get_wu_recovery_done():
     return load_config().get("wu_recovery_done", False)
@@ -101,5 +148,6 @@ def set_boost_setting(key, value):
         return {"success": False, "message": f"알 수 없는 설정입니다: {key}"}
     c = load_config()
     c[key] = bool(value)
-    save_config(c)
+    if not save_config(c):
+        return {"success": False, "message": "설정을 저장하지 못했습니다."}
     return {"success": True, "key": key, "value": bool(value)}

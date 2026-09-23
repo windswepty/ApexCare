@@ -73,8 +73,10 @@ class Api:
     def purgeRam(self):
         res = optimizer.purge_ram()
         if res.get("success"):
-            return {"success": True, "message": f"RAM 메모리 최적화 완료 (프로세스 {res.get('purgedProcesses')}개 최적화)", "freedMB": 0}
-        return {"success": False, "message": "RAM 메모리 최적화 실패", "error": res.get("error")}
+            freed = round(res.get("freed_mb") or 0)
+            return {"success": True, "message": f"대기 메모리를 비웠습니다 (사용 가능 메모리 약 {freed}MB 증가)",
+                    "freedMB": freed}
+        return {"success": False, "message": "대기 메모리를 비우지 못했습니다.", "error": res.get("error")}
 
     def runTrim(self):
         return system_repair.run_trim()
@@ -82,16 +84,10 @@ class Api:
     def getTrimStatus(self):
         return system_repair.get_trim_status()
 
-    def optimizeNetwork(self, consent=False):
-        # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).
-        # 기본값이 False 라 프론트가 옛 버전이어도 영구 변경이 들어가지 않는다.
-        return system_repair.apply_network_tweaks(consent=consent)
-
+    # 네트워크 '영구 최적화'(Winsock 초기화 등)는 제거했다. 되돌릴 수 없는 변경이 섞여 있었고
+    # 프론트 어디에서도 쓰이지 않았다. 구버전이 적용한 것을 되돌리는 경로만 남긴다.
     def restoreNetworkTweaks(self):
         return system_repair.restore_network_tweaks()
-
-    def getNetworkStatus(self):
-        return system_repair.get_network_status()
 
     def runSfc(self):
         return system_repair.run_sfc()
@@ -134,6 +130,8 @@ class Api:
         예전에는 버튼을 누른 즉시 성공 토스트를 띄워, 실제로는 아무것도 적용되지 않아도
         사용자가 알 수 없었다.
         """
+        # 사용자가 직접 골랐다. 게임이 끝났다고 게임 전 모드로 되돌리면 이 선택을 덮어쓴다.
+        game_booster.forget_power_mode_restore()
         return perf_modes.apply_mode(mode)
 
     def listOptimizationModes(self):
@@ -142,10 +140,15 @@ class Api:
 
     def revertAllSystemChanges(self):
         """이 앱이 바꾼 모든 시스템 설정을 원래대로 되돌린다."""
+        game_booster.forget_power_mode_restore()
         return perf_modes.revert_everything()
 
     def getPendingSystemChanges(self):
-        """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼 노출 여부를 판단한다."""
+        """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼 노출 여부를 판단한다.
+
+        구버전이 settings.json 에 따로 남긴 백업도 함께 보여준다. 여기서 빠지면
+        복구 센터가 '되돌릴 변경이 없습니다' 라고 말하는데 실제로는 남아 있게 된다.
+        """
         changes = system_state.pending_changes()
         by_group = {}
         for key, e in changes.items():
@@ -153,8 +156,26 @@ class Api:
                 'what': e.get('why') or key,
                 'kind': e.get('kind'),
             })
-        return {'count': len(changes), 'groups': by_group}
+        count = len(changes)
+        if system_repair.has_legacy_network_backup():
+            by_group.setdefault('legacy_network', []).append({
+                'what': '이전 버전이 바꾼 TCP 자동 튜닝·Nagle·네트워크 스로틀링', 'kind': 'legacy'})
+            count += 1
+        if optimizer.has_legacy_service_backup():
+            by_group.setdefault('legacy_service', []).append({
+                'what': '이전 버전이 바꾼 SysMain·Windows Search 시작 설정', 'kind': 'legacy'})
+            count += 1
+        return {'count': count, 'groups': by_group}
         
+    # --- 초기 설정 마법사 ---
+    def getSetupWizardState(self):
+        """마법사를 이미 마쳤는지. 예전에는 기록하지 않아 매 실행마다 마법사가 떴다."""
+        return {'done': config_manager.get_setup_wizard_done()}
+
+    def completeSetupWizard(self):
+        """마법사를 닫았다고 기록한다. 시스템은 바꾸지 않는다."""
+        return {'success': config_manager.set_setup_wizard_done(True)}
+
     def applyHardwareTuning(self, cpu_cores, ram_gb, consent=False):
         # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).
         # 기본값이 False 라 프론트가 옛 버전이어도 영구 변경이 들어가지 않는다.
@@ -278,14 +299,7 @@ class Api:
             return {'success': False, 'busy': True, 'reason': reason,
                     'message': f'{reason} 작업이 진행 중입니다. 완료 후 종료하거나 먼저 중단해 주세요.'}
 
-        try:
-            game_booster.toggle_booster(False)   # 부스트가 바꾼 것을 되돌린다
-        except Exception as e:
-            log.warning(f"종료 중 부스터 정리 실패: {e}")
-        try:
-            process_boost.restore_all()          # 우선순위를 원래대로
-        except Exception as e:
-            log.warning(f"종료 중 우선순위 복구 실패: {e}")
+        self._cleanup()
 
         if self._window:
             try:
@@ -293,6 +307,19 @@ class Api:
             except Exception:
                 pass
         return {'success': True}
+
+    def _cleanup(self):
+        """종료 직전 정리. 여러 번 불러도 안전하다(main.py 도 창이 닫힌 뒤 한 번 더 부른다)."""
+        try:
+            # 부스트가 바꾼 것을 이 스레드에서 되돌린다. toggle_booster(False) 를 쓰면
+            # '부스터 꺼짐' 이 설정에 저장되고, 되돌리기는 곧 죽을 데몬 스레드에 맡겨진다.
+            game_booster.shutdown()
+        except Exception as e:
+            log.warning(f"종료 중 부스터 정리 실패: {e}")
+        try:
+            process_boost.restore_all()          # 우선순위를 원래대로
+        except Exception as e:
+            log.warning(f"종료 중 우선순위 복구 실패: {e}")
 
     def quitApplication(self, force=False):
         return self.closeWindow(force=force)

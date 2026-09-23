@@ -15,7 +15,7 @@ a = Analysis(
         # hiddenimports 에 없으면 exe 로 묶였을 때만 import 에 실패한다
         # (개발 중에는 드러나지 않는다).
         'backend.safe_delete', 'backend.system_state', 'backend.perf_modes',
-        'backend.process_boost', 'backend.storage',
+        'backend.process_boost', 'backend.storage', 'backend.service_ctl',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
         'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time',
         'win32pdh', 'pythoncom', 'win32com'

@@ -79,13 +79,20 @@ def _save(data):
 
 
 def _record(key, entry):
-    """원본을 기록한다. 이미 기록돼 있으면 건드리지 않는다 — 이게 핵심이다."""
+    """원본을 기록한다. 이미 기록돼 있으면 건드리지 않는다 — 이게 핵심이다.
+
+    원본이 디스크에 안전하게 있으면 True, 저장에 실패했으면 False.
+    False 면 호출부는 시스템을 바꾸면 안 된다. 기록 없이 바꾸면 되돌릴 방법이 없다.
+    """
     data = _load()
     if key in data['entries']:
-        return False          # 이미 원본이 있다. 덮어쓰면 진짜 원본을 잃는다.
+        return True           # 이미 원본이 있다. 덮어쓰면 진짜 원본을 잃는다.
     data['entries'][key] = entry
-    _save(data)
-    return True
+    return _save(data)
+
+
+_NOT_RECORDED = {'ok': False, 'verified': False,
+                 'reason': '원래 값을 기록하지 못해 바꾸지 않았습니다 (저널 저장 실패)'}
 
 
 def _forget(keys):
@@ -108,14 +115,27 @@ def has_pending():
 # 레지스트리
 # ─────────────────────────────────────────────
 
-def read_registry(hive, path, name):
-    """(존재여부, 값, 타입) 을 돌려준다. 없으면 (False, None, None)."""
+def read_registry_strict(hive, path, name):
+    """(존재여부, 값, 타입). 값이 없으면 (False, None, None).
+
+    '없음' 과 '읽지 못함' 을 구분한다. 읽기 실패(권한 등)는 OSError 로 올린다.
+    읽지 못한 것을 '원래 없었음' 으로 기록하면, 복구할 때 멀쩡한 값을 지우게 된다.
+    """
     try:
         with winreg.OpenKey(HIVES[hive], path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
             val, typ = winreg.QueryValueEx(k, name)
             return True, val, typ
     except FileNotFoundError:
         return False, None, None
+
+
+def read_registry(hive, path, name):
+    """(존재여부, 값, 타입) 을 돌려준다. 없거나 읽지 못하면 (False, None, None).
+
+    표시용이다. 변경 전 원래 값을 기록할 때는 read_registry_strict 를 쓴다.
+    """
+    try:
+        return read_registry_strict(hive, path, name)
     except Exception as e:
         log.debug(f"레지스트리 읽기 실패 {hive}\\{path}\\{name}: {e}")
         return False, None, None
@@ -127,14 +147,22 @@ def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why='')
     group 은 '이 변경이 어느 기능에 속하는가' 다(예: 'mode:gaming').
     나중에 그 기능만 골라 되돌릴 때 쓴다.
     """
-    existed, before, before_type = read_registry(hive, path, name)
+    try:
+        existed, before, before_type = read_registry_strict(hive, path, name)
+    except PermissionError:
+        return {'ok': False, 'verified': False,
+                'reason': '원래 값을 읽을 권한이 없어 바꾸지 않았습니다(관리자 권한 필요)'}
+    except OSError as e:
+        return {'ok': False, 'verified': False,
+                'reason': f'원래 값을 읽지 못해 바꾸지 않았습니다: {e}'}
     entry_key = f"reg:{hive}\\{path}\\{name}"
 
-    _record(entry_key, {
+    if not _record(entry_key, {
         'kind': 'registry', 'group': group, 'hive': hive, 'path': path,
         'name': name, 'existed': existed, 'value': before,
         'type': before_type if existed else vtype, 'why': why,
-    })
+    }):
+        return dict(_NOT_RECORDED)
 
     try:
         with winreg.CreateKeyEx(HIVES[hive], path, 0,
@@ -269,9 +297,13 @@ def available_plans():
 def set_active_plan(guid_str, group, why=''):
     """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다."""
     before = active_plan_guid()
-    _record('power:active_plan', {
+    if not before:
+        return {'ok': False, 'verified': False,
+                'reason': '현재 전원 플랜을 읽지 못해 바꾸지 않았습니다'}
+    if not _record('power:active_plan', {
         'kind': 'power_plan', 'group': group, 'value': before, 'why': why,
-    })
+    }):
+        return dict(_NOT_RECORDED)
     if guid_str not in available_plans():
         return {'ok': False, 'verified': False,
                 'reason': f'이 PC 에 없는 전원 플랜입니다 ({KNOWN_PLANS.get(guid_str, guid_str)})'}
@@ -314,11 +346,18 @@ def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=
     results = []
     for ac in ([True, False] if both_ac_dc else [True]):
         before = _read_power_value(plan, sub, setting, ac)
+        if before is None:
+            # 원래 값을 모르면 되돌릴 수 없다. 모르는 채로 바꾸지 않는다.
+            results.append({'ac': ac, 'ok': False,
+                            'reason': '원래 값을 읽지 못해 바꾸지 않았습니다'})
+            continue
         key = f"power:{plan}:{sub}:{setting}:{'ac' if ac else 'dc'}"
-        _record(key, {
+        if not _record(key, {
             'kind': 'power_value', 'group': group, 'plan': plan, 'sub': sub,
             'setting': setting, 'ac': ac, 'value': before, 'why': label,
-        })
+        }):
+            results.append({'ac': ac, 'ok': False, 'reason': _NOT_RECORDED['reason']})
+            continue
         try:
             p = _powrprof()
             pg, sg, stg = _guid(plan), _guid(sub), _guid(setting)
@@ -336,16 +375,59 @@ def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=
         results.append({'ac': ac, 'ok': after == value, 'before': before, 'after': after,
                         'reason': '' if after == value else f'기대 {value}, 실제 {after}'})
 
-    # 쓴 값은 플랜을 다시 활성화해야 실제로 적용된다
-    try:
-        g = _guid(plan)
-        _powrprof().PowerSetActiveScheme(None, ctypes.byref(g))
-    except Exception:
-        pass
+    # 쓴 값은 플랜을 다시 활성화해야 실제로 적용된다.
+    # 단, 지금 활성 플랜일 때만. 비활성 플랜을 켜면 기록 없이 플랜을 바꾸는 셈이 된다.
+    _reapply_if_active({plan})
 
     ok = all(r['ok'] for r in results)
     return {'ok': ok, 'verified': ok, 'detail': results,
             'reason': '' if ok else '; '.join(r['reason'] for r in results if not r['ok'])}
+
+
+def _reapply_if_active(plans):
+    """세부값을 쓴 플랜이 지금 활성 플랜이면 다시 활성화해 반영시킨다.
+
+    비활성 플랜은 건드리지 않는다. 예전 복구 경로는 원래 플랜을 되돌린 '뒤에'
+    세부값을 고친 플랜(예: 고성능)을 다시 활성화해서, '전부 원래대로' 를 눌러도
+    고성능 플랜이 켜진 채로 끝났다.
+    """
+    active = active_plan_guid()
+    if active and active in plans:
+        try:
+            _powrprof().PowerSetActiveScheme(None, ctypes.byref(_guid(active)))
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────
+# 서비스 시작 유형
+# ─────────────────────────────────────────────
+
+def set_service_start(service, start, group, delayed=False, why=''):
+    """서비스 시작 유형을 바꾼다. 원래 값(과 실행 중이었는지)을 먼저 기록한다.
+
+    기존 코드는 sc config 를 shell=True 로 부르고 반환 코드도 보지 않았으며,
+    원래 값은 settings.json 에 따로 적었다. 백업이 없으면 '윈도우 기본값' 을
+    추측해 써넣었는데, 사용자가 일부러 꺼 둔 서비스를 다시 켜는 결과가 됐다.
+    """
+    from backend import service_ctl
+    cur = service_ctl.read_config(service)
+    if not cur['exists']:
+        return {'ok': False, 'verified': False, 'reason': cur.get('reason') or '없는 서비스'}
+    if cur['start'] is None:
+        return {'ok': False, 'verified': False,
+                'reason': (cur.get('reason') or '원래 시작 유형을 읽지 못했습니다')
+                          + ' — 되돌릴 수 없으므로 바꾸지 않았습니다'}
+    if not _record(f"svc:{service}", {
+        'kind': 'service', 'group': group, 'service': service,
+        'value': {'start': cur['start'], 'delayed': cur['delayed']},
+        'was_running': cur['running'], 'why': why,
+    }):
+        return dict(_NOT_RECORDED)
+    r = service_ctl.set_start_type(service, {'start': start, 'delayed': delayed})
+    return {'ok': bool(r.get('ok')), 'verified': bool(r.get('ok')),
+            'reason': r.get('reason', ''),
+            'before': cur['start'], 'after': start}
 
 
 # ─────────────────────────────────────────────
@@ -362,6 +444,30 @@ def restore_all():
     return _restore(lambda e: True)
 
 
+def _restore_registry(e):
+    """레지스트리 항목 하나를 되돌리고 되읽어 확인한다. 실패 사유 또는 None."""
+    hive, path, name = HIVES[e['hive']], e['path'], e['name']
+    if e.get('existed'):
+        with winreg.CreateKeyEx(hive, path, 0,
+                                winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
+            winreg.SetValueEx(k, name, 0, e.get('type') or winreg.REG_DWORD, e['value'])
+    else:
+        # 원래 없던 값이다. 되돌린다는 건 '지운다'는 뜻이다.
+        try:
+            with winreg.OpenKey(hive, path, 0,
+                                winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
+                winreg.DeleteValue(k, name)
+        except FileNotFoundError:
+            pass
+    existed, now, _ = read_registry_strict(e['hive'], path, name)
+    if e.get('existed'):
+        if not existed or now != e['value']:
+            return f"되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {e['value']}, 실제 {now})"
+    elif existed:
+        return '원래 없던 값을 지웠지만 아직 남아 있습니다'
+    return None
+
+
 def _restore(predicate):
     data = _load()
     entries = data['entries']
@@ -376,18 +482,10 @@ def _restore(predicate):
         try:
             kind = e.get('kind')
             if kind == 'registry':
-                if e.get('existed'):
-                    with winreg.CreateKeyEx(HIVES[e['hive']], e['path'], 0,
-                                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
-                        winreg.SetValueEx(k, e['name'], 0, e.get('type') or winreg.REG_DWORD, e['value'])
-                else:
-                    # 원래 없던 값이다. 되돌린다는 건 '지운다'는 뜻이다.
-                    try:
-                        with winreg.OpenKey(HIVES[e['hive']], e['path'], 0,
-                                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
-                            winreg.DeleteValue(k, e['name'])
-                    except FileNotFoundError:
-                        pass
+                reason = _restore_registry(e)
+                if reason:
+                    failed.append({'key': key, 'reason': reason})
+                    continue
                 done.append(key)
 
             elif kind == 'power_value':
@@ -402,6 +500,11 @@ def _restore(predicate):
                 if r != 0:
                     failed.append({'key': key, 'reason': f'쓰기 오류 {r}'})
                     continue
+                now = _read_power_value(e['plan'], e['sub'], e['setting'], e['ac'])
+                if now != e['value']:
+                    failed.append({'key': key,
+                                   'reason': f"되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {e['value']}, 실제 {now})"})
+                    continue
                 plans_touched.add(e['plan'])
                 done.append(key)
 
@@ -411,6 +514,9 @@ def _restore(predicate):
                     if res != 0:
                         failed.append({'key': key, 'reason': f'플랜 복구 실패 {res}'})
                         continue
+                    if active_plan_guid() != str(e['value']).lower():
+                        failed.append({'key': key, 'reason': '플랜을 되돌린 뒤 확인에 실패했습니다'})
+                        continue
                 done.append(key)
 
             elif kind == 'service':
@@ -419,6 +525,13 @@ def _restore(predicate):
                 if not r.get('ok'):
                     failed.append({'key': key, 'reason': r.get('reason', '서비스 복구 실패')})
                     continue
+                # 바꾸기 전에 돌고 있던 서비스면 다시 켠다. 시작 유형만 되돌리면
+                # 다음 부팅까지 꺼진 채로 남는다. 실패해도 시작 유형은 이미 원래대로라
+                # 재부팅하면 돌아오므로 기록은 지우고 로그만 남긴다.
+                if e.get('was_running') and int(e['value'].get('start', 4)) != 4:
+                    s = service_ctl.start(e['service'])
+                    if not s.get('ok'):
+                        log.warning(f"{e['service']} 재시작 실패: {s.get('reason')}")
                 done.append(key)
             else:
                 failed.append({'key': key, 'reason': f'알 수 없는 종류: {kind}'})
@@ -427,12 +540,9 @@ def _restore(predicate):
         except Exception as ex:
             failed.append({'key': key, 'reason': str(ex)})
 
-    # 되돌린 세부값을 실제로 반영시킨다
-    for plan in plans_touched:
-        try:
-            _powrprof().PowerSetActiveScheme(None, ctypes.byref(_guid(plan)))
-        except Exception:
-            pass
+    # 되돌린 세부값을 실제로 반영시킨다. 원래 플랜을 되돌린 '뒤' 이므로
+    # 지금 활성 플랜만 다시 활성화한다.
+    _reapply_if_active(plans_touched)
 
     # 성공한 것만 저널에서 지운다. 실패한 건 남겨야 다음에 다시 시도할 수 있다.
     if done:

@@ -60,7 +60,12 @@ PRIORITY_BY_NAME = {
 }
 NAME_BY_PRIORITY = {v: k for k, v in PRIORITY_BY_NAME.items()}
 
-# pid -> {'priority': 원래 우선순위, 'name': 프로세스명, 'throttled': 원래 EcoQoS 여부}
+# pid -> {'priority': 원래 우선순위, 'name': 프로세스명, 'created': 생성 시각, 'owner': 누가 바꿨나}
+#
+# created: PID 는 재사용된다. 게임이 끝나고 그 PID 를 다른 프로세스가 물려받으면
+#   '원래대로' 가 엉뚱한 프로세스의 우선순위를 바꾼다. 생성 시각이 같을 때만 같은 프로세스다.
+# owner: 'user'(게이밍 탭에서 직접), 'boost'(게임 부스트), 'eco'(에코 억제).
+#   게임이 끝났다고 사용자가 직접 바꾼 것까지 되돌리면 안 된다.
 _original = {}
 
 
@@ -72,23 +77,46 @@ def _never_throttle(name):
     return any(p.endswith('*') and n.startswith(p[:-1]) for p in NEVER_THROTTLE)
 
 
-def snapshot(pid, name=None):
+def _same_process(pid, entry):
+    try:
+        return psutil.Process(pid).create_time() == entry.get('created')
+    except Exception:
+        return False
+
+
+def snapshot(pid, name=None, owner='user'):
     """바꾸기 전 원래 우선순위를 기록한다. 이미 기록돼 있으면 덮어쓰지 않는다.
 
     덮어쓰면 우리가 설정한 IDLE 이 '원래 값'으로 굳어 영영 복구할 수 없다.
     system_state 가 레지스트리에 대해 하는 것과 같은 원칙이다.
+    기록이 있어도 PID 가 재사용된 다른 프로세스라면 옛 기록을 버리고 새로 적는다.
     """
-    if pid in _original:
-        return
+    entry = _original.get(pid)
+    if entry is not None:
+        if _same_process(pid, entry):
+            if owner == 'user':
+                entry['owner'] = 'user'      # 사용자가 직접 손댔다. 자동 복구 대상에서 뺀다.
+            return True
+        _original.pop(pid, None)
     try:
         p = psutil.Process(pid)
-        _original[pid] = {'priority': p.nice(), 'name': name or p.name()}
+        _original[pid] = {'priority': p.nice(), 'name': name or p.name(),
+                          'created': p.create_time(), 'owner': owner}
+        return True
     except Exception:
-        pass
+        return False
 
 
-def set_priority(pid, priority_name, reason=''):
-    """우선순위를 바꾼다. process_guard 를 반드시 통과해야 한다."""
+def owner_of(pid):
+    entry = _original.get(pid)
+    return entry.get('owner') if entry else None
+
+
+def set_priority(pid, priority_name, reason='', owner='user'):
+    """우선순위를 바꾼다. process_guard 를 반드시 통과해야 한다.
+
+    원래 값을 기록하지 못하면 바꾸지 않는다. 되돌릴 수 없는 변경이 된다.
+    """
     if priority_name not in PRIORITY_BY_NAME:
         return {'ok': False, 'reason': f'알 수 없는 우선순위: {priority_name}'}
 
@@ -96,7 +124,9 @@ def set_priority(pid, priority_name, reason=''):
     if not ok:
         return {'ok': False, 'reason': err, 'name': proc_name}
 
-    snapshot(safe_pid, proc_name)
+    if not snapshot(safe_pid, proc_name, owner):
+        return {'ok': False, 'name': proc_name,
+                'reason': '원래 우선순위를 읽지 못해 바꾸지 않았습니다.'}
     target = PRIORITY_BY_NAME[priority_name]
     try:
         psutil.Process(safe_pid).nice(target)
@@ -128,6 +158,9 @@ def restore(pid):
     entry = _original.pop(pid, None)
     if not entry:
         return {'ok': False, 'reason': '기록된 원래 값이 없습니다.'}
+    if not _same_process(pid, entry):
+        # 이미 끝났거나 PID 를 다른 프로세스가 물려받았다. 되돌릴 대상이 없다.
+        return {'ok': True, 'name': entry['name'], 'reason': '프로세스가 이미 종료됨'}
     try:
         psutil.Process(pid).nice(entry['priority'])
         return {'ok': True, 'name': entry['name'],

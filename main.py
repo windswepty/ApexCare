@@ -43,3 +43,7 @@ if __name__ == '__main__':
     os.makedirs(app_data_path, exist_ok=True)
     
     webview.start(debug=False, private_mode=False, storage_path=app_data_path)
+
+    # 창이 제목 표시줄의 닫기 버튼이 아닌 다른 경로(작업 표시줄, Alt+F4, 로그오프)로
+    # 닫혀도 게임 부스트와 우선순위를 되돌린다. 이미 정리됐다면 아무 일도 하지 않는다.
+    api._cleanup()
