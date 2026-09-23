@@ -1,297 +1,330 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Crosshair, 
-  Gamepad2, 
-  Activity, 
-  ToggleLeft, 
-  ToggleRight,
-  ShieldCheck,
-  Cpu,
-  X
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Crosshair, Gamepad2, Activity, Zap, ShieldCheck, AlertTriangle,
+  RotateCcw, Loader2, Cpu, ChevronUp, ChevronDown, Minus, Search
 } from 'lucide-react';
 
-export default function GameBooster() {
-  const [status, setStatus] = useState({
-    enabled: false,
-    active: false,
-    detected_game: null,
-    boost_count: 0
-  });
+const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
+/** 각 설정이 무엇을 바꾸고 되돌릴 수 있는지 사용자에게 그대로 보여준다. */
+const BOOST_OPTIONS = [
+  {
+    key: 'boost_timer_resolution',
+    title: '타이머 해상도 높이기',
+    desc: '시스템 타이머를 0.5ms 로 올려 입력 지연을 줄입니다.',
+    scope: '세션 한정 · 프로그램을 끄면 자동 복구',
+    risk: 'safe',
+  },
+  {
+    key: 'boost_tame_background',
+    title: '바쁜 백그라운드 앱 양보시키기',
+    desc: 'CPU 를 많이 쓰는 백그라운드 앱의 우선순위를 낮춥니다. 게임·백신·통화 앱은 건드리지 않습니다.',
+    scope: '세션 한정 · 원래 우선순위로 복구',
+    risk: 'safe',
+  },
+  {
+    key: 'boost_auto_power_mode',
+    title: '게임 감지 시 게이밍 전원 모드로 전환',
+    desc: '전원 플랜과 CPU 속도 설정을 게이밍 모드로 바꿉니다.',
+    scope: 'OS 설정 변경 · 게임 종료 시 되돌림',
+    risk: 'moderate',
+  },
+  {
+    key: 'boost_disable_nagle',
+    title: 'Nagle 알고리즘 끄기',
+    desc: '네트워크 어댑터의 패킷 묶음 전송을 꺼서 온라인 게임 반응을 빠르게 합니다. 대신 패킷 수가 늘어납니다.',
+    scope: '레지스트리 영구 변경 · 되돌리기 가능',
+    risk: 'high',
+  },
+];
 
-  const gameCategories = [
-    {
-      category: "FPS & 슈팅",
-      icon: "🎯",
-      games: [
-        { name: "PUBG (배틀그라운드)", icon: "🪂" },
-        { name: "Valorant (발로란트)", icon: "🔫" },
-        { name: "Overwatch (오버워치)", icon: "⚔️" },
-        { name: "CS:GO / CS2", icon: "💣" },
-        { name: "Apex Legends", icon: "🏃" },
-        { name: "Call of Duty", icon: "🎖️" },
-        { name: "Fortnite (포트나이트)", icon: "🎪" },
-        { name: "Escape from Tarkov", icon: "🎒" },
-        { name: "The Finals", icon: "💰" },
-        { name: "Destiny 2", icon: "🌌" },
-        { name: "Helldivers 2", icon: "🚀" }
-      ]
-    },
-    {
-      category: "RPG & MMORPG",
-      icon: "🗡️",
-      games: [
-        { name: "World of Warcraft", icon: "🐲" },
-        { name: "Diablo IV", icon: "👿" },
-        { name: "Lost Ark (로스트아크)", icon: "⛵" },
-        { name: "MapleStory", icon: "🍁" },
-        { name: "Elden Ring", icon: "⚔️" },
-        { name: "Cyberpunk 2077", icon: "🤖" },
-        { name: "Genshin Impact", icon: "🌟" },
-        { name: "Honkai: Star Rail", icon: "🚂" }
-      ]
-    },
-    {
-      category: "AOS & MOBA",
-      icon: "🛡️",
-      games: [
-        { name: "League of Legends", icon: "⚔️" },
-        { name: "Dota 2", icon: "🔥" }
-      ]
-    },
-    {
-      category: "오픈월드 & 샌드박스",
-      icon: "🌍",
-      games: [
-        { name: "GTA V", icon: "🚗" },
-        { name: "Minecraft", icon: "⛏️" },
-        { name: "Roblox", icon: "🧱" },
-        { name: "Palworld (팰월드)", icon: "🦕" },
-        { name: "Rust (러스트)", icon: "⛺" }
-      ]
-    },
-    {
-      category: "스포츠 (Sports)",
-      icon: "⚽",
-      games: [
-        { name: "FC 24 (피파)", icon: "⚽" }
-      ]
-    }
-  ];
+const RISK_STYLE = {
+  safe: 'text-emerald-400',
+  moderate: 'text-amber-400',
+  high: 'text-rose-400',
+};
 
-  useEffect(() => {
-    const checkAndFetch = () => {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
-        fetchStatus();
+export default function GameBooster({ addToast }) {
+  const [status, setStatus] = useState(null);
+  const [settings, setSettings] = useState({});
+  const [procs, setProcs] = useState([]);
+  const [adjusted, setAdjusted] = useState(0);
+  const [busyPid, setBusyPid] = useState(null);
+  const [filter, setFilter] = useState('');
+  const [toggling, setToggling] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const a = api();
+    if (!a) return;
+    try {
+      if (a.getGameBoosterStatus) setStatus(await a.getGameBoosterStatus());
+      if (a.getBoostSettings) setSettings(await a.getBoostSettings());
+      if (a.getAdjustedProcessCount) {
+        const c = await a.getAdjustedProcessCount();
+        setAdjusted(c?.count || 0);
       }
-    };
-    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
-      checkAndFetch();
-    } else {
-      window.addEventListener('pywebviewready', checkAndFetch);
+      if (a.getProcesses) {
+        const list = await a.getProcesses();
+        if (Array.isArray(list)) setProcs(list);
+      }
+    } catch (e) {
+      console.error('게임 부스터 상태 조회 실패:', e);
     }
-    const interval = setInterval(fetchStatus, 3000);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('pywebviewready', checkAndFetch);
-    };
   }, []);
 
-  const fetchStatus = async () => {
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 4000);
+    const onReady = () => refresh();
+    window.addEventListener('pywebviewready', onReady);
+    return () => { clearInterval(id); window.removeEventListener('pywebviewready', onReady); };
+  }, [refresh]);
+
+  const toggleBooster = async () => {
+    const a = api();
+    if (!a?.toggleGameBooster || toggling) return;
+    setToggling(true);
+    const next = !status?.enabled;
     try {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getGameBoosterStatus === 'function') {
-        const st = await window.pywebview.api.getGameBoosterStatus();
-        if (st) setStatus(st);
+      const res = await a.toggleGameBooster(next);
+      addToast?.(
+        next ? '게임 자동 감지를 켰습니다.' : '게임 자동 감지를 껐습니다. 적용했던 설정은 되돌렸습니다.',
+        res?.success === false ? 'error' : 'success'
+      );
+    } catch (e) {
+      addToast?.(`전환 실패: ${e}`, 'error');
+    }
+    setToggling(false);
+    refresh();
+  };
+
+  const toggleOption = async (key) => {
+    const a = api();
+    if (!a?.setBoostSetting) return;
+    const next = !settings[key];
+    const opt = BOOST_OPTIONS.find((o) => o.key === key);
+
+    // 영구 변경을 켤 때는 무엇이 바뀌는지 먼저 알린다
+    if (next && opt?.risk === 'high') {
+      if (!window.confirm(
+        `${opt.title}\n\n${opt.desc}\n\n${opt.scope}\n\n계속할까요?`
+      )) return;
+    }
+
+    try {
+      const res = await a.setBoostSetting(key, next);
+      if (res?.success) {
+        setSettings((s) => ({ ...s, [key]: next }));
+      } else {
+        addToast?.(res?.message || '설정 변경에 실패했습니다.', 'error');
       }
     } catch (e) {
-      console.error('Error fetching game booster status:', e);
+      addToast?.(`설정 변경 실패: ${e}`, 'error');
     }
   };
 
-  const toggleBooster = async () => {
-    const newState = !status.enabled;
-    setStatus(prev => ({ ...prev, enabled: newState }));
-    
+  const changePriority = async (pid, priority, name) => {
+    const a = api();
+    if (!a?.boostProcess) return;
+    setBusyPid(pid);
     try {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleGameBooster === 'function') {
-        await window.pywebview.api.toggleGameBooster(newState);
-        fetchStatus();
+      const res = await a.boostProcess(pid, priority);
+      if (res?.ok) {
+        addToast?.(`${res.name}: 우선순위를 ${priority} 로 바꿨습니다.`, 'success');
+      } else {
+        // 백엔드가 왜 막았는지 한국어로 돌려주므로 그대로 보여준다
+        addToast?.(res?.reason || `${name} 의 우선순위를 바꾸지 못했습니다.`, 'error');
       }
     } catch (e) {
-      console.error('Error toggling game booster:', e);
-      setStatus(prev => ({ ...prev, enabled: !newState }));
+      addToast?.(`우선순위 변경 실패: ${e}`, 'error');
     }
+    setBusyPid(null);
+    refresh();
   };
+
+  const restoreAll = async () => {
+    const a = api();
+    if (!a?.restoreAllProcesses) return;
+    const res = await a.restoreAllProcesses();
+    addToast?.(
+      res?.ok ? `${res.restored}개 프로세스를 원래 우선순위로 되돌렸습니다.`
+              : `${res?.restored || 0}개 복구, ${res?.failed?.length || 0}개 실패`,
+      res?.ok ? 'success' : 'error'
+    );
+    refresh();
+  };
+
+  const visible = procs
+    .filter((p) => !filter || (p.name || '').toLowerCase().includes(filter.toLowerCase()))
+    .slice(0, 60);
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="glass-panel p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="space-y-1 z-10">
-          <div className="flex items-center gap-2 text-purple-400 font-mono text-xs font-semibold">
+      {/* 헤더 */}
+      <div className="glass-panel p-6 flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-rose-400 font-mono text-xs font-semibold">
             <Crosshair className="w-4 h-4" />
-            AUTO GAME BOOSTER & PROCESS TAMER
+            SMART GAME BOOSTER
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">스마트 게임 부스터</h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xl">
-            백그라운드에서 게임 실행을 자동으로 감지하고, 브라우저와 디스코드 등 렉을 유발하는 프로세스의 자원 점유율을 강제로 억제합니다.
+          <p className="text-gray-500 dark:text-gray-400 text-sm max-w-2xl">
+            게임 실행을 감지하면 아래에서 켜둔 항목만 적용하고, 게임이 끝나면 되돌립니다.
           </p>
         </div>
-        <div className="z-10 shrink-0">
-          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20">
-            <Gamepad2 className="w-8 h-8 text-purple-500" />
-          </div>
-        </div>
+        <button
+          onClick={toggleBooster}
+          disabled={toggling}
+          className={`shrink-0 flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 ${
+            status?.enabled
+              ? 'bg-rose-500 text-white hover:bg-rose-600'
+              : 'border border-black/10 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-rose-500'
+          }`}
+        >
+          {toggling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+          {status?.enabled ? '자동 감지 켜짐' : '자동 감지 꺼짐'}
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="glass-panel p-8 flex flex-col items-center justify-center text-center relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
-          
-          <div className="mb-6 relative">
-            <div className={`absolute inset-0 rounded-full blur-xl transition-all duration-700 ${
-              status.enabled ? 'bg-purple-500/30' : 'bg-gray-500/10'
-            }`} />
-            <div className={`relative w-24 h-24 rounded-full flex items-center justify-center border-4 transition-all duration-500 ${
-              status.enabled ? 'border-purple-500 text-purple-500' : 'border-gray-300 dark:border-gray-700 text-gray-400'
-            }`}>
-              <ShieldCheck className="w-10 h-10" />
-            </div>
+      {/* 현재 상태 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="glass-panel p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+            <Gamepad2 className="w-3.5 h-3.5" /> 감지된 게임
           </div>
-          
-          <h3 className="text-xl font-bold text-black dark:text-white mb-2">
-            자동 부스터 {status.enabled ? '작동 중' : '꺼짐'}
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 max-w-xs mx-auto">
-            {status.enabled 
-              ? "백그라운드 감시 프로세스가 안전하게 동작하고 있습니다." 
-              : "기능을 활성화하면 게임 실행 시 렉을 유발하는 앱들을 억제합니다."}
+          <p className="font-bold text-black dark:text-white truncate">
+            {status?.detected_game || '없음'}
           </p>
-          
-          <button 
-            onClick={toggleBooster}
-            className={`flex items-center gap-2 px-8 py-4 rounded-xl font-bold transition-all ${
-              status.enabled 
-                ? 'bg-purple-500/10 text-purple-500 hover:bg-purple-500/20' 
-                : 'bg-black text-white dark:bg-white dark:text-black'
-            }`}
-          >
-            {status.enabled ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
-            {status.enabled ? '기능 끄기' : '기능 켜기'}
-          </button>
         </div>
-
-        <div className="space-y-6">
-          <div className="glass-panel p-6">
-            <h3 className="font-bold text-gray-500 dark:text-gray-400 text-sm mb-4">현재 상태</h3>
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-4">
-                <div className="flex items-center gap-3">
-                  <Activity className={`w-5 h-5 ${status.active ? 'text-green-500' : 'text-gray-400'}`} />
-                  <div>
-                    <div className="font-bold text-black dark:text-white">부스트 모드 (Boost)</div>
-                    <div className="text-xs text-gray-500">우선순위 억제 엔진</div>
-                  </div>
-                </div>
-                <div className={`font-mono font-bold ${status.active ? 'text-green-500' : 'text-gray-400'}`}>
-                  {status.active ? 'ENGAGED' : 'STANDBY'}
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-4">
-                <div className="flex items-center gap-3">
-                  <Gamepad2 className={`w-5 h-5 ${status.detected_game ? 'text-purple-500' : 'text-gray-400'}`} />
-                  <div>
-                    <div className="font-bold text-black dark:text-white">감지된 게임</div>
-                    <div className="text-xs text-gray-500">실행 중인 대상</div>
-                  </div>
-                </div>
-                <div className="font-mono font-bold text-black dark:text-white">
-                  {status.detected_game ? status.detected_game : 'NONE'}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pb-2">
-                <div className="flex items-center gap-3">
-                  <Cpu className="w-5 h-5 text-blue-500" />
-                  <div>
-                    <div className="font-bold text-black dark:text-white">누적 억제 횟수</div>
-                    <div className="text-xs text-gray-500">게임 렉 방지 기록</div>
-                  </div>
-                </div>
-                <div className="font-mono font-bold text-black dark:text-white">
-                  {status.boost_count} 회
-                </div>
-              </div>
-            </div>
+        <div className="glass-panel p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+            <Activity className="w-3.5 h-3.5" /> 부스트 상태
           </div>
-          
-          <div className="glass-panel p-5 bg-purple-500/5 border-purple-500/20 flex flex-col justify-center items-center">
-            <h4 className="font-bold text-purple-500 mb-3 text-sm flex items-center gap-2">
-              <Gamepad2 className="w-4 h-4" />
-              자동 감지 엔진 가동 중
-            </h4>
-            <button
-              onClick={() => {
-                setIsModalOpen(true);
-              }}
-              className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-purple-500/30 w-full sm:w-auto"
-            >
-              지원되는 게임목록 보기
-            </button>
-          </div>
+          <p className={`font-bold ${status?.active ? 'text-rose-400' : 'text-black dark:text-white'}`}>
+            {status?.active ? '적용 중' : '대기 중'}
+          </p>
+          {status?.appliedBoosts?.length > 0 && (
+            <p className="text-[11px] text-gray-500 mt-1">{status.appliedBoosts.join(' · ')}</p>
+          )}
         </div>
-      </div>
-
-      {/* Supported Games Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 rounded-3xl p-6 w-full max-w-2xl shadow-2xl relative flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between mb-6 shrink-0">
-              <h3 className="text-lg font-black text-black dark:text-white flex items-center gap-2">
-                <Gamepad2 className="w-5 h-5 text-purple-500" />
-                스마트 부스터 지원 게임 목록
-              </h3>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                }}
-                className="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500 dark:text-slate-400" />
+        <div className="glass-panel p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+            <Cpu className="w-3.5 h-3.5" /> 우선순위 조정됨
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-bold text-black dark:text-white">{adjusted}개</p>
+            {adjusted > 0 && (
+              <button onClick={restoreAll}
+                className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-1">
+                <RotateCcw className="w-3 h-3" /> 되돌리기
               </button>
-            </div>
-            
-            <div className="overflow-y-auto custom-scrollbar pr-4 pb-2 space-y-6" data-lenis-prevent>
-              {gameCategories.map((cat, catIdx) => (
-                <div key={catIdx}>
-                  <h4 className="text-sm font-bold text-gray-800 dark:text-slate-300 mb-3 flex items-center gap-2">
-                    <span>{cat.icon}</span> {cat.category}
-                  </h4>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {cat.games.map((game, idx) => (
-                      <div key={idx} className="bg-gray-50 dark:bg-slate-800/50 hover:bg-purple-50 dark:hover:bg-purple-500/10 border border-black/5 dark:border-slate-700 p-3 rounded-xl flex items-center gap-3 transition-colors cursor-default shadow-sm">
-                        <span className="text-xl">{game.icon}</span>
-                        <span className="font-semibold text-gray-800 dark:text-slate-200 text-xs truncate">
-                          {game.name}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            
-            <div className="mt-6 pt-4 border-t border-black/5 dark:border-slate-800 text-center shrink-0">
-              <p className="text-xs text-gray-500 dark:text-slate-400 font-mono">
-                이 외에도 수십 종의 글로벌 인기 게임 프로세스를 백그라운드에서 실시간 모니터링합니다.
-              </p>
-            </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
+
+      {/* 부스트 항목 설정 */}
+      <div className="glass-panel p-6">
+        <h3 className="font-bold text-black dark:text-white mb-1">부스트할 항목 고르기</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          각 항목이 무엇을 바꾸고 되돌릴 수 있는지 함께 적었습니다.
+          되돌릴 수 있고 세션 안에서만 유효한 항목만 기본으로 켜져 있습니다.
+        </p>
+        <div className="space-y-3">
+          {BOOST_OPTIONS.map((opt) => {
+            const on = !!settings[opt.key];
+            return (
+              <button
+                key={opt.key}
+                onClick={() => toggleOption(opt.key)}
+                className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                  on ? 'border-cyan-500/50 bg-cyan-500/5'
+                     : 'border-black/10 dark:border-slate-700 hover:border-black/20 dark:hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 w-9 h-5 rounded-full shrink-0 transition-colors relative ${
+                    on ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-slate-700'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                      on ? 'left-[18px]' : 'left-0.5'}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm text-black dark:text-white">{opt.title}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{opt.desc}</p>
+                    <p className={`text-[11px] mt-1.5 font-mono ${RISK_STYLE[opt.risk]}`}>{opt.scope}</p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 프로세스 우선순위 직접 조정 */}
+      <div className="glass-panel p-6">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h3 className="font-bold text-black dark:text-white">프로세스 우선순위 직접 조정</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+              바꾸기 전 원래 값을 기록하므로 언제든 되돌릴 수 있습니다.
+            </p>
+          </div>
+        </div>
+
+        <div className="relative mb-3">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="프로세스 이름으로 찾기"
+            className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-700 outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        <div className="max-h-[360px] overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+          {visible.length === 0 && (
+            <p className="text-sm text-gray-500 py-6 text-center">표시할 프로세스가 없습니다.</p>
+          )}
+          {visible.map((p) => (
+            <div key={p.pid}
+              className="flex items-center gap-3 p-2.5 rounded-lg border border-black/5 dark:border-slate-800 hover:border-black/10 dark:hover:border-slate-700">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-black dark:text-white truncate">{p.name}</p>
+                <p className="text-[11px] text-gray-500 font-mono">
+                  PID {p.pid} · {p.cpuPct ?? p.cpu_percent ?? '0%'} · {p.memoryMB ?? 0}MB
+                </p>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                {[
+                  { k: 'high', Icon: ChevronUp, label: '높음', cls: 'hover:border-rose-500 hover:text-rose-400' },
+                  { k: 'normal', Icon: Minus, label: '보통', cls: 'hover:border-sky-500 hover:text-sky-400' },
+                  { k: 'idle', Icon: ChevronDown, label: '낮음', cls: 'hover:border-emerald-500 hover:text-emerald-400' },
+                ].map(({ k, Icon, label, cls }) => (
+                  <button
+                    key={k}
+                    onClick={() => changePriority(p.pid, k, p.name)}
+                    disabled={busyPid === p.pid}
+                    title={`${label}으로 변경`}
+                    className={`w-8 h-8 grid place-items-center rounded-lg border border-black/10 dark:border-slate-700 text-gray-500 transition-colors disabled:opacity-40 ${cls}`}
+                  >
+                    {busyPid === p.pid ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 안전 안내 */}
+      <div className="glass-panel p-4 flex gap-3">
+        <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+        <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+          Windows 필수 프로세스, 실행 중인 게임, 백신·통화·백업 프로그램은 우선순위 조정 대상에서
+          자동으로 제외됩니다. <strong className="text-black dark:text-white">realtime</strong> 우선순위는
+          입력까지 멈출 수 있어 아예 제공하지 않습니다.
+        </div>
+      </div>
     </div>
   );
 }

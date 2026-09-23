@@ -22,6 +22,12 @@ import logging
 logging.basicConfig(level=logging.INFO, format='[GameBooster] %(message)s')
 log = logging.getLogger('GameBooster')
 
+# 에코 억제 기준: 이 % 이상 CPU 를 쓰는 프로세스만 건드린다.
+# 유휴 상태인 앱의 우선순위를 낮춰봐야 얻는 것은 없고,
+# 그 앱이 깨어날 때 느려지기만 한다.
+ECO_CPU_THRESHOLD = 5.0
+ECO_INTERVAL_SEC = 10
+
 # List of popular game executables to detect
 GAMES_LIST = [
     "tslgame.exe",             # PUBG
@@ -424,44 +430,24 @@ def _is_safe_to_tame(proc_name, pid=None):
     return True
 
 def _tame_processes(pids):
-    """Lower priority AND apply EcoQoS to background apps.
-    
-    Uses psutil first, falls back to Win32 API on AccessDenied.
+    """백그라운드 앱의 우선순위를 낮춘다.
+
+    실제 작업은 process_boost 가 한다. 그쪽이 바꾸기 전 원래 우선순위를 기록하므로
+    복구할 때 정확히 그 값으로 되돌릴 수 있다. 예전에는 무조건 NORMAL 로 되돌려
+    원래 BELOW_NORMAL 이던 프로세스의 설정을 잃었다.
     """
-    tamed_count = 0
+    from backend import process_boost
+    tamed = 0
     for pid in pids:
-        try:
-            p = psutil.Process(pid)
-            proc_name = p.name().lower()
-            
-            # Strict Pre-Check
-            if not _is_safe_to_tame(proc_name, pid):
-                continue
-            
-            # Try psutil first
-            try:
-                if p.nice() != psutil.IDLE_PRIORITY_CLASS:
-                    p.nice(psutil.IDLE_PRIORITY_CLASS)
-                tamed_count += 1
-            except psutil.AccessDenied:
-                # Fallback: Win32 API direct call
-                if _set_priority_via_win32(pid, IDLE_PRIORITY_CLASS):
-                    log.info(f"  ✓ Tamed {proc_name} (PID {pid}) via Win32 API fallback")
-                    tamed_count += 1
-                else:
-                    log.warning(f"  ✗ Failed to tame {proc_name} (PID {pid}) - AccessDenied even with Win32")
-            
-            # Apply EcoQoS (force to E-cores / efficiency mode)
+        r = process_boost.set_priority(pid, 'idle', reason='(에코/부스트 억제)')
+        if r.get('ok'):
+            tamed += 1
+            # EcoQoS 는 세션 한정이고 프로세스가 끝나면 사라진다
             _set_process_power_throttling(pid, True)
-            
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            pass
-        except Exception as e:
-            log.warning(f"  ✗ Tame error for PID {pid}: {e}")
-    
-    if tamed_count > 0:
-        log.info(f"✓ Tamed {tamed_count} background processes (IDLE priority + EcoQoS)")
-    return tamed_count
+    if tamed:
+        log.info(f"백그라운드 프로세스 {tamed}개의 우선순위를 낮췄습니다")
+    return tamed
+
 
 def _boost_game_processes(pids):
     """Elevate game to HIGH priority + disable power throttling (force P-cores).
@@ -503,49 +489,74 @@ def _boost_game_processes(pids):
     return boosted_count
 
 def _restore_processes(pids):
-    """Restore normal priority and remove EcoQoS from background apps."""
+    """기록해둔 원래 우선순위로 되돌린다."""
+    from backend import process_boost
     for pid in pids:
-        try:
-            p = psutil.Process(pid)
-            try:
-                if p.nice() == psutil.IDLE_PRIORITY_CLASS:
-                    p.nice(psutil.NORMAL_PRIORITY_CLASS)
-            except psutil.AccessDenied:
-                _set_priority_via_win32(pid, NORMAL_PRIORITY_CLASS)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
+        _set_process_power_throttling(pid, False)
+        process_boost.restore(pid)
+
 
 def _enter_boost_mode():
-    """Apply all system-wide boost settings when a game is detected."""
-    log.info("🚀 Entering BOOST MODE - applying system-wide optimizations")
-    _set_timer_resolution(True)   # 0.5ms timer
-    _disable_nagle()              # Low latency TCP
-    
-    # Switch to gaming power plan + detailed tuning
-    try:
-        from backend import optimizer
-        # user_set=False: 게임 자동감지는 사용자의 명시적 선택이 아니므로
-        # config 에 '사용자가 고른 모드'로 굳히지 않는다.
-        # (굳히면 다음 실행부터 앱 시작만으로 gaming 튜닝이 재적용된다)
-        optimizer.set_optimization_mode('gaming', user_set=False)
-        log.info("✓ Power plan switched to Gaming (High Performance)")
-    except Exception as e:
-        log.warning(f"⚠ Power plan switch error: {e}")
+    """게임이 감지됐을 때 부스트를 적용한다.
+
+    예전에는 감지되자마자 타이머 해상도, Nagle 레지스트리, 전체 게이밍 모드를
+    한꺼번에 바꿨다. 사용자는 무엇이 바뀌는지 알 수 없었고 Nagle 은 영구
+    레지스트리 변경이었다. 이제 각 항목을 설정으로 끄고 켤 수 있고,
+    기본값은 '되돌릴 수 있는 것만 켜짐' 이다.
+    """
+    from backend import config_manager
+    cfg = config_manager.load_config()
+    applied = []
+
+    # 타이머 해상도: 세션 한정. 프로세스가 끝나면 원래대로 돌아간다.
+    if cfg.get('boost_timer_resolution', True):
+        _set_timer_resolution(True)
+        applied.append('타이머 해상도 0.5ms')
+
+    # Nagle 비활성화: 레지스트리 영구 변경이므로 기본값을 꺼둔다.
+    if cfg.get('boost_disable_nagle', False):
+        _disable_nagle()
+        applied.append('Nagle 알고리즘 비활성화')
+
+    # 전원 모드 전환: OS 설정을 바꾸므로 기본값을 꺼둔다.
+    if cfg.get('boost_auto_power_mode', False):
+        try:
+            from backend import perf_modes
+            res = perf_modes.apply_mode('gaming', user_set=False)
+            if res.get('success') or res.get('partial'):
+                applied.append('게이밍 전원 모드')
+        except Exception as e:
+            log.warning(f"전원 모드 전환 실패: {e}")
+
+    _booster_state['appliedBoosts'] = applied
+    log.info(f"부스트 진입: {', '.join(applied) if applied else '적용 항목 없음'}")
+
 
 def _exit_boost_mode():
-    """Restore all system-wide settings when game exits."""
-    log.info("🔄 Exiting BOOST MODE - restoring system defaults")
-    _set_timer_resolution(False)  # Restore default timer
-    _restore_nagle()              # Restore Nagle
-    
-    # Restore standard mode
+    """게임이 끝나면 부스트에서 적용한 것을 되돌린다."""
+    from backend import config_manager
+    cfg = config_manager.load_config()
+
+    if cfg.get('boost_timer_resolution', True):
+        _set_timer_resolution(False)
+    if cfg.get('boost_disable_nagle', False):
+        _restore_nagle()
+    if cfg.get('boost_auto_power_mode', False):
+        try:
+            from backend import perf_modes
+            perf_modes.apply_mode('standard', user_set=False)
+        except Exception as e:
+            log.warning(f"전원 모드 복구 실패: {e}")
+
+    # 우선순위를 낮췄던 프로세스를 전부 원래대로
     try:
-        from backend import optimizer
-        # 자동 복귀 역시 사용자의 명시적 선택이 아니다
-        optimizer.set_optimization_mode('standard', user_set=False)
-        log.info("✓ Power plan restored to Standard (Balanced)")
+        from backend import process_boost
+        process_boost.restore_all()
     except Exception as e:
-        log.warning(f"⚠ Power plan restore error: {e}")
+        log.warning(f"프로세스 우선순위 복구 실패: {e}")
+
+    _booster_state['appliedBoosts'] = []
+    log.info("부스트 종료: 적용했던 설정을 되돌렸습니다")
 
 
 # ─────────────────────────────────────────────
@@ -706,58 +717,52 @@ def _get_foreground_pid():
     return None
 
 def _eco_suppression_thread_func():
+    """에코 모드에서 바쁜 백그라운드 앱의 우선순위를 낮춘다.
+
+    예전에는 포그라운드가 아닌 '모든' 사용자 프로세스를 IDLE 로 내렸다.
+    변수 이름은 current_heavy_pids 였지만 CPU 임계값이 없어서, 백신·백업·
+    음악 재생·컴파일까지 전부 굼떠졌다. 실행 중인 게임도 대상이었다
+    (CPU 를 가장 많이 쓰므로 사실상 1순위였다).
+
+    이제 process_boost.find_throttle_candidates 가 고른 것만 건드린다.
+    CPU 임계값을 넘고, 게임이 아니고, 보호 목록에 없고, process_guard 를
+    통과한 프로세스만 후보가 된다.
+    """
     global _eco_tamed_pids
-    log.info("Eco suppression loop started.")
-    
-    # Critical system processes to NEVER touch
-    system_procs = {'svchost.exe', 'csrss.exe', 'smss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'dwm.exe', 'explorer.exe', 'spoolsv.exe', 'taskmgr.exe'}
-    
+    from backend import process_boost
+
+    log.info("에코 억제 루프 시작")
+    process_boost.prime_cpu_measurement()   # cpu_percent 기준점 잡기
+
     while not _eco_stop_event.is_set():
         try:
             fg_pid = _get_foreground_pid()
-            current_heavy_pids = set()
-            
-            # Find all heavy background apps
-            for p in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent']):
-                try:
-                    pid = p.info['pid']
-                    name = p.info['name'].lower() if p.info['name'] else ""
-                    
-                    if pid == fg_pid:
-                        continue
-                    if name in system_procs:
-                        continue
-                        
-                    # Skip System/Network/Local Service processes if possible
-                    user = p.info['username']
-                    if user and ('system' in user.lower() or 'service' in user.lower()):
-                        continue
-                        
-                    current_heavy_pids.add(pid)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    pass
-            
-            # Tame new ones
-            new_pids = current_heavy_pids - _eco_tamed_pids
+            candidates = process_boost.find_throttle_candidates(
+                foreground_pid=fg_pid, cpu_threshold=ECO_CPU_THRESHOLD)
+            pids = {c['pid'] for c in candidates}
+
+            new_pids = pids - _eco_tamed_pids
             if new_pids:
                 _tame_processes(list(new_pids))
                 _eco_tamed_pids.update(new_pids)
-                
-            # Clean up dead ones
-            _eco_tamed_pids.intersection_update(current_heavy_pids)
-            current_heavy_pids.clear()
-            
+
+            # 더 이상 바쁘지 않거나 종료된 프로세스는 원래대로 돌려준다.
+            # 예전에는 목록에서 빼기만 하고 복구하지 않아, 한 번 낮춘 우선순위가
+            # 에코 모드를 끌 때까지 그대로 유지됐다.
+            gone = _eco_tamed_pids - pids
+            if gone:
+                _restore_processes(list(gone))
+                _eco_tamed_pids -= gone
+
             gc.collect()
-            
-            
         except Exception as e:
-            log.warning(f"Eco suppression loop error: {e}")
-            
-        # Sleep for 10 seconds before next check
-        for _ in range(10):
+            log.warning(f"에코 억제 루프 오류: {e}")
+
+        for _ in range(ECO_INTERVAL_SEC):
             if _eco_stop_event.is_set():
                 break
             time.sleep(1)
+
 
 def start_eco_suppression_loop():
     global _eco_suppression_thread, _eco_stop_event

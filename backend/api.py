@@ -12,6 +12,7 @@ from backend import game_booster
 from backend import config_manager
 from backend import perf_modes
 from backend import system_state
+from backend import process_boost
 
 log = logging.getLogger('API')
 
@@ -114,7 +115,13 @@ class Api:
         return system_monitor.kill_process(pid)
 
     def setProcessPriority(self, pid, priority):
-        return system_monitor.set_process_priority(pid, priority)
+        """프로세스 우선순위 변경 (구 API 이름).
+
+        process_boost 로 위임한다. 예전 경로는 바꾸기 전 원래 값을 기록하지 않아
+        되돌릴 수 없었다. 같은 일을 하는 두 경로 중 하나만 안전하면
+        어느 쪽이 호출됐는지에 따라 복구 가능 여부가 달라지는 함정이 된다.
+        """
+        return process_boost.set_priority(pid, priority, reason='(구 API)')
 
     def getOptimizationMode(self):
         return optimizer.get_optimization_mode()
@@ -204,6 +211,31 @@ class Api:
         
     def toggleGameBooster(self, enabled):
         return game_booster.toggle_booster(enabled)
+
+    def getBoostSettings(self):
+        """게임 부스트가 무엇을 할지에 대한 설정.
+
+        예전에는 게임이 감지되면 타이머 해상도·Nagle 레지스트리·전원 모드를
+        고지 없이 한꺼번에 바꿨다. 이제 각 항목을 사용자가 끄고 켤 수 있다.
+        """
+        return config_manager.get_boost_settings()
+
+    def setBoostSetting(self, key, value):
+        return config_manager.set_boost_setting(key, value)
+
+    # --- 프로세스 우선순위 (게이밍 탭) ---
+    def boostProcess(self, pid, priority):
+        """프로세스 우선순위를 바꾼다. 원래 값을 기록하므로 되돌릴 수 있다."""
+        return process_boost.set_priority(pid, priority, reason='(사용자 지정)')
+
+    def restoreProcess(self, pid):
+        return process_boost.restore(pid)
+
+    def restoreAllProcesses(self):
+        return process_boost.restore_all()
+
+    def getAdjustedProcessCount(self):
+        return {'count': process_boost.adjusted_count()}
 
 
     def closeWindow(self):
