@@ -210,7 +210,8 @@ body {
   transition: background 0.3s ease;
 }
 .toggle-switch.active {
-  background: var(--accent-cyan);
+  /* --accent-cyan 은 정의된 곳이 없어 켜짐 상태가 투명하게 보였다. cyan-400 으로 대체한다. */
+  background: var(--accent-cyan, #22d3ee);
 }
 .toggle-thumb {
   position: absolute;

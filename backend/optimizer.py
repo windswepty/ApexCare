@@ -979,23 +979,27 @@ def _start_service(service_name):
 import winreg
 
 def get_startup_apps():
-    """Retrieve startup applications from registry (enabled and disabled)."""
+    """Run 키에 등록된 시작 프로그램(켜짐)과 APEX CARE 가 꺼 둔 항목(꺼짐)을 돌려준다.
+
+    레지스트리에서 읽은 사실만 담는다: 이름, 명령줄(command), 등록 위치(location), 켜짐 여부.
+    예전에는 명령줄 길이로 '영향도' 와 '+1.4s' 같은 부팅 시간을 지어냈다. 측정값이 아니므로 뺐다.
+    """
     apps = []
     app_id = 1
-    
+
     def _clean(s):
         if isinstance(s, str): return s.replace('\x00', '').strip()
         return s
-        
+
     registry_paths = [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 'HKCU'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 'HKLM'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", 'HKLM32')
     ]
-    
+
     seen = set()
-    
-    for hkey, path in registry_paths:
+
+    for hkey, path, tag in registry_paths:
         try:
             run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_READ)
             i = 0
@@ -1005,8 +1009,8 @@ def get_startup_apps():
                     name_clean = _clean(name)
                     if name_clean not in seen:
                         seen.add(name_clean)
-                        impact = "High" if len(value) > 30 else "Normal"
-                        apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": impact, "enabled": True, "bootTimeImpact": "+1.4s" if impact == "High" else "+0.6s"})
+                        apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
+                                     "location": tag, "enabled": True})
                         app_id += 1
                     i += 1
                 except OSError:
@@ -1025,7 +1029,8 @@ def get_startup_apps():
                 name_clean = _clean(name)
                 if name_clean not in seen:
                     seen.add(name_clean)
-                    apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": "High", "enabled": False, "bootTimeImpact": "+1.4s"})
+                    apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
+                                 "location": "disabled", "enabled": False})
                     app_id += 1
                 i += 1
             except OSError:

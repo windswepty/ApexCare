@@ -1,12 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Rocket, 
-  Zap, 
+import {
+  Rocket,
   Power
 } from 'lucide-react';
 
+// 백엔드 get_startup_apps() 의 location 값 → 화면 표시
+const LOCATION_LABEL = {
+  HKCU: '현재 사용자',
+  HKLM: '모든 사용자',
+  HKLM32: '모든 사용자 (32비트)',
+  disabled: 'APEX CARE 에서 끔',
+};
+
 export default function StartupManager({ addToast }) {
   const [startupApps, setStartupApps] = useState([]);
+  // 요청 중인 항목. 결과를 받기 전에는 스위치를 바꾸지 않는다.
+  const [pendingId, setPendingId] = useState(null);
 
   useEffect(() => {
     const fetchStartup = async () => {
@@ -35,75 +44,37 @@ export default function StartupManager({ addToast }) {
 
   const toggleApp = async (id, appName) => {
     const app = startupApps.find(a => a.id === id);
-    if (!app) return;
+    if (!app || pendingId !== null) return;
     const newEnabled = !app.enabled;
-    
-    // Optimistically update UI
-    setStartupApps(startupApps.map(a => 
-      a.id === id ? { ...a, enabled: newEnabled } : a
-    ));
 
-    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function') {
-      try {
-        const res = await window.pywebview.api.toggleStartupApp(appName, newEnabled);
-        if (!res?.success) {
-          throw new Error('Failed to toggle');
-        }
-        if (addToast) addToast(`[${appName}] 시작 프로그램 상태가 변경되었습니다.`, 'success');
-      } catch (e) {
-        // Revert on failure
-        alert(`시작 프로그램(${appName}) 상태 변경에 실패했습니다. 권한을 확인해주세요.`);
-        setStartupApps(startupApps.map(a => 
-          a.id === id ? { ...a, enabled: !newEnabled } : a
-        ));
-      }
-    } else {
+    if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function')) {
       if (addToast) addToast("API가 준비되지 않았습니다.", "error");
-      setStartupApps(startupApps.map(a => 
-        a.id === id ? { ...a, enabled: !newEnabled } : a
-      ));
+      return;
     }
-  };
 
-  const disableAllHighImpact = async () => {
-    
-    const appsToDisable = startupApps.filter(app => app.impact === 'High' && app.enabled);
-    
-    // Optimistically update UI
-    setStartupApps(startupApps.map(app => 
-      app.impact === 'High' ? { ...app, enabled: false } : app
-    ));
-
-    let allSuccess = true;
-    for (const app of appsToDisable) {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function') {
-        try {
-          const res = await window.pywebview.api.toggleStartupApp(app.name, false);
-          if (!res?.success) {
-            allSuccess = false;
-          }
-        } catch (e) {
-          allSuccess = false;
-        }
+    setPendingId(id);
+    try {
+      const res = await window.pywebview.api.toggleStartupApp(appName, newEnabled);
+      if (res?.success) {
+        setStartupApps(prev => prev.map(a =>
+          a.id === id
+            ? { ...a, enabled: newEnabled, location: newEnabled ? (res.origin || a.location) : 'disabled' }
+            : a
+        ));
+        if (addToast) addToast(res.message || `[${appName}] 시작 프로그램 상태가 변경되었습니다.`, 'success');
       } else {
-        allSuccess = false;
+        if (addToast) addToast(res?.message || `시작 프로그램(${appName}) 상태 변경에 실패했습니다.`, 'error');
       }
-    }
-
-    if (!allSuccess) {
-      // Revert on failure
-      setStartupApps(prev => prev.map(app => 
-        appsToDisable.some(a => a.id === app.id) ? { ...app, enabled: true } : app
-      ));
-      if (addToast) addToast('높은 영향도의 시작 프로그램 비활성화에 실패했습니다.', 'error');
-    } else {
-      if (addToast) addToast('모든 무거운 시작 프로그램이 비활성화되었습니다!', 'success');
+    } catch (e) {
+      console.error('Error toggling startup app:', e);
+      if (addToast) addToast(`시작 프로그램(${appName}) 상태 변경에 실패했습니다.`, 'error');
+    } finally {
+      setPendingId(null);
     }
   };
 
-  // Calculate total enabled boot time impact
-  const enabledApps = startupApps.filter(a => a.enabled);
-  const currentBootSec = (8.5 + enabledApps.length * 1.4).toFixed(1);
+  const enabledCount = startupApps.filter(a => a.enabled).length;
+  const disabledCount = startupApps.length - enabledCount;
 
   return (
     <div className="space-y-6">
@@ -112,43 +83,25 @@ export default function StartupManager({ addToast }) {
         <div>
           <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-semibold mb-1">
             <Rocket className="w-4 h-4" />
-            WINDOWS BOOT TIME ACCELERATOR
+            WINDOWS STARTUP PROGRAMS
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white">시작 프로그램 관리</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-            윈도우 부팅 시 불필요하게 자동 실행되는 프로그램을 차단하여 부팅 속도를 획기적으로 개선합니다.
+            Windows 로그인 시 자동으로 실행되도록 레지스트리(Run 키)에 등록된 프로그램을 켜고 끕니다. 끈 항목은 언제든 다시 켤 수 있습니다.
           </p>
         </div>
-
-        <button
-          onClick={disableAllHighImpact}
-          className="btn-secondary text-xs border-amber-500/40 hover:bg-amber-500/10 text-amber-300 px-5 py-3"
-        >
-          <Zap className="w-4 h-4 text-amber-400" />
-          <span>고부하 시작 프로그램 일괄 비활성화</span>
-        </button>
       </div>
 
-      {/* Boot Speed Comparison Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Counts — 레지스트리에서 읽은 값만 보여준다 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">현재 예상 부팅 시간</span>
-          <div className="text-3xl font-black font-mono text-amber-400 my-1">{currentBootSec} 초</div>
-          <span className="text-[10px] text-slate-500 font-mono">활성 앱 {enabledApps.length}개</span>
+          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">켜진 시작 프로그램</span>
+          <div className="text-3xl font-black font-mono text-cyan-400 my-1">{enabledCount}개</div>
         </div>
 
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">최적화 목표 부팅 시간</span>
-          <div className="text-3xl font-black font-mono text-emerald-400 my-1">8.5 초</div>
-          <span className="text-[10px] text-emerald-300 font-mono">52% 속도 향상 가용한 상태</span>
-        </div>
-
-        <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">단축 가능 시간</span>
-          <div className="text-3xl font-black font-mono text-cyan-400 my-1">
-            +{(currentBootSec - 8.5).toFixed(1)} 초
-          </div>
-          <span className="text-[10px] text-slate-500 font-mono">High Impact 차단 시</span>
+          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">APEX CARE 에서 끈 항목</span>
+          <div className="text-3xl font-black font-mono text-slate-400 my-1">{disabledCount}개</div>
         </div>
       </div>
 
@@ -156,10 +109,14 @@ export default function StartupManager({ addToast }) {
       <div className="glass-panel p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm">
-            등록된 부팅 시작 프로그램 목록 ({startupApps.length})
+            등록된 시작 프로그램 목록 ({startupApps.length})
           </h3>
-          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">영향도 순</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">이름 순</span>
         </div>
+        <p className="text-[11px] text-gray-500 dark:text-slate-400">
+          각 프로그램이 부팅 시간에 주는 영향은 측정하지 않으므로 표시하지 않습니다.
+          작업 스케줄러나 시작 폴더에 등록된 항목은 이 목록에 나오지 않습니다.
+        </p>
 
         <div className="space-y-2">
           {startupApps.map((app) => (
@@ -181,26 +138,31 @@ export default function StartupManager({ addToast }) {
                 <div className="min-w-0 flex-1 pr-2">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{app.name}</span>
-                    <span className={`badge flex-shrink-0 ${
-                      app.impact === 'High' ? 'badge-high' : app.impact === 'Medium' ? 'badge-medium' : 'badge-low'
-                    }`}>
-                      {app.impact} Impact
-                    </span>
+                    {LOCATION_LABEL[app.location] && (
+                      <span className="text-[10px] font-mono flex-shrink-0 px-1.5 py-0.5 rounded bg-black/5 dark:bg-slate-800 text-gray-600 dark:text-slate-400">
+                        {LOCATION_LABEL[app.location]}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate w-full" title={app.publisher}>
-                    제조사: {app.publisher} • 부팅 영향: <span className="font-mono text-gray-700 dark:text-slate-300">{app.bootTimeImpact}</span>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate w-full font-mono" title={app.command}>
+                    {app.command}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-4 self-end sm:self-center">
-                {/* Enable/Disable Toggle */}
-                <div 
-                  onClick={() => toggleApp(app.id, app.name)} 
-                  className={`toggle-switch ${app.enabled ? 'active' : ''}`}
+                {/* Enable/Disable Toggle — 결과를 받은 뒤에만 바뀐다 */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={app.enabled}
+                  aria-label={`${app.name} 시작 프로그램 ${app.enabled ? '끄기' : '켜기'}`}
+                  disabled={pendingId !== null}
+                  onClick={() => toggleApp(app.id, app.name)}
+                  className={`toggle-switch ${app.enabled ? 'active' : ''} ${pendingId === app.id ? 'opacity-50 cursor-wait' : ''} disabled:cursor-not-allowed`}
                 >
                   <div className="toggle-thumb"></div>
-                </div>
+                </button>
               </div>
             </div>
           ))}
