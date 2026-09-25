@@ -71,12 +71,29 @@ class Api:
             return {"success": False, "message": "임시 파일 정리 실패", "error": str(e)}
         
     def purgeRam(self):
+        """대기 메모리를 비우고, 측정한 전후 크기를 그대로 돌려준다.
+
+        예전에는 실패해도 성공으로 보고할 수 있었고 freedMB 는 늘 0 이었다.
+        """
         res = optimizer.purge_ram()
-        if res.get("success"):
-            freed = round(res.get("freed_mb") or 0)
-            return {"success": True, "message": f"대기 메모리를 비웠습니다 (사용 가능 메모리 약 {freed}MB 증가)",
-                    "freedMB": freed}
-        return {"success": False, "message": "대기 메모리를 비우지 못했습니다.", "error": res.get("error")}
+        if not res.get("success"):
+            return {"success": False, "error": res.get("error"),
+                    "message": res.get("message") or "대기 메모리를 비우지 못했습니다."}
+
+        def gb(b):
+            return None if b is None else round(b / (1024 ** 3), 2)
+
+        out = {"success": True,
+               "standbyBeforeGB": gb(res.get("standbyBeforeBytes")),
+               "standbyAfterGB": gb(res.get("standbyAfterBytes")),
+               "freeBeforeGB": gb(res.get("freeBeforeBytes")),
+               "freeAfterGB": gb(res.get("freeAfterBytes"))}
+        if out["standbyBeforeGB"] is not None and out["standbyAfterGB"] is not None:
+            out["message"] = (f"대기 메모리를 비웠습니다: {out['standbyBeforeGB']:.1f} GB → "
+                              f"{out['standbyAfterGB']:.1f} GB")
+        else:
+            out["message"] = "대기 메모리를 비웠습니다. 전후 크기는 측정하지 못했습니다."
+        return out
 
     def runTrim(self):
         return system_repair.run_trim()
@@ -249,6 +266,19 @@ class Api:
 
     def setBoostSetting(self, key, value):
         return config_manager.set_boost_setting(key, value)
+
+    # --- UI 색 조합 ---
+    def getUiTheme(self):
+        return config_manager.get_ui_theme()
+
+    def setUiTheme(self, theme):
+        return config_manager.set_ui_theme(theme)
+
+    def getUiAccent(self):
+        return config_manager.get_ui_accent()
+
+    def setUiAccent(self, accent):
+        return config_manager.set_ui_accent(accent)
 
     # --- 프로세스 우선순위 (게이밍 탭) ---
     def boostProcess(self, pid, priority):

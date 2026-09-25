@@ -7,30 +7,32 @@
    Tailwind CDN 을 제거한 것과 같은 이유다. Windows 기본 폰트로 대체한다. */
 
 :root {
+  /* 아래 색은 테마 변수(--slate-*, --zinc-*, --accent-*, --black)에서 온다.
+     테마 변수 값은 src/theme.js 의 applyTheme() 이 넣는다. */
   --bg-primary: #ffffff; 
-  --bg-secondary: #f8fafc;
+  --bg-secondary: rgb(var(--slate-50));
   --panel-bg: #ffffff;
-  --panel-border: #e2e8f0;
-  --panel-hover: #f1f5f9;
+  --panel-border: rgb(var(--slate-200));
+  --panel-hover: rgb(var(--slate-100));
 
-  --text-main: #000000;
-  --text-muted: #475569;
-  --text-dim: #94a3b8;
+  --text-main: rgb(var(--black));
+  --text-muted: rgb(var(--slate-600));
+  --text-dim: rgb(var(--slate-400));
 
   --font-sans: 'Pretendard', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Malgun Gothic', sans-serif;
   --font-mono: 'Cascadia Mono', Consolas, 'D2Coding', ui-monospace, monospace;
 }
 
 .dark {
-  --bg-primary: #09090b; 
-  --bg-secondary: #000000;
-  --panel-bg: #18181b;
-  --panel-border: #27272a;
-  --panel-hover: #27272a;
+  --bg-primary: rgb(var(--zinc-950)); 
+  --bg-secondary: rgb(var(--black));
+  --panel-bg: rgb(var(--zinc-900));
+  --panel-border: rgb(var(--zinc-800));
+  --panel-hover: rgb(var(--zinc-800));
 
-  --text-main: #f4f4f5;
-  --text-muted: #a1a1aa;
-  --text-dim: #71717a;
+  --text-main: rgb(var(--zinc-100));
+  --text-muted: rgb(var(--zinc-400));
+  --text-dim: rgb(var(--zinc-500));
 }
 
 html {
@@ -69,14 +71,14 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgb(var(--slate-900) / 0.6);
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.5);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 242, 254, 0.6);
+  background: rgb(var(--accent-400) / 0.6);
 }
 
 /* Simple Flat Panel Style */
@@ -95,7 +97,7 @@ body {
   box-shadow: none;
 }
 .dark .glass-panel:hover {
-  border-color: #52525b;
+  border-color: rgb(var(--zinc-600));
 }
 
 
@@ -210,7 +212,8 @@ body {
   transition: background 0.3s ease;
 }
 .toggle-switch.active {
-  background: var(--accent-cyan);
+  /* 예전에는 정의되지 않은 --accent-cyan 을 써서 켜짐 상태가 투명하게 보였다. */
+  background: rgb(var(--accent-400));
 }
 .toggle-thumb {
   position: absolute;
@@ -226,7 +229,7 @@ body {
 }
 .toggle-switch.active .toggle-thumb {
   transform: translateX(20px);
-  background: #050b14;
+  background: rgb(var(--black));
 }
 
 /* Badge status */
@@ -293,8 +296,8 @@ body {
 .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(34, 211, 238, 0.3);
+  background: rgb(var(--accent-400) / 0.3);
   border-radius: 999px;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.5); }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent-400) / 0.5); }
 .preserve-3d { transform-style: preserve-3d; }

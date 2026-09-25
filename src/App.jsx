@@ -18,6 +18,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
+import { applyTheme, cachedAppearance } from './theme';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -33,6 +34,8 @@ export default function App() {
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // 색 조합과 직접 고른 강조색(저장된 값). main.jsx 가 캐시 값으로 먼저 적용해 둔다.
+  const [appearance, setAppearance] = useState(cachedAppearance);
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -70,6 +73,18 @@ export default function App() {
             }
             setWizardState(wizardDone ? 'done' : 'show');
             setIsBackendReady(true);
+            // 저장된 색 설정을 기준으로 다시 맞춘다(캐시와 다를 수 있다).
+            if (typeof window.pywebview.api.getUiTheme === 'function') {
+              try {
+                const savedTheme = await window.pywebview.api.getUiTheme();
+                const savedAccent = typeof window.pywebview.api.getUiAccent === 'function'
+                  ? await window.pywebview.api.getUiAccent() : null;
+                const applied = applyTheme(savedTheme, savedAccent);
+                setAppearance({ id: applied.id, accent: savedAccent || null });
+              } catch (e) {
+                console.error('Error loading UI theme:', e);
+              }
+            }
             // Sync current active power plan mode from backend
             if (typeof window.pywebview.api.getOptimizationMode === 'function') {
               const res = await window.pywebview.api.getOptimizationMode();
@@ -167,6 +182,9 @@ export default function App() {
             isOpen={isSettingsOpen} 
             onClose={() => setIsSettingsOpen(false)} 
             addToast={addToast} 
+            themeId={appearance.id}
+            accent={appearance.accent}
+            onAppearanceChange={setAppearance}
           />
 
           {/* Main Desktop Window Body */}

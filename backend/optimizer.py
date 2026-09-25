@@ -122,7 +122,7 @@ def _run_deep_optimization():
         ram_res = purge_ram()
         steps.append({"name": "대기 메모리 해제", "ok": bool(ram_res.get("success")),
                       "detail": "" if ram_res.get("success")
-                                else ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
+                                else ram_res.get("message") or ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
         _optimization_state["progress_pct"] = 60
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
@@ -615,50 +615,49 @@ def _enable_privilege(priv_name):
         return False
 
 def purge_ram():
-    """Smart Memory Optimizer: Safe standby cache purge.
-    
-    This function NO LONGER empties the working sets of active processes to avoid
-    crashing games and applications. It ONLY purges the Windows standby list
-    (global standby cache) using built-in system calls, which is 100% safe.
+    """대기 목록(Standby list)을 비운다. 실행 중인 프로세스의 작업 집합은 건드리지 않는다.
+
+    예전 구현의 문제:
+      1. NtSetSystemInformation 이 실패해도 success=True 를 돌려줬다(standbyPurged 만 False).
+      2. '확보량' 을 available 전후 차이로 쟀는데, 대기 메모리는 원래 available 에 들어 있어서
+         비워도 available 은 거의 변하지 않는다. 늘 0 에 가까운 값이었다.
+      3. 필요 없는 SeDebugPrivilege 까지 켰다.
+
+    이제 호출이 STATUS_SUCCESS 일 때만 성공이고, 전후 대기·여유 메모리를
+    성능 카운터로 측정해 돌려준다(측정하지 못하면 None).
     """
+    from backend import system_monitor
+
     try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        is_admin = False
+    if not is_admin:
+        return {"success": False, "error": "UAC_REQUIRED",
+                "message": "대기 메모리를 비우려면 관리자 권한이 필요합니다."}
+
+    try:
+        before = system_monitor.memory_lists()
+        priv_ok = _enable_privilege("SeProfileSingleProcessPrivilege")
         ntdll = ctypes.WinDLL('ntdll', use_last_error=True)
-        
-        # Capture memory before purge
-        mem_before = psutil.virtual_memory().available
-        
-        # Safely purge standby list
-        try:
-            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-            if not is_admin:
-                return {"success": False, "error": "UAC_REQUIRED"}
-        except Exception:
-            return {"success": False, "error": "UAC_REQUIRED"}
-
-        _enable_privilege("SeProfileSingleProcessPrivilege")
-        _enable_privilege("SeDebugPrivilege")
         command = ctypes.c_int(4)  # MemoryPurgeStandbyList
-        status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
-        standby_purged = (status == 0)
-            
-        # Capture memory after purge and calculate freed MB
-        mem_after = psutil.virtual_memory().available
-        freed_mb = max(0, (mem_after - mem_before) / (1024 * 1024))
-
-        # 해제 호출이 실패했으면 성공이라고 하지 않는다. 예전에는 상태 코드와 상관없이
-        # success=True 를 돌려줘서 화면에 '최적화되었습니다' 가 떴다.
-        if not standby_purged:
-            return {"success": False, "standbyPurged": False,
-                    "error": f"대기 메모리 해제에 실패했습니다 (NTSTATUS 0x{status & 0xFFFFFFFF:08X})"}
-
+        # 80 = SystemMemoryListInformation
+        status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command)) & 0xFFFFFFFF
+        if status != 0:
+            hint = "" if priv_ok else " 권한(SeProfileSingleProcessPrivilege)을 켜지 못했습니다."
+            return {"success": False, "error": f"NTSTATUS 0x{status:08X}",
+                    "message": f"대기 메모리를 비우지 못했습니다 (NTSTATUS 0x{status:08X}).{hint}"}
+        after = system_monitor.memory_lists()
         return {
             "success": True,
-            "purgedProcesses": 0,
-            "standbyPurged": standby_purged,
-            "freed_mb": freed_mb
+            "standbyBeforeBytes": before['standby'] if before else None,
+            "standbyAfterBytes": after['standby'] if after else None,
+            "freeBeforeBytes": before['free'] if before else None,
+            "freeAfterBytes": after['free'] if after else None,
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        detail = str(e) or type(e).__name__
+        return {"success": False, "error": detail, "message": f"대기 메모리를 비우지 못했습니다: {detail}"}
 
 
 # ─────────────────────────────────────────────
@@ -932,23 +931,27 @@ def restore_tailored_service_config():
 import winreg
 
 def get_startup_apps():
-    """Retrieve startup applications from registry (enabled and disabled)."""
+    """Run 키에 등록된 시작 프로그램(켜짐)과 APEX CARE 가 꺼 둔 항목(꺼짐)을 돌려준다.
+
+    레지스트리에서 읽은 사실만 담는다: 이름, 명령줄(command), 등록 위치(location), 켜짐 여부.
+    예전에는 명령줄 길이로 '영향도' 와 '+1.4s' 같은 부팅 시간을 지어냈다. 측정값이 아니므로 뺐다.
+    """
     apps = []
     app_id = 1
-    
+
     def _clean(s):
         if isinstance(s, str): return s.replace('\x00', '').strip()
         return s
-        
+
     registry_paths = [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 'HKCU'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 'HKLM'),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", 'HKLM32')
     ]
-    
+
     seen = set()
-    
-    for hkey, path in registry_paths:
+
+    for hkey, path, tag in registry_paths:
         try:
             run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_READ)
             i = 0
@@ -958,8 +961,8 @@ def get_startup_apps():
                     name_clean = _clean(name)
                     if name_clean not in seen:
                         seen.add(name_clean)
-                        impact = "High" if len(value) > 30 else "Normal"
-                        apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": impact, "enabled": True, "bootTimeImpact": "+1.4s" if impact == "High" else "+0.6s"})
+                        apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
+                                     "location": tag, "enabled": True})
                         app_id += 1
                     i += 1
                 except OSError:
@@ -978,7 +981,8 @@ def get_startup_apps():
                 name_clean = _clean(name)
                 if name_clean not in seen:
                     seen.add(name_clean)
-                    apps.append({"id": app_id, "name": name_clean, "publisher": _clean(value), "impact": "High", "enabled": False, "bootTimeImpact": "+1.4s"})
+                    apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
+                                 "location": "disabled", "enabled": False})
                     app_id += 1
                 i += 1
             except OSError:

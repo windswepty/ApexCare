@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'APEX_CARE_DATA')
 os.makedirs(APPDATA_DIR, exist_ok=True)
@@ -26,7 +27,15 @@ DEFAULT_CONFIG = {
     "boost_disable_nagle": False,      # 레지스트리 영구 변경. 복구 함수는 있음
     "boost_auto_power_mode": False,    # 게임 감지 시 게이밍 전원 모드로 자동 전환
     "boost_tame_background": True,     # 바쁜 백그라운드 앱 우선순위 낮춤(복구됨)
+
+    # UI 색 조합. 목록은 src/theme.js 의 THEMES 와 같아야 한다.
+    "ui_theme": "cyan",
+    # 직접 고른 강조색("#rrggbb"). 빈 문자열이면 색 조합의 기본 강조색을 쓴다.
+    # 대비 검사는 UI(src/theme.js)가 한다. 읽기 어려운 값이 들어 있으면 UI 가 쓰지 않는다.
+    "ui_accent": "",
 }
+
+UI_THEMES = ('cyan', 'graphite', 'stone', 'midnight', 'violet')
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -151,3 +160,43 @@ def set_boost_setting(key, value):
     if not save_config(c):
         return {"success": False, "message": "설정을 저장하지 못했습니다."}
     return {"success": True, "key": key, "value": bool(value)}
+
+
+def get_ui_theme():
+    """저장된 UI 색 조합. 알 수 없는 값이면 기본값을 돌려준다."""
+    theme = load_config().get("ui_theme", DEFAULT_CONFIG["ui_theme"])
+    return theme if theme in UI_THEMES else DEFAULT_CONFIG["ui_theme"]
+
+
+def set_ui_theme(theme):
+    """UI 색 조합을 저장하고, 다시 읽어 저장됐는지 확인한다."""
+    if theme not in UI_THEMES:
+        return {"success": False, "message": f"알 수 없는 색 조합입니다: {theme}"}
+    c = load_config()
+    c["ui_theme"] = theme
+    if not save_config(c) or load_config().get("ui_theme") != theme:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색 조합으로 열립니다."}
+    return {"success": True, "theme": theme}
+
+
+_HEX_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def get_ui_accent():
+    """직접 고른 강조색. 없거나 형식이 틀리면 None."""
+    value = load_config().get("ui_accent") or ""
+    return value.lower() if isinstance(value, str) and _HEX_RE.match(value) else None
+
+
+def set_ui_accent(value):
+    """강조색을 저장한다. None 이나 빈 문자열이면 지정을 해제한다. 다시 읽어 확인한다."""
+    if value in (None, ""):
+        value = ""
+    elif not (isinstance(value, str) and _HEX_RE.match(value)):
+        return {"success": False, "message": f"색 형식이 올바르지 않습니다: {value}"}
+    value = value.lower()
+    c = load_config()
+    c["ui_accent"] = value
+    if not save_config(c) or load_config().get("ui_accent") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색으로 열립니다."}
+    return {"success": True, "accent": value or None}

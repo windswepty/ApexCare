@@ -121,7 +121,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             
             <div className="w-full max-w-md h-2 rounded-full overflow-hidden bg-black/10 dark:bg-white/10">
               <div 
-                className="h-full bg-cyan-400 transition-all duration-75 ease-out shadow-[0_0_10px_rgba(34,211,238,0.5)]"
+                className="h-full bg-cyan-400 transition-all duration-75 ease-out shadow-[0_0_10px_rgb(var(--accent-400)/0.5)]"
                 style={{ width: `${scanProgress}%` }}
               ></div>
             </div>

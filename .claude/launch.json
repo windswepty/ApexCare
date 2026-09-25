@@ -26,6 +26,16 @@
         "4173"
       ],
       "port": 4173
+    },
+    {
+      "name": "apex-care-app-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

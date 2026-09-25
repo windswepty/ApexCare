@@ -112,6 +112,70 @@ def _get_gpu_model():
         _gpu_model_cache = "Unknown GPU"
     return _gpu_model_cache
 
+# ── 메모리 목록 크기 (Windows 성능 카운터) ─────────────────────────
+# psutil 은 Windows 에서 free 를 available 과 같은 값으로 채운다. 그래서 예전 계산
+# 'available - free' 는 대기(Standby) 메모리를 늘 0 으로 냈다. 작업 관리자의 메모리 구성과
+# 같은 값을 쓰려고 \Memory 성능 카운터를 PDH 로 읽는다. 영어 카운터 이름을 쓰므로
+# 한국어 Windows 에서도 동작한다(PdhAddEnglishCounterW). 관리자 권한은 필요 없다.
+_PDH_FMT_LARGE = 0x00000400
+_STANDBY_COUNTERS = (
+    r'\Memory\Standby Cache Reserve Bytes',
+    r'\Memory\Standby Cache Normal Priority Bytes',
+    r'\Memory\Standby Cache Core Bytes',
+)
+_FREE_COUNTER = r'\Memory\Free & Zero Page List Bytes'
+_MODIFIED_COUNTER = r'\Memory\Modified Page List Bytes'
+
+
+class _PdhCounterValue(ctypes.Structure):
+    # PDH_FMT_COUNTERVALUE: DWORD CStatus + 8바이트 정렬된 union. LONGLONG 만 쓴다.
+    _fields_ = [('CStatus', ctypes.wintypes.DWORD), ('largeValue', ctypes.c_longlong)]
+
+
+def memory_lists():
+    """대기·여유·수정됨 메모리 목록 크기(바이트). 읽지 못하면 None.
+
+    반환: {'standby': int, 'free': int, 'modified': int}
+    """
+    try:
+        pdh = ctypes.WinDLL('pdh')
+    except OSError as e:
+        log.debug(f"pdh.dll 을 열지 못했습니다: {e}")
+        return None
+    query = ctypes.c_void_p()
+    if pdh.PdhOpenQueryW(None, None, ctypes.byref(query)) != 0:
+        return None
+    try:
+        handles = {}
+        for path in _STANDBY_COUNTERS + (_FREE_COUNTER, _MODIFIED_COUNTER):
+            h = ctypes.c_void_p()
+            status = pdh.PdhAddEnglishCounterW(query, ctypes.c_wchar_p(path), None, ctypes.byref(h))
+            if status != 0:
+                log.debug(f"카운터 추가 실패 {path}: 0x{status & 0xFFFFFFFF:08X}")
+                return None
+            handles[path] = h
+        if pdh.PdhCollectQueryData(query) != 0:
+            return None
+        values = {}
+        for path, h in handles.items():
+            v = _PdhCounterValue()
+            status = pdh.PdhGetFormattedCounterValue(h, _PDH_FMT_LARGE, None, ctypes.byref(v))
+            if status != 0 or v.CStatus != 0:
+                log.debug(f"카운터 읽기 실패 {path}: 0x{status & 0xFFFFFFFF:08X}")
+                return None
+            values[path] = v.largeValue
+        return {
+            'standby': sum(values[p] for p in _STANDBY_COUNTERS),
+            'free': values[_FREE_COUNTER],
+            'modified': values[_MODIFIED_COUNTER],
+        }
+    except Exception as e:
+        log.debug(f"메모리 목록을 읽지 못했습니다: {e}")
+        return None
+    finally:
+        pdh.PdhCloseQuery(query)
+
+
 def get_system_stats():
     """Get system stats using only psutil and WMI for GPU."""
     try:
@@ -123,10 +187,18 @@ def get_system_stats():
         cpu_cores = psutil.cpu_count(logical=False) or 0
         cpu_threads = psutil.cpu_count(logical=True) or 0
         
-        # Standby memory estimation via psutil (available - free)
-        standby_bytes = mem.available - mem.free
-        standby_gb = round(max(standby_bytes, 0) / (1024**3), 1)
-            
+        # 메모리 구성은 작업 관리자와 같은 성능 카운터 값이다. 읽지 못하면 None 으로 둔다(추측하지 않는다).
+        GB = 1024 ** 3
+        lists = memory_lists()
+        if lists:
+            standby_gb = round(lists['standby'] / GB, 1)
+            free_gb = round(lists['free'] / GB, 1)
+            modified_gb = round(lists['modified'] / GB, 1)
+            # 사용 중 = 전체 - 사용 가능(대기+여유) - 수정됨  (작업 관리자의 '사용 중')
+            in_use_gb = round(max(mem.total - mem.available - lists['modified'], 0) / GB, 1)
+        else:
+            standby_gb = free_gb = modified_gb = in_use_gb = None
+
         return {
             'cpuModel': cpu_model,
             'cpuCores': cpu_cores,
@@ -136,6 +208,10 @@ def get_system_stats():
             'ramTotalGB': round(mem.total / (1024**3), 1),
             'ramPct': round(mem.percent),
             'ramStandbyGB': standby_gb,
+            'ramFreeGB': free_gb,
+            'ramModifiedGB': modified_gb,
+            'ramInUseGB': in_use_gb,
+            'ramAvailableGB': round(mem.available / GB, 1),
             'diskUsedGB': round(disk.used / (1024**3)),
             'diskTotalGB': round(disk.total / (1024**3)),
             'diskPct': round(disk.percent),
@@ -150,6 +226,20 @@ def get_system_stats():
         return None
 
 
+# psutil 의 Windows 우선순위 클래스 → 화면 표시 (작업 관리자와 같은 이름)
+_PRIORITY_LABEL = {
+    psutil.IDLE_PRIORITY_CLASS: '낮음',
+    psutil.BELOW_NORMAL_PRIORITY_CLASS: '보통 미만',
+    psutil.NORMAL_PRIORITY_CLASS: '보통',
+    psutil.ABOVE_NORMAL_PRIORITY_CLASS: '보통 초과',
+    psutil.HIGH_PRIORITY_CLASS: '높음',
+    psutil.REALTIME_PRIORITY_CLASS: '실시간',
+}
+
+
+_cpu_seen_pids = set()
+
+
 def get_processes():
     """Get top 8 processes by memory. Pure psutil, no external calls.
 
@@ -159,9 +249,11 @@ def get_processes():
     (차단 자체는 kill_process · process_boost.set_priority 의 process_guard 관문이 담당한다)
     """
     try:
+        global _cpu_seen_pids
         procs = []
+        seen_now = set()
         own_family = process_guard.get_own_pid_family()
-        for p in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent']):
+        for p in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent', 'nice']):
             try:
                 mem_info = p.info.get('memory_info')
                 if mem_info is None:
@@ -172,21 +264,27 @@ def get_processes():
                     continue
                 mem_mb = mem_info.rss / (1024 * 1024)
                 if mem_mb > 10:  # Only show processes using > 10MB
-                    raw_cpu = p.info.get('cpu_percent', 0) or 0
+                    # psutil 은 프로세스를 처음 잴 때 cpu_percent 를 0.0 으로 준다(측정값이 아니다).
+                    # 처음 본 PID 는 None 으로 두고 UI 가 '측정 중' 으로 보여준다.
+                    pid = p.info['pid']
+                    first_sample = pid not in _cpu_seen_pids
+                    seen_now.add(pid)
+                    raw_cpu = p.info.get('cpu_percent') or 0
                     num_cores = psutil.cpu_count(logical=True) or 1
-                    normalized_cpu = raw_cpu / num_cores
+                    cpu_text = None if first_sample else f"{raw_cpu / num_cores:.1f}%"
                     procs.append({
                         'id': p.info['pid'],
                         'pid': p.info['pid'],
                         'name': p.info['name'] or 'unknown',
                         'memoryMB': round(mem_mb),
-                        'cpuPct': f"{normalized_cpu:.1f}%",
-                        'priority': 'Normal',
-                        'status': 'Running'
+                        'cpuPct': cpu_text,
+                        # 실제 우선순위 클래스. 예전에는 모든 프로세스에 'Normal' 을 박아 넣었다.
+                        'priority': _PRIORITY_LABEL.get(p.info.get('nice'), '알 수 없음'),
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         
+        _cpu_seen_pids = seen_now
         procs.sort(key=lambda x: x['memoryMB'], reverse=True)
         return procs[:8]
     except Exception as e:
