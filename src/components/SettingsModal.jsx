@@ -249,7 +249,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                 초기 설정 마법사
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400">
-                PC 사양에 맞는 서비스·전원 설정을 다시 확인합니다. 여는 것만으로는 아무것도 바뀌지 않습니다.
+                PC 사양에 맞는 서비스 설정을 다시 확인합니다. 여는 것만으로는 아무것도 바뀌지 않습니다.
               </p>
               <button
                 type="button"
