@@ -28,7 +28,9 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
   const [isBackendReady, setIsBackendReady] = useState(false);
-  const [showInitialWizard, setShowInitialWizard] = useState(true);
+  // 초기 설정 마법사는 첫 실행 때만 띄운다. 백엔드에서 기록을 읽기 전에는 띄우지 않는다.
+  // 예전에는 useState(true) 라 앱을 켤 때마다 떴다.
+  const [showInitialWizard, setShowInitialWizard] = useState(false);
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -47,6 +49,19 @@ export default function App() {
     }, 10000);
   }, []);
 
+  // 마법사를 닫으면(건너뛰기·적용 후 계속 모두) 다시 띄우지 않도록 기록한다.
+  const closeSetupWizard = async () => {
+    setShowInitialWizard(false);
+    const api = window.pywebview && window.pywebview.api;
+    if (!api || typeof api.markSetupWizardDone !== 'function') return;
+    try {
+      const res = await api.markSetupWizardDone();
+      if (!res?.success) addToast(res?.message || '마법사 완료 기록을 저장하지 못했습니다.', 'error');
+    } catch (e) {
+      addToast(`마법사 완료 기록을 저장하지 못했습니다: ${e}`, 'error');
+    }
+  };
+
   const removeToast = (id) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
@@ -57,6 +72,16 @@ export default function App() {
         try {
           const stats = await window.pywebview.api.getSystemStats();
           if (stats && stats.cpuModel !== 'Error') {
+            // 대시보드가 잠깐 보였다 마법사로 바뀌지 않도록 준비 완료 전에 먼저 확인한다.
+            // 읽지 못하면 띄우지 않는다(마법사의 튜닝은 선택 사항이고, 설정 창에서 다시 열 수 있다).
+            if (typeof window.pywebview.api.getSetupWizardDone === 'function') {
+              try {
+                const done = await window.pywebview.api.getSetupWizardDone();
+                if (done === false) setShowInitialWizard(true);
+              } catch (e) {
+                console.error('Error reading setup wizard state:', e);
+              }
+            }
             setSystemStats(stats);
             setIsBackendReady(true);
             // 저장된 색 설정을 기준으로 다시 맞춘다(캐시와 다를 수 있다).
@@ -135,7 +160,7 @@ export default function App() {
               // 마법사를 닫기만 한다. 예전에는 여기서 setOptimizationMode('standard') 를 불러,
               // '건너뛰기 (적용 안함)' 을 눌러도 앱을 켤 때마다 사용자가 고른 게이밍·에코 모드를
               // 표준으로 되돌리고 전원 플랜을 바꿨다. 마법사에는 이제 모드 선택이 없다.
-              onComplete={() => setShowInitialWizard(false)}
+              onComplete={closeSetupWizard}
             />
           ) : showLoading ? (
             <LoadingScreen 
@@ -154,7 +179,8 @@ export default function App() {
           <SettingsModal 
             isOpen={isSettingsOpen} 
             onClose={() => setIsSettingsOpen(false)} 
-            addToast={addToast} 
+            addToast={addToast}
+            onOpenSetupWizard={() => { setIsSettingsOpen(false); setShowInitialWizard(true); }}
             themeId={appearance.id}
             accent={appearance.accent}
             onAppearanceChange={setAppearance}

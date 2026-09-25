@@ -261,6 +261,13 @@ class Api:
     def setUiAccent(self, accent):
         return config_manager.set_ui_accent(accent)
 
+    # --- 초기 설정 마법사 (첫 실행 때만) ---
+    def getSetupWizardDone(self):
+        return config_manager.get_setup_wizard_done()
+
+    def markSetupWizardDone(self):
+        return config_manager.set_setup_wizard_done()
+
     # --- 프로세스 우선순위 (게이밍 탭) ---
     def boostProcess(self, pid, priority):
         """프로세스 우선순위를 바꾼다. 원래 값을 기록하므로 되돌릴 수 있다."""
