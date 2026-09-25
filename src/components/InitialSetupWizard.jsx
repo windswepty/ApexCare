@@ -185,9 +185,9 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   </div>
                 </div>
               ))}
-              {/* 서비스 시작 유형은 아직 system_state 저널에 기록되지 않아 복구 센터에 나오지 않는다 */}
+              {/* 서비스 시작 유형과 전원 플랜 모두 system_state 저널의 hw_tuning 그룹에 기록된다(6a4f007) */}
               <p className="text-xs pt-2 text-gray-500">
-                전원 관리 프로필 변경은 '변경 내역 · 되돌리기' 탭에서 되돌릴 수 있습니다. 서비스 시작 유형 변경은 아직 그 탭에 표시되지 않습니다.
+                바꾼 설정은 '변경 내역 · 되돌리기' 탭의 '하드웨어 맞춤 튜닝' 에서 되돌릴 수 있습니다.
               </p>
             </div>
             <div className={`p-6 border-t flex justify-end ${band}`}>
