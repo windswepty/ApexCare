@@ -8,7 +8,7 @@ import {
 // 예전 '저장하기' 버튼은 아무것도 저장하지 않고 "설정이 저장되었습니다" 를 띄웠다.
 // 이제 고르면 바로 적용하고, 백엔드가 저장에 성공했을 때만 성공을 알린다.
 // 저장에 실패하면 화면도 이전 색으로 되돌린다. 다음 실행 때 보일 색과 어긋나지 않게.
-export default function SettingsModal({ isOpen, onClose, addToast, themeId, accent, onAppearanceChange }) {
+export default function SettingsModal({ isOpen, onClose, addToast, themeId, accent, onAppearanceChange, onOpenSetupWizard }) {
   const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent'
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
@@ -240,6 +240,26 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
               )}
             </div>
           </section>
+
+          {/* ── 초기 설정 마법사 ── 첫 실행 때만 뜨므로 사양별 설정을 다시 보려면 여기서 연다 */}
+          {onOpenSetupWizard && (
+            <section className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
+                <Wand2 className="w-4 h-4 text-cyan-400" />
+                초기 설정 마법사
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                PC 사양에 맞는 서비스 설정을 다시 확인합니다. 여는 것만으로는 아무것도 바뀌지 않습니다.
+              </p>
+              <button
+                type="button"
+                onClick={onOpenSetupWizard}
+                className="px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 transition-colors"
+              >
+                마법사 다시 열기
+              </button>
+            </section>
+          )}
 
           <button
             onClick={onClose}

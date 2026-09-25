@@ -16,8 +16,6 @@ DEFAULT_CONFIG = {
     "optimization_mode_user_set": False,
     # 구버전이 중지시킨 Windows Update 서비스 1회 복구 완료 플래그
     "wu_recovery_done": False,
-    # 초기 설정 마법사를 마쳤는지(적용했든 건너뛰었든). 없으면 매 실행마다 마법사가 뜬다.
-    "setup_wizard_done": False,
 
     # ── 게임 부스트가 무엇을 해도 되는지 ────────────────────────
     # 기본값 원칙: 되돌릴 수 있고 세션 한정인 것만 켜둔다.
@@ -33,6 +31,8 @@ DEFAULT_CONFIG = {
     # 직접 고른 강조색("#rrggbb"). 빈 문자열이면 색 조합의 기본 강조색을 쓴다.
     # 대비 검사는 UI(src/theme.js)가 한다. 읽기 어려운 값이 들어 있으면 UI 가 쓰지 않는다.
     "ui_accent": "",
+    # 초기 설정 마법사를 한 번 닫았는지. 예전에는 앱을 켤 때마다 마법사가 떴다.
+    "setup_wizard_done": False,
 }
 
 UI_THEMES = ('cyan', 'graphite', 'stone', 'midnight', 'violet')
@@ -122,16 +122,6 @@ def set_optimization_mode(mode, user_set=True):
 def get_optimization_mode_user_set():
     return load_config().get("optimization_mode_user_set", False)
 
-def get_setup_wizard_done():
-    return bool(load_config().get("setup_wizard_done", False))
-
-
-def set_setup_wizard_done(state):
-    config = load_config()
-    config["setup_wizard_done"] = bool(state)
-    return save_config(config)
-
-
 def get_wu_recovery_done():
     return load_config().get("wu_recovery_done", False)
 
@@ -200,3 +190,16 @@ def set_ui_accent(value):
     if not save_config(c) or load_config().get("ui_accent") != value:
         return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색으로 열립니다."}
     return {"success": True, "accent": value or None}
+
+
+def get_setup_wizard_done():
+    return bool(load_config().get("setup_wizard_done", False))
+
+
+def set_setup_wizard_done():
+    """마법사를 닫았다고 기록한다. 다시 읽어 저장됐는지 확인한다."""
+    c = load_config()
+    c["setup_wizard_done"] = True
+    if not save_config(c) or load_config().get("setup_wizard_done") is not True:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때 마법사가 다시 뜰 수 있습니다."}
+    return {"success": True}

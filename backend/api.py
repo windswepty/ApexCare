@@ -184,15 +184,6 @@ class Api:
             count += 1
         return {'count': count, 'groups': by_group}
         
-    # --- 초기 설정 마법사 ---
-    def getSetupWizardState(self):
-        """마법사를 이미 마쳤는지. 예전에는 기록하지 않아 매 실행마다 마법사가 떴다."""
-        return {'done': config_manager.get_setup_wizard_done()}
-
-    def completeSetupWizard(self):
-        """마법사를 닫았다고 기록한다. 시스템은 바꾸지 않는다."""
-        return {'success': config_manager.set_setup_wizard_done(True)}
-
     def applyHardwareTuning(self, cpu_cores, ram_gb, consent=False):
         # consent=False 는 미리보기(변경 예정 항목만 반환, 시스템 변경 없음).
         # 기본값이 False 라 프론트가 옛 버전이어도 영구 변경이 들어가지 않는다.
@@ -279,6 +270,13 @@ class Api:
 
     def setUiAccent(self, accent):
         return config_manager.set_ui_accent(accent)
+
+    # --- 초기 설정 마법사 (첫 실행 때만) ---
+    def getSetupWizardDone(self):
+        return config_manager.get_setup_wizard_done()
+
+    def markSetupWizardDone(self):
+        return config_manager.set_setup_wizard_done()
 
     # --- 프로세스 우선순위 (게이밍 탭) ---
     def boostProcess(self, pid, priority):

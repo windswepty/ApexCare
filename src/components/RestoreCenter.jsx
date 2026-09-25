@@ -9,7 +9,7 @@ const api = () => (typeof window !== 'undefined' && window.pywebview && window.p
 /** 백엔드가 쓰는 그룹 키를 사람이 읽을 이름으로. */
 const GROUP_META = {
   perf_mode: { label: '성능 모드', icon: Zap, desc: '전원 플랜과 CPU 동작 설정' },
-  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정·전원 플랜' },
+  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정' },
   boost: { label: '게임 부스트', icon: Gamepad2, desc: 'Nagle 끄기 (네트워크 어댑터 레지스트리)' },
   debloat: { label: '원격 분석·Cortana 정책', icon: ShieldOff, desc: '디블로터가 바꾼 정책 레지스트리와 서비스' },
   legacy_network: { label: '이전 버전의 네트워크 튜닝', icon: Network, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },

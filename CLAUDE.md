@@ -51,8 +51,8 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
 - 반드시 `backend/system_state` 를 거칩니다: `set_registry()`, `set_active_plan()`, `set_power_value()`, `set_service_start()`.
   이 함수들은 바꾸기 전에 원래 값을 한 번만 기록하고, 쓴 뒤 다시 읽어 확인합니다. 되돌릴 때는 `restore_group()` 을 씁니다.
   원래 값을 읽지 못했거나 저널 저장에 실패하면 바꾸지 않습니다(되돌릴 수 없는 변경이 되므로).
-- 서비스 시작 유형은 `service_ctl` 이 서비스 관리자 API 로 바꿉니다. `service_ctl.set_start_type()` 을 직접 부르면
-  원래 값이 기록되지 않으므로, 복구 경로 밖에서는 `system_state.set_service_start()` 만 씁니다.
+- 서비스는 시작 유형만 바꿉니다(`set_service_start(서비스, 'auto'|'delayed-auto'|'demand'|'disabled', group)`, sc.exe 인자 리스트).
+  실행 중인 서비스를 즉시 시작·중지하지 않습니다. 그 상태는 기록·복구할 수 없어서입니다.
 - 추측한 "기본값"을 쓰는 것은 복구가 아닙니다. 원래 값이 없었으면 값을 삭제하는 것이 복구입니다.
 - 복구가 실패하면 백업이나 저널 기록을 지우지 않습니다. 그래야 다시 시도할 수 있습니다.
 - 성능 모드 전환은 `perf_modes.apply_mode()` 한 곳에서만 합니다. 새 모드를 적용하기 전에 이전 모드를 먼저 되돌립니다.
@@ -84,7 +84,7 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
   로직은 가짜 객체로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
 - 옛 테스트 스크립트는 실제 시스템을 바꿉니다. `test_performance.py` 는 성능 모드를 전환하고, `tools/test_full.py` 와 `tools/test_backend.py` 는 `purge_ram()` 을 호출합니다. 실행하지 않습니다.
 - 개발 PC 에는 구버전이 남긴 설정(`NetworkThrottlingIndex=0xFFFFFFFF`, `HwSchMode=2`)이 남아 있습니다. 이 값을 "원래 값"으로 가정하지 않습니다.
-- 초기 설정 마법사는 `settings.json` 의 `setup_wizard_done` 이 없을 때만 뜹니다. 마법사를 닫는 것(`completeSetupWizard`)은 시스템을 바꾸지 않습니다.
+- 초기 설정 마법사는 `settings.json` 의 `setup_wizard_done` 이 없을 때만 뜹니다. 마법사를 닫는 것(`markSetupWizardDone`)은 시스템을 바꾸지 않습니다.
 
 ## 빌드 함정
 
@@ -100,7 +100,6 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
 | `api.py` | UI 가 부르는 모든 것의 진입점 |
 | `safe_delete.py` | 휴지통 삭제, 보호 경로 판정 |
 | `system_state.py` | 시스템 변경 저널 (원래 값 기록·확인·복구) |
-| `service_ctl.py` | 서비스 시작 유형·시작·중지 (서비스 관리자 API). 기록은 `system_state` 가 한다 |
 | `perf_modes.py` | 성능 모드 (표준·게이밍·에코) |
 | `process_boost.py` · `process_guard.py` | 프로세스 우선순위 변경·복구, 건드려도 되는지 판정 |
 | `game_booster.py` | 게임 감지, 부스트, 에코 억제 |

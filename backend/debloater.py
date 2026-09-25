@@ -43,7 +43,7 @@ DEBLOAT_SAFE_LIST = [
      "reversible": False, "note": "Xbox Game Bar 와 새 Xbox 앱은 건드리지 않습니다. " + _APPX_NOTE},
     {"id": "telemetry", "name": "Windows 원격 분석 (Telemetry) 줄이기", "pattern": "policy",
      "reversible": True,
-     "note": "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 끕니다. 복구 센터에서 되돌릴 수 있습니다."},
+     "note": "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 '사용 안 함'으로 바꿉니다(다음 부팅부터). 복구 센터에서 되돌릴 수 있습니다."},
     {"id": "cortana", "name": "Cortana 끄기", "pattern": "policy",
      "reversible": True, "note": "Cortana 사용 안 함 정책을 켭니다. 복구 센터에서 되돌릴 수 있습니다."},
 ]
@@ -112,24 +112,20 @@ def _remove_appx(pattern):
 
 def _apply_telemetry_policy():
     """원격 분석 정책 + DiagTrack 서비스. 모두 저널에 원래 값을 기록한다. (ok, 사유)"""
-    from backend import system_state as ss, service_ctl
+    from backend import system_state as ss
     reasons = []
     r = ss.set_registry('HKLM', r'SOFTWARE\Policies\Microsoft\Windows\DataCollection',
                         'AllowTelemetry', 0, group=DEBLOAT_GROUP,
                         why='디블로터: 원격 분석 수준 최소화 정책 (AllowTelemetry=0)')
     if not r.get('ok'):
         reasons.append(f"정책: {r.get('reason')}")
-    cur = service_ctl.read_config('DiagTrack')
-    if cur.get('exists'):
-        if cur.get('start') != service_ctl.START_DISABLED:
-            r = ss.set_service_start('DiagTrack', service_ctl.START_DISABLED, group=DEBLOAT_GROUP,
-                                     why="디블로터: 원격 분석 서비스(DiagTrack) '사용 안 함'")
-            if not r.get('ok'):
-                reasons.append(f"DiagTrack: {r.get('reason')}")
-        if not reasons:
-            st = service_ctl.stop('DiagTrack')
-            if not st.get('ok'):
-                log.info(f"DiagTrack 즉시 중지 실패(다음 부팅부터 꺼짐): {st.get('reason')}")
+    # 서비스는 시작 유형만 바꾼다(다음 부팅부터 반영). 실행 중인 서비스를 즉시 멈추면
+    # 그 상태는 기록·복구할 수 없다. 이 PC 에 없는 서비스면 건너뛴다.
+    if ss.service_start_type('DiagTrack') is not None:
+        r = ss.set_service_start('DiagTrack', 'disabled', DEBLOAT_GROUP,
+                                 why="디블로터: 원격 분석 서비스(DiagTrack) '사용 안 함'")
+        if not r.get('ok'):
+            reasons.append(f"DiagTrack: {r.get('reason')}")
     return (not reasons), '; '.join(reasons)
 
 

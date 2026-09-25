@@ -24,6 +24,7 @@ import ctypes
 import json
 import logging
 import os
+import subprocess
 import uuid
 import winreg
 
@@ -294,16 +295,37 @@ def available_plans():
     return out
 
 
+_PLAN_KEY = 'power:active_plan'
+
+
 def set_active_plan(guid_str, group, why=''):
-    """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다."""
+    """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다.
+
+    활성 플랜은 하나라서 원래 값 기록도 하나다. 그 기록은 마지막으로 플랜을 바꾼 group 이
+    가진다. 다른 group 이 남긴 기록이 있으면 원래 값은 그대로 두고 소유만 넘겨받는다.
+    넘겨받지 않으면 이 group 을 되돌려도 플랜이 돌아오지 않는다(예: 구버전 맞춤 튜닝이
+    'hw_tuning' 으로 남긴 기록 때문에 성능 모드 전환이 플랜을 되돌리지 못했다).
+    원래 값 기록을 남기지 못하면 바꾸지 않는다.
+    """
     before = active_plan_guid()
     if not before:
         return {'ok': False, 'verified': False,
                 'reason': '현재 전원 플랜을 읽지 못해 바꾸지 않았습니다'}
-    if not _record('power:active_plan', {
+    if not _record(_PLAN_KEY, {
         'kind': 'power_plan', 'group': group, 'value': before, 'why': why,
     }):
         return dict(_NOT_RECORDED)
+    data = _load()
+    entry = data['entries'].get(_PLAN_KEY)
+    if entry is not None and entry.get('group') != group:
+        entry['group'] = group
+        entry['why'] = why or entry.get('why', '')
+        _save(data)
+        entry = _load()['entries'].get(_PLAN_KEY)
+    if entry is None or entry.get('group') != group:
+        return {'ok': False, 'verified': False,
+                'reason': '원래 전원 플랜 기록을 저장하지 못해 바꾸지 않았습니다'}
+
     if guid_str not in available_plans():
         return {'ok': False, 'verified': False,
                 'reason': f'이 PC 에 없는 전원 플랜입니다 ({KNOWN_PLANS.get(guid_str, guid_str)})'}
@@ -402,32 +424,130 @@ def _reapply_if_active(plans):
 # ─────────────────────────────────────────────
 # 서비스 시작 유형
 # ─────────────────────────────────────────────
+# 레지스트리 Start 값을 직접 쓰지 않고 sc.exe 를 쓴다. SCM 이 설정을 캐시하고 있어서
+# 레지스트리만 바꾸면 재부팅 전까지 SCM 과 어긋난다. 확인은 레지스트리를 다시 읽어서 한다.
 
-def set_service_start(service, start, group, delayed=False, why=''):
-    """서비스 시작 유형을 바꾼다. 원래 값(과 실행 중이었는지)을 먼저 기록한다.
+_SERVICES_KEY = r'SYSTEM\CurrentControlSet\Services'
+START_TYPES = ('auto', 'delayed-auto', 'demand', 'disabled')
+_START_VALUE = {'auto': 2, 'delayed-auto': 2, 'demand': 3, 'disabled': 4}
+CREATE_NO_WINDOW = 0x08000000
 
-    기존 코드는 sc config 를 shell=True 로 부르고 반환 코드도 보지 않았으며,
-    원래 값은 settings.json 에 따로 적었다. 백업이 없으면 '윈도우 기본값' 을
-    추측해 써넣었는데, 사용자가 일부러 꺼 둔 서비스를 다시 켜는 결과가 됐다.
+
+def _valid_service_name(service):
+    # 명령줄에 들어가는 값이다. 문자·숫자·_ . - 만 허용한다.
+    return (isinstance(service, str) and 0 < len(service) <= 256
+            and all(c.isascii() and (c.isalnum() or c in '_.-') for c in service))
+
+
+def read_service_start(service):
+    """(ok, Start, DelayedAutostart) 를 돌려준다. 서비스가 없거나 읽지 못하면 ok=False."""
+    if not _valid_service_name(service):
+        return False, None, None
+    path = f'{_SERVICES_KEY}\\{service}'
+    ok, start, _ = read_registry('HKLM', path, 'Start')
+    if not ok or not isinstance(start, int):
+        return False, None, None
+    has_delayed, delayed, _ = read_registry('HKLM', path, 'DelayedAutostart')
+    return True, start, (delayed if has_delayed else None)
+
+
+def service_start_type(service):
+    """'auto'·'delayed-auto'·'demand'·'disabled'·'boot'·'system' 또는 None(읽지 못함)."""
+    ok, start, delayed = read_service_start(service)
+    if not ok:
+        return None
+    if start == 2:
+        return 'delayed-auto' if delayed else 'auto'
+    return {0: 'boot', 1: 'system', 3: 'demand', 4: 'disabled'}.get(start)
+
+
+def _sc_config_start(service, start_type):
+    """sc.exe config <서비스> start= <유형>. shell=False, 절대 경로, 인자는 검증한 값만."""
+    if not _valid_service_name(service) or start_type not in _START_VALUE:
+        return {'rc': None, 'error': '허용되지 않은 인자'}
+    sysroot = os.environ.get('SystemRoot') or os.environ.get('WINDIR') or r'C:\Windows'
+    sc = os.path.join(sysroot, 'System32', 'sc.exe')
+    try:
+        r = subprocess.run([sc, 'config', service, 'start=', start_type], shell=False,
+                           capture_output=True, text=True, errors='replace',
+                           creationflags=CREATE_NO_WINDOW, timeout=30)
+    except Exception as e:
+        return {'rc': None, 'error': str(e) or type(e).__name__}
+    err = '' if r.returncode == 0 else (r.stderr or r.stdout or '').strip()[-200:]
+    return {'rc': r.returncode, 'error': err}
+
+
+def _write_service_start(service, start_type):
+    """쓰고 다시 읽어 확인한다. (ok, reason)"""
+    if service_start_type(service) == start_type:
+        return True, ''
+    r = _sc_config_start(service, start_type)
+    now = service_start_type(service)
+    if now != start_type:
+        detail = r.get('error') or ''
+        return False, (f'{service} 시작 유형을 {start_type} 로 바꾸지 못했습니다 '
+                       f'(sc 코드 {r.get("rc")}, 현재 {now}) {detail}').strip()
+    return True, ''
+
+
+def set_service_start(service, start_type, group, why=''):
+    """서비스 시작 유형을 바꾼다. 원래 Start·DelayedAutostart 를 먼저 기록한다.
+
+    원래 값을 읽지 못하거나 저널에 남기지 못하면 바꾸지 않는다.
+    반환: {'ok', 'changed', 'before', 'reason'}
     """
-    from backend import service_ctl
-    cur = service_ctl.read_config(service)
-    if not cur['exists']:
-        return {'ok': False, 'verified': False, 'reason': cur.get('reason') or '없는 서비스'}
-    if cur['start'] is None:
-        return {'ok': False, 'verified': False,
-                'reason': (cur.get('reason') or '원래 시작 유형을 읽지 못했습니다')
-                          + ' — 되돌릴 수 없으므로 바꾸지 않았습니다'}
-    if not _record(f"svc:{service}", {
+    if not _valid_service_name(service):
+        return {'ok': False, 'changed': False, 'reason': '서비스 이름이 올바르지 않습니다'}
+    if start_type not in START_TYPES:
+        return {'ok': False, 'changed': False, 'reason': f'알 수 없는 시작 유형입니다: {start_type}'}
+
+    ok, start, delayed = read_service_start(service)
+    if not ok:
+        return {'ok': False, 'changed': False,
+                'reason': '원래 시작 유형을 읽지 못해 바꾸지 않았습니다(서비스가 없을 수 있음)'}
+    before = service_start_type(service)
+    if before == start_type:
+        return {'ok': True, 'changed': False, 'before': before, 'reason': ''}
+    if before not in START_TYPES:
+        return {'ok': False, 'changed': False, 'before': before,
+                'reason': f'시작 유형이 일반적이지 않아({start}) 건드리지 않았습니다'}
+
+    key = f'svc:{service.lower()}'
+    _record(key, {
         'kind': 'service', 'group': group, 'service': service,
-        'value': {'start': cur['start'], 'delayed': cur['delayed']},
-        'was_running': cur['running'], 'why': why,
-    }):
-        return dict(_NOT_RECORDED)
-    r = service_ctl.set_start_type(service, {'start': start, 'delayed': delayed})
-    return {'ok': bool(r.get('ok')), 'verified': bool(r.get('ok')),
-            'reason': r.get('reason', ''),
-            'before': cur['start'], 'after': start}
+        'start': start, 'delayed': delayed, 'why': why,
+    })
+    # _record 는 저장 실패를 알리지 않는다. 기록이 실제로 남았는지 확인한 뒤에만 바꾼다.
+    if key not in _load()['entries']:
+        return {'ok': False, 'changed': False, 'before': before,
+                'reason': '되돌릴 정보를 저장하지 못해 바꾸지 않았습니다'}
+
+    w_ok, reason = _write_service_start(service, start_type)
+    return {'ok': w_ok, 'changed': w_ok, 'before': before, 'reason': reason}
+
+
+def _restore_service(e):
+    """기록한 원래 Start·DelayedAutostart 로 되돌린다. (ok, reason)"""
+    svc = e.get('service')
+    start = e.get('start')
+    if start is None and isinstance(e.get('value'), dict):
+        # 병합 전 브랜치가 남긴 형식 {'value': {'start', 'delayed'}} 도 읽는다
+        start = e['value'].get('start')
+        e = dict(e, delayed=e['value'].get('delayed'))
+    if not _valid_service_name(svc) or not isinstance(start, int) or isinstance(start, bool):
+        return False, '기록 형식이 올바르지 않아 건드리지 않았습니다'
+    if start == 2:
+        target = 'delayed-auto' if e.get('delayed') else 'auto'
+    else:
+        target = {3: 'demand', 4: 'disabled'}.get(start)
+    if not target:
+        return False, f'원래 시작 유형({start})은 이 앱이 되돌리지 않습니다'
+    return _write_service_start(svc, target)
+
+
+def restore_service_start(service, start, delayed):
+    """저널 밖에 남은 기록(구버전 settings.json 백업)으로 되돌릴 때 쓴다. (ok, reason)"""
+    return _restore_service({'service': service, 'start': start, 'delayed': delayed})
 
 
 # ─────────────────────────────────────────────
@@ -520,18 +640,10 @@ def _restore(predicate):
                 done.append(key)
 
             elif kind == 'service':
-                from backend import service_ctl
-                r = service_ctl.set_start_type(e['service'], e['value'])
-                if not r.get('ok'):
-                    failed.append({'key': key, 'reason': r.get('reason', '서비스 복구 실패')})
+                ok, reason = _restore_service(e)
+                if not ok:
+                    failed.append({'key': key, 'reason': reason or '서비스 복구 실패'})
                     continue
-                # 바꾸기 전에 돌고 있던 서비스면 다시 켠다. 시작 유형만 되돌리면
-                # 다음 부팅까지 꺼진 채로 남는다. 실패해도 시작 유형은 이미 원래대로라
-                # 재부팅하면 돌아오므로 기록은 지우고 로그만 남긴다.
-                if e.get('was_running') and int(e['value'].get('start', 4)) != 4:
-                    s = service_ctl.start(e['service'])
-                    if not s.get('ok'):
-                        log.warning(f"{e['service']} 재시작 실패: {s.get('reason')}")
                 done.append(key)
             else:
                 failed.append({'key': key, 'reason': f'알 수 없는 종류: {kind}'})
