@@ -119,11 +119,16 @@ def _run_deep_optimization():
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
         # Step 2: RAM Purge
-        _optimization_state["current_task"] = "유휴 프로세스 정리 및 가용 메모리 확보 중..."
+        # 예전 문구 '유휴 프로세스 정리' 는 사실이 아니었다. purge_ram 은 프로세스를 건드리지 않는다.
+        _optimization_state["current_task"] = "대기 메모리 비우는 중..."
         ram_res = purge_ram()
-        steps.append({"name": "대기 메모리 해제", "ok": bool(ram_res.get("success")),
-                      "detail": "" if ram_res.get("success")
-                                else ram_res.get("message") or ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
+        if ram_res.get("success"):
+            b, a = ram_res.get("standbyBeforeBytes"), ram_res.get("standbyAfterBytes")
+            ram_detail = (f"대기 {b / 1024**3:.1f} GB → {a / 1024**3:.1f} GB"
+                          if b is not None and a is not None else "전후 크기는 측정하지 못함")
+        else:
+            ram_detail = ram_res.get("message") or ram_res.get("error", "관리자 권한이 필요할 수 있습니다")
+        steps.append({"name": "대기 메모리 비우기", "ok": bool(ram_res.get("success")), "detail": ram_detail})
         _optimization_state["progress_pct"] = 60
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
@@ -140,7 +145,7 @@ def _run_deep_optimization():
         # Step 4: SSD TRIM
         # run_trim() 은 스레드를 띄우고 바로 반환한다. 기다리지 않으면 defrag 가
         # 아직 돌고 있는데 화면에는 '완료'가 떠 버린다.
-        _optimization_state["current_task"] = "물리 디스크 응답속도 최적화(TRIM) 중..."
+        _optimization_state["current_task"] = "디스크 최적화(TRIM) 중..."
         trim_res = system_repair.run_trim()
         trim_ok = False
         if trim_res.get("success"):
@@ -884,10 +889,9 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             purge_ram() # 강력한 램 클리어 즉시 실행
             
             # 저사양 맞춤 전원 프로필 세팅
-            system_state.set_active_plan(POWER_PLAN_BALANCED,
-                                         group='hw_tuning', why='저사양 맞춤 튜닝')
-            
-            msg = "저사양 맞춤 튜닝 적용 완료: 불필요한 백그라운드 서비스(SysMain, WSearch)를 영구 차단하여 CPU/RAM 점유율을 대폭 낮추었습니다."
+            plan_res = system_state.set_active_plan(POWER_PLAN_BALANCED,
+                                                    group='hw_tuning', why='저사양 맞춤 튜닝')
+            want_start, plan_name = 4, '균형 조정'
             tier = "LowEnd"
         else:
             # 중/고사양: 최대 성능 유지 및 캐시 활용 (영구적)
@@ -904,18 +908,34 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             _start_service("WSearch")
             
             # 고성능 프로필 베이스
-            system_state.set_active_plan(POWER_PLAN_HIGH_PERF,
-                                         group='hw_tuning', why='고사양 맞춤 튜닝')
-            
-            msg = "고성능 맞춤 튜닝 적용 완료: 넉넉한 하드웨어 자원을 활용하여 시스템 캐시를 켜고, CPU 성능을 100% 개방하도록 영구 튜닝했습니다."
+            plan_res = system_state.set_active_plan(POWER_PLAN_HIGH_PERF,
+                                                    group='hw_tuning', why='고사양 맞춤 튜닝')
+            want_start, plan_name = 2, '고성능'
             tier = "HighEnd"
-            
+
+        # 적용 결과를 다시 읽어 항목별로 보고한다. 예전에는 sc 명령이 실패해도 늘 success=True 였고
+        # "CPU/RAM 점유율을 대폭 낮추었습니다", "CPU 성능을 100% 개방" 같은 측정하지 않은 결과를 알렸다.
+        start_label = {2: '자동', 3: '수동', 4: '사용 안 함'}
+        steps = []
+        for svc, label in (("SysMain", "SysMain(수퍼패치)"), ("WSearch", "Windows Search")):
+            got = _get_service_start_type(svc)
+            steps.append({"name": f"{label} 시작 유형 → {start_label[want_start]}",
+                          "ok": got == want_start,
+                          "detail": "" if got == want_start
+                                    else f"현재 값: {start_label.get(got, '읽지 못함' if got is None else got)}"})
+        steps.append({"name": f"전원 관리 프로필 → {plan_name}", "ok": bool(plan_res.get('ok')),
+                      "detail": "" if plan_res.get('ok') else plan_res.get('reason', '확인 실패')})
+        failed = [st for st in steps if not st["ok"]]
+
         return {
-            "success": True,
+            "success": not failed,
             "applied": True,
             "tier": tier,
             "changes": permanent_changes,
-            "message": msg
+            "steps": steps,
+            "failed": [st["name"] for st in failed],
+            "message": (f"{len(steps)}개 항목을 모두 적용했습니다." if not failed
+                        else f"{len(steps)}개 중 {len(failed)}개 항목을 적용하지 못했습니다."),
         }
     except Exception as e:
         return {"success": False, "applied": False, "message": "맞춤 튜닝 적용에 실패했습니다.", "error": str(e)}

@@ -7,7 +7,7 @@ import {
   Cpu, 
   HardDrive, 
   MemoryStick, 
-  Sparkles, 
+  XCircle, 
   TrendingUp, 
   Gauge,
   Sun,
@@ -60,8 +60,13 @@ const renderLineGraph = (history) => {
   );
 };
 
+// 원클릭 최적화가 실제로 하는 일 (backend/optimizer.py _run_deep_optimization 과 같은 순서)
+const OPTIMIZATION_STEPS = ['임시 파일·캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
+
 export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast }) {
-  const [healthScore, setHealthScore] = useState(null);
+  // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
+  // '최상 / 최적화 필요' 를 판정했다. 측정한 건강 상태가 아니므로 없앴다.
+  const [lastRun, setLastRun] = useState(null);   // 이번 실행의 단계별 결과
   const [isScanning, setIsScanning] = useState(false);
   const [modalMessage, setModalMessage] = useState(null);
   
@@ -73,8 +78,6 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     freed_mb: 0,
     error: null
   });
-
-  const [junkFound, setJunkFound] = useState(null);
 
   const [lastOptimized, setLastOptimized] = useState(() => localStorage.getItem('apex_last_optimized') || '기록 없음');
   const [totalFreed, setTotalFreed] = useState(() => parseFloat(localStorage.getItem('apex_total_freed')) || 0);
@@ -91,7 +94,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     cpuThreads: 0,
     ramTotalGB: '0',
     ramUsedGB: '0',
-    ramFreeGB: '0',
+    ramAvailableGB: '0',
     diskTotalGB: '0',
     diskUsedGB: '0',
     diskFreeGB: '0'
@@ -128,21 +131,14 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               cpuModel: stats.cpuModel || 'Unknown CPU',
               cpuCores: stats.cpuCores || 0,
               cpuThreads: stats.cpuThreads || 0,
-              gpuModel: stats.gpuModel || 'GPU 3D 엔진',
+              gpuModel: stats.gpuModel || '알 수 없음',
               ramTotalGB: stats.ramTotalGB || '0',
               ramUsedGB: stats.ramUsedGB || '0',
-              ramFreeGB: stats.ramTotalGB ? (parseFloat(stats.ramTotalGB) - parseFloat(stats.ramUsedGB)).toFixed(1) : '0',
+              ramAvailableGB: stats.ramAvailableGB ?? '0',
               diskTotalGB: stats.diskTotalGB || '0',
               diskUsedGB: stats.diskUsedGB || '0',
               diskFreeGB: stats.diskTotalGB ? (parseFloat(stats.diskTotalGB) - parseFloat(stats.diskUsedGB)).toFixed(0) : '0'
             });
-
-            // Dynamically compute health score from real metrics
-            const cpuPenalty = Math.max(0, (stats.cpuUsage || 0) - 50) * 0.3;
-            const ramPenalty = Math.max(0, (stats.ramPct || 0) - 70) * 0.4;
-            const diskPenalty = Math.max(0, (stats.diskPct || 0) - 80) * 0.5;
-            const computed = Math.max(30, Math.round(100 - cpuPenalty - ramPenalty - diskPenalty));
-            setHealthScore(computed);
           }
         } catch (e) {
           // Keep previous data if failed
@@ -193,7 +189,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
                     }
                     setIsScanning(false);
                   } else {
-                    finishOptimization(status.freed_mb);
+                    finishOptimization(status);
                   }
                 }
               }
@@ -216,8 +212,13 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     }
   };
 
-  const finishOptimization = (freedMB) => {
-    
+  // 백엔드가 돌려준 단계별 성패를 그대로 보여준다. 부분 실패는 성공이 아니다.
+  const finishOptimization = (status) => {
+    const steps = Array.isArray(status.steps) ? status.steps : [];
+    const failedCount = steps.filter(st => !st.ok).length;
+    setLastRun({ steps, failedCount });
+
+    const freedMB = Number(status.freed_mb) || 0;
     const now = new Date().toLocaleDateString('ko-KR');
     localStorage.setItem('apex_last_optimized', now);
     setLastOptimized(now);
@@ -226,20 +227,17 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     localStorage.setItem('apex_total_freed', newTotalFreed);
     setTotalFreed(newTotalFreed);
 
-    try {
-      confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
-    } catch (e) {}
-    
-    if (addToast) {
-      addToast('원클릭 최적화가 성공적으로 완료되었습니다!', 'success');
+    if (failedCount === 0 && steps.length > 0) {
+      try {
+        confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
+      } catch (e) {}
+      if (addToast) addToast(`원클릭 최적화를 마쳤습니다 (${steps.length}단계 모두 성공).`, 'success');
+    } else if (addToast) {
+      addToast(steps.length
+        ? `원클릭 최적화: ${steps.length}단계 중 ${failedCount}단계 실패. 결과를 확인하세요.`
+        : '원클릭 최적화 결과를 받지 못했습니다.', 'error');
     }
     setIsScanning(false);
-  };
-
-  const getScoreColor = (score) => {
-    if (score >= 90) return 'text-emerald-500 border-emerald-500 shadow-emerald-500/20';
-    if (score >= 70) return 'text-amber-500 border-amber-500 shadow-amber-500/20';
-    return 'text-rose-500 border-rose-500 shadow-rose-500/20';
   };
 
   const getUsageColor = (val) => {
@@ -286,21 +284,23 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
           <div className="space-y-4 max-w-xl text-center md:text-left">
             <div className="flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-xs font-mono text-gray-600 dark:text-gray-300">
-                <Sparkles className="w-3.5 h-3.5 text-black dark:text-white animate-spin-slow" />
-                AI 기반 원클릭 자가진단 및 성능 복구
+                <Zap className="w-3.5 h-3.5 text-black dark:text-white" />
+                ONE-CLICK
               </div>
             </div>
-            
+
             <h2 className="text-3xl font-black tracking-tight text-black dark:text-white transition-colors duration-300">
-              현재 컴퓨터 상태: {' '}
-              <span className={healthScore >= 90 ? 'text-emerald-500' : 'text-amber-500'}>
-                {healthScore >= 90 ? '최상 (Optimized)' : '최적화 필요 (Action Needed)'}
-              </span>
+              원클릭 최적화
             </h2>
 
-            <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed transition-colors duration-300">
-              임시 정크 파일 <span className="font-mono text-black dark:text-white font-bold">{junkFound || '스캔 대기 중'}</span> 등이 시스템 속도를 저하시킬 수 있습니다. 원클릭 최적화를 실행해 보세요.
-            </p>
+            <div className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed transition-colors duration-300">
+              아래 네 가지를 차례로 실행하고 단계별 결과를 보여줍니다.
+              <ol className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
+                {OPTIMIZATION_STEPS.map((name, i) => (
+                  <li key={name}>{i + 1}. {name}</li>
+                ))}
+              </ol>
+            </div>
 
             <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 pt-2">
               <button
@@ -310,7 +310,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               >
                 <>
                   <Zap className="w-5 h-5 fill-current" />
-                  <span>원클릭 딥 최적화 시작</span>
+                  <span>원클릭 최적화 시작</span>
                 </>
               </button>
 
@@ -328,30 +328,28 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
                 </button>
               )}
 
-              {healthScore >= 90 && !isScanning && (
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono">
-                  <CheckCircle2 className="w-4 h-4" />
-                  최적 성능 상태 유지 중
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Right Circular Gauge */}
-          <div className="relative flex items-center justify-center">
-            
-            <div className={`w-48 h-48 rounded-full border-4 flex flex-col items-center justify-center glass-panel shadow-2xl transition-all duration-500 ${getScoreColor(healthScore)}`}>
-              <span className="text-xs font-mono tracking-widest text-gray-500 dark:text-gray-400 uppercase">Health Score</span>
-              <span className="text-5xl font-black font-mono tracking-tight my-1 text-black dark:text-white">
-                {isScanning ? (
-                  <span className="text-gray-400 dark:text-gray-600 animate-pulse">--</span>
-                ) : (
-                  healthScore
-                )}
-              </span>
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 font-mono">/ 100</span>
+          {/* Right: 이번 실행의 단계별 결과 (실행 전에는 비워 둔다) */}
+          {lastRun && !isScanning && (
+            <div className="w-full md:w-72 space-y-2">
+              <div className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400">
+                최근 실행 결과 — {lastRun.steps.length - lastRun.failedCount}/{lastRun.steps.length} 단계 성공
+              </div>
+              {lastRun.steps.map((st, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  {st.ok
+                    ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                    : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-black dark:text-white">{st.name}</div>
+                    {st.detail && <div className="text-gray-500 dark:text-gray-400 break-words">{st.detail}</div>}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+          )}
         </div>
 
         {/* Scan Step Progress Bar if active */}
@@ -359,7 +357,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
           <div className="mt-6 pt-4 border-t border-black/10 dark:border-white/10 space-y-2">
             <div className="flex justify-between text-xs font-mono">
               <span className="text-gray-700 dark:text-gray-300">
-                {optStatus.current_task || '딥 최적화 엔진 시작 중...'}
+                {optStatus.current_task || '시작하는 중...'}
               </span>
               <div className="flex gap-4">
                 <span className="text-gray-500 dark:text-gray-400">
@@ -381,7 +379,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
       <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-5">
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">마지막 최적화 날짜</h4>
+            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">마지막 원클릭 최적화</h4>
             <div className="text-2xl font-black text-black dark:text-white">{lastOptimized}</div>
           </div>
           <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
@@ -391,7 +389,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
         
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">총 확보한 공간</h4>
+            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">임시 파일 정리로 확보한 공간 (누적)</h4>
             <div className="text-2xl font-black text-black dark:text-white">{totalFreed.toFixed(1)} <span className="text-lg">MB</span></div>
           </div>
           <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
@@ -468,7 +466,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[200px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Hardware Acceleration</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">3D 엔진 사용률</p>
             </div>
           </div>
           <div className="flex items-baseline gap-1.5 shrink-0">
@@ -514,7 +512,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
 
         <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
           <span>사용 중: {sysInfo.ramUsedGB} GB</span>
-          <span>여유 공간: {sysInfo.ramFreeGB} GB</span>
+          <span>사용 가능: {sysInfo.ramAvailableGB} GB</span>
         </div>
       </div>
 
