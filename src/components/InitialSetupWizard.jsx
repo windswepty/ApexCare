@@ -9,6 +9,13 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   const [previewError, setPreviewError] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
   const [consentChecked, setConsentChecked] = useState(false);
+  // 사양 정보를 오래 받지 못하면 알린다(건너뛰기는 처음부터 가능)
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (stats) return;
+    const tm = setTimeout(() => setSlow(true), 15000);
+    return () => clearTimeout(tm);
+  }, [stats]);
 
   // 사양을 받으면 무엇이 바뀌는지 백엔드에 물어본다(consent=false: 미리보기만).
   // 저사양 판정 기준도 백엔드 한 곳(optimizer.apply_hardware_tailored_tuning)에서 온다.
@@ -90,6 +97,14 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             <p className={`text-sm ${muted}`}>
               프로세서·메모리·드라이브 정보를 가져오고 있습니다.
             </p>
+            {slow && (
+              <p className="text-xs text-amber-500 mt-4 text-center">
+                15초가 넘도록 사양 정보를 받지 못했습니다. 건너뛰어도 아무것도 바뀌지 않습니다.
+              </p>
+            )}
+            <button onClick={() => onComplete()} className={`${skipBtn} mt-6`}>
+              건너뛰기 (적용 안함)
+            </button>
           </div>
         ) : step === 'consent' ? (
           <div className="flex flex-col animate-fade-in-up">
@@ -124,7 +139,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             </div>
 
             <div className={`p-6 border-t flex justify-end gap-3 ${band}`}>
-              <button onClick={() => onComplete('standard')} className={skipBtn}>
+              <button onClick={() => onComplete()} className={skipBtn}>
                 건너뛰기 (적용 안함)
               </button>
               <button
@@ -177,7 +192,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             </div>
             <div className={`p-6 border-t flex justify-end ${band}`}>
               <button
-                onClick={() => onComplete('standard')}
+                onClick={() => onComplete()}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg active:scale-95 ${primaryBtn}`}
               >
                 계속
@@ -287,7 +302,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
 
             {/* Footer Buttons */}
             <div className={`p-6 border-t flex justify-end gap-3 ${band}`}>
-              <button onClick={() => onComplete('standard')} className={skipBtn}>
+              <button onClick={() => onComplete()} className={skipBtn}>
                 건너뛰기 (적용 안함)
               </button>
 

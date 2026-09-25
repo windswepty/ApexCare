@@ -132,27 +132,10 @@ export default function App() {
             <InitialSetupWizard 
               stats={systemStats} 
               isDarkMode={isDarkMode} 
-              onComplete={async (selectedMode) => {
-                setShowInitialWizard(false);
-                // 마법사에서 고른 모드를 실제로 적용하고 결과를 알린다.
-                // 예전에는 setCurrentMode 만 해서 화면만 바뀌고 적용은 안 될 수 있었다.
-                const a = window.pywebview && window.pywebview.api;
-                if (a && typeof a.setOptimizationMode === 'function') {
-                  try {
-                    const res = await a.setOptimizationMode(selectedMode);
-                    if (res?.success) {
-                      setCurrentMode(selectedMode);
-                      addToast(res.message || '성능 모드를 적용했습니다.', 'success');
-                    } else if (res?.error === 'UAC_REQUIRED') {
-                      addToast('관리자 권한이 없어 성능 모드를 적용하지 못했습니다.', 'error');
-                    } else {
-                      addToast(res?.message || '성능 모드 적용에 실패했습니다.', 'error');
-                    }
-                  } catch (e) {
-                    addToast(`성능 모드 적용 중 오류: ${e}`, 'error');
-                  }
-                }
-              }} 
+              // 마법사를 닫기만 한다. 예전에는 여기서 setOptimizationMode('standard') 를 불러,
+              // '건너뛰기 (적용 안함)' 을 눌러도 앱을 켤 때마다 사용자가 고른 게이밍·에코 모드를
+              // 표준으로 되돌리고 전원 플랜을 바꿨다. 마법사에는 이제 모드 선택이 없다.
+              onComplete={() => setShowInitialWizard(false)}
             />
           ) : showLoading ? (
             <LoadingScreen 
