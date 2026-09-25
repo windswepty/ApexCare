@@ -24,7 +24,12 @@ DEFAULT_CONFIG = {
     "boost_disable_nagle": False,      # 레지스트리 영구 변경. 복구 함수는 있음
     "boost_auto_power_mode": False,    # 게임 감지 시 게이밍 전원 모드로 자동 전환
     "boost_tame_background": True,     # 바쁜 백그라운드 앱 우선순위 낮춤(복구됨)
+
+    # UI 색 조합. 목록은 src/theme.js 의 THEMES 와 같아야 한다.
+    "ui_theme": "cyan",
 }
+
+UI_THEMES = ('cyan', 'graphite', 'stone', 'midnight', 'violet')
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -40,11 +45,13 @@ def load_config():
         return DEFAULT_CONFIG.copy()
 
 def save_config(config):
+    """설정을 쓴다. 성공 여부를 돌려준다(기존 호출부는 무시해도 된다)."""
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4)
+        return True
     except Exception:
-        pass
+        return False
 
 def get_booster_state():
     return load_config().get("booster_enabled", True)
@@ -103,3 +110,20 @@ def set_boost_setting(key, value):
     c[key] = bool(value)
     save_config(c)
     return {"success": True, "key": key, "value": bool(value)}
+
+
+def get_ui_theme():
+    """저장된 UI 색 조합. 알 수 없는 값이면 기본값을 돌려준다."""
+    theme = load_config().get("ui_theme", DEFAULT_CONFIG["ui_theme"])
+    return theme if theme in UI_THEMES else DEFAULT_CONFIG["ui_theme"]
+
+
+def set_ui_theme(theme):
+    """UI 색 조합을 저장하고, 다시 읽어 저장됐는지 확인한다."""
+    if theme not in UI_THEMES:
+        return {"success": False, "message": f"알 수 없는 색 조합입니다: {theme}"}
+    c = load_config()
+    c["ui_theme"] = theme
+    if not save_config(c) or load_config().get("ui_theme") != theme:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색 조합으로 열립니다."}
+    return {"success": True, "theme": theme}

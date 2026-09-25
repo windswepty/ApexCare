@@ -39,7 +39,7 @@ export default function LoadingScreen({ isAppReady, onComplete, isDarkMode }) {
   }, [isAppReady, onComplete]);
 
   return (
-    <div className={`fixed inset-0 z-50 flex flex-col items-center justify-center ${isDarkMode ? 'bg-[#09090b] text-black dark:text-white' : 'bg-white text-black'}`}>
+    <div className={`fixed inset-0 z-50 flex flex-col items-center justify-center ${isDarkMode ? 'bg-zinc-950 text-black dark:text-white' : 'bg-white text-black'}`}>
       <div className="w-64 flex flex-col items-center">
         <img 
           src="/icon.png" 

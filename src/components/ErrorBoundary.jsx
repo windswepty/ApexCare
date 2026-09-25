@@ -40,7 +40,7 @@ export default class ErrorBoundary extends React.Component {
           <div className="flex gap-4 mt-6">
             <button 
               onClick={() => window.location.reload()} 
-              className="px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded font-bold transition-colors shadow-lg"
+              className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black rounded font-bold transition-colors shadow-lg"
             >
               앱 새로고침
             </button>

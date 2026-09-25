@@ -18,6 +18,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
+import { applyTheme, cachedThemeId } from './theme';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -31,6 +32,8 @@ export default function App() {
   const [systemStats, setSystemStats] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // 화면에 적용된 색 조합. main.jsx 가 캐시 값으로 먼저 적용해 둔다.
+  const [themeId, setThemeId] = useState(cachedThemeId);
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -56,6 +59,15 @@ export default function App() {
           if (stats && stats.cpuModel !== 'Error') {
             setSystemStats(stats);
             setIsBackendReady(true);
+            // 저장된 색 조합을 기준으로 다시 맞춘다(캐시와 다를 수 있다).
+            if (typeof window.pywebview.api.getUiTheme === 'function') {
+              try {
+                const saved = await window.pywebview.api.getUiTheme();
+                setThemeId(applyTheme(saved).id);
+              } catch (e) {
+                console.error('Error loading UI theme:', e);
+              }
+            }
             // Sync current active power plan mode from backend
             if (typeof window.pywebview.api.getOptimizationMode === 'function') {
               const res = await window.pywebview.api.getOptimizationMode();
@@ -157,6 +169,8 @@ export default function App() {
             isOpen={isSettingsOpen} 
             onClose={() => setIsSettingsOpen(false)} 
             addToast={addToast} 
+            themeId={themeId}
+            onThemeChange={setThemeId}
           />
 
           {/* Main Desktop Window Body */}
