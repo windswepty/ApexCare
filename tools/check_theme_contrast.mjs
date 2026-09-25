@@ -1,66 +1,68 @@
-// src/theme.js 의 각 테마가 글자를 읽을 수 있는 대비를 갖는지 확인한다.
+// src/theme.js 의 색 조합과 강조색 직접 지정 로직을 확인한다.
 //   node tools/check_theme_contrast.mjs
 //
-// 기준: WCAG 본문 글자 4.5:1. 다만 기본 테마(시안)가 이미 4.5 에 못 미치는 조합은
-// 기본 테마보다 나빠지지 않으면 통과로 본다(지금 화면보다 읽기 어려워지지 않게).
-// 조합은 컴포넌트에서 실제로 많이 쓰는 글자색/배경색 짝이다.
+// 1. 기본 테마(시안)가 Tailwind 원래 색과 정확히 같은지 (테마 기능을 넣어도 기본 화면은 그대로)
+// 2. 모든 색 조합이 글자 대비 기준을 통과하는지 (기준은 theme.js 의 checkContrast 와 같다)
+// 3. 직접 고른 강조색: 읽기 어려운 색을 거부하고, readableAccent() 가 고친 색은 반드시 통과하는지
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 // package.json 이 commonjs 라서 src/theme.js(ESM)를 그대로 import 할 수 없다.
 const src = readFileSync(new URL('../src/theme.js', import.meta.url), 'utf8');
-const { THEMES, DEFAULT_THEME_ID } = await import('data:text/javascript,' + encodeURIComponent(src));
+const T = await import('data:text/javascript,' + encodeURIComponent(src));
+const { THEMES, DEFAULT_THEME_ID, STEPS, checkContrast, accentProblems, readableAccent, accentScale, resemblesWarningColor } = T;
 
-const IDX = { 300: 3, 400: 4, 500: 5, 600: 6, 800: 8, 900: 9, 950: 10 };
-
-function lum(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => {
-    v /= 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-function contrast(a, b) {
-  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
-  return (x + 0.05) / (y + 0.05);
-}
-
-// [이름, 글자색 선택, 배경색 선택]
-const PAIRS = [
-  ['강조 글자(cyan-400) / 페이지 배경', t => t.accent[IDX[400]], t => t.black],
-  ['강조 글자(cyan-400) / 패널(zinc-900)', t => t.accent[IDX[400]], t => t.zinc[IDX[900]]],
-  ['강조 글자(cyan-400) / 카드(slate-800)', t => t.accent[IDX[400]], t => t.slate[IDX[800]]],
-  ['강조 글자(cyan-500) / 패널(zinc-900)', t => t.accent[IDX[500]], t => t.zinc[IDX[900]]],
-  ['검은 글자 / 강조 버튼(cyan-500)', t => t.black, t => t.accent[IDX[500]]],
-  ['검은 글자 / 강조 버튼 hover(cyan-400)', t => t.black, t => t.accent[IDX[400]]],
-  ['보조 글자(gray-400) / 패널(zinc-900)', t => t.gray[IDX[400]], t => t.zinc[IDX[900]]],
-  ['보조 글자(slate-400) / 카드(slate-900)', t => t.slate[IDX[400]], t => t.slate[IDX[900]]],
-  ['보조 글자(slate-400) / 카드(slate-800)', t => t.slate[IDX[400]], t => t.slate[IDX[800]]],
-  ['흐린 글자(slate-500) / 페이지 배경', t => t.slate[IDX[500]], t => t.black],
-  ['본문(slate-200) / 카드(slate-900)', t => t.slate[2], t => t.slate[IDX[900]]],
-];
-
-const base = THEMES.find(t => t.id === DEFAULT_THEME_ID);
 let failed = 0;
+const report = (ok, msg) => { if (!ok) failed++; console.log(`${ok ? 'OK  ' : 'FAIL'} ${msg}`); };
 
-// 기본 테마는 Tailwind 원래 색과 정확히 같아야 한다(테마 기능을 넣어도 기본 화면은 그대로).
+// 1
 const tw = createRequire(import.meta.url)('tailwindcss/colors');
-const STEPS = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+const base = THEMES.find(t => t.id === DEFAULT_THEME_ID);
 for (const [family, twName] of [['accent', 'cyan'], ['slate', 'slate'], ['gray', 'gray'], ['zinc', 'zinc']]) {
   const diff = STEPS.filter((s, i) => base[family][i].toLowerCase() !== tw[twName][s]);
-  if (diff.length) failed++;
-  console.log(`${diff.length ? 'FAIL' : 'OK  '} 기본 테마 ${family} = Tailwind ${twName}${diff.length ? ` (다름: ${diff.join(', ')})` : ''}`);
+  report(!diff.length, `기본 테마 ${family} = Tailwind ${twName}${diff.length ? ` (다름: ${diff.join(', ')})` : ''}`);
 }
+
+// 2
 for (const t of THEMES) {
   console.log(`\n[${t.id}] ${t.name}`);
-  for (const [name, fg, bg] of PAIRS) {
-    const c = contrast(fg(t), bg(t));
-    const floor = Math.min(4.5, contrast(fg(base), bg(base)));
-    const ok = c + 1e-9 >= floor;
-    if (!ok) failed++;
-    console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${c.toFixed(2).padStart(5)}  (기준 ${floor.toFixed(2)})  ${name}`);
+  for (const r of checkContrast(t)) {
+    report(r.ok, `${r.ratio.toFixed(2).padStart(5)}  (기준 ${r.floor.toFixed(2)})  ${r.name}`);
   }
 }
-console.log(failed ? `\n실패 ${failed}건` : '\n모든 조합 통과');
+
+// 3
+console.log('\n[강조색 직접 지정]');
+const scale = accentScale('#06b6d4');
+report(scale.length === 11 && scale[5] === '#06b6d4' && STEPS.every((_, i) => /^#[0-9a-f]{6}$/.test(scale[i])),
+  'accentScale: 11단계, 고른 색이 500');
+// 어두운 파랑은 검은 글자를 올릴 수 없어 거부돼야 한다
+report(accentProblems('cyan', '#1d4ed8').length > 0, '어두운 파랑(#1d4ed8)은 거부');
+report(accentProblems('cyan', '#000000').length > 0, '검정(#000000)은 거부');
+report(accentProblems('cyan', '#22d3ee').length === 0, '밝은 시안(#22d3ee)은 허용');
+// 여러 색을 모든 테마에서 고쳐 보고, 고친 색이 통과하는지 확인
+const samples = [];
+for (let h = 0; h < 360; h += 15) for (const l of [0.2, 0.45, 0.7]) samples.push(hsl(h, 0.8, l));
+samples.push('#000000', '#ffffff', '#808080', '#1d4ed8', '#7f1d1d');
+let fixedOk = 0, total = 0, untouched = 0;
+for (const t of THEMES) for (const hex of samples) {
+  total++;
+  const fixed = readableAccent(t.id, hex);
+  if (accentProblems(t.id, fixed).length === 0) fixedOk++;
+  if (accentProblems(t.id, hex).length === 0 && fixed !== hex.toLowerCase()) untouched++;
+}
+report(fixedOk === total, `readableAccent 결과가 모두 통과 (${fixedOk}/${total})`);
+report(untouched === 0, `이미 읽을 수 있는 색은 바꾸지 않음 (바뀐 수 ${untouched})`);
+// 고친 색은 원래 색상(hue)을 유지해야 한다. 어두운 빨강은 여전히 빨강 계열이어야 한다
+report(resemblesWarningColor(readableAccent('cyan', '#7f1d1d')), `어두운 빨강을 고쳐도 빨강 계열 유지 (${readableAccent('cyan', '#7f1d1d')})`);
+report(resemblesWarningColor('#ef4444') && resemblesWarningColor('#f59e0b') && !resemblesWarningColor('#3b82f6') && !resemblesWarningColor('#a3a3a3'),
+  '빨강·주황 계열 경고 판정');
+
+console.log(failed ? `\n실패 ${failed}건` : '\n모든 검사 통과');
 process.exit(failed ? 1 : 0);
+
+function hsl(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+}
