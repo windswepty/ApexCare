@@ -274,7 +274,7 @@ function JunkSection({ addToast, onDone }) {
             {result.skipped_mb > 0 && (
               <p className="text-xs text-gray-500 mt-1">
                 {fmtMB(result.skipped_mb)} 는 다른 프로그램이 사용 중이라 건너뛰었습니다.
-                바탕화면의 APEX_Skipped_Files.log 에서 목록을 볼 수 있습니다.
+                {result.skipped_log && <> 목록: <span className="font-mono break-all">{result.skipped_log}</span></>}
               </p>
             )}
           </div>

@@ -19,10 +19,10 @@ from backend import system_state
 log = logging.getLogger('Optimizer')
 
 # ─────────────────────────────────────────────
-# Zero-Risk Shield: Absolute Protection Constants
-# These constants are shared by ALL scan/clean functions.
-# Any path containing these substrings (case-insensitive) is UNTOUCHABLE.
+# 보호 상수
 # ─────────────────────────────────────────────
+# PROTECTED_ROOTS 는 file_finder 가 쓰는 부분 문자열 목록이다(휴지통 삭제 경로).
+# 정크 정리(영구 삭제)는 이것을 쓰지 않는다. 아래 _junk_candidate 를 본다.
 
 PROTECTED_ROOTS = [
     os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
@@ -55,14 +55,74 @@ SAFE_JUNK_EXTS = frozenset({
 })
 
 
-def _is_protected_path(file_path):
-    """Zero-Risk Shield: Returns True if the path is inside any protected zone.
-    
-    This is a module-level guard function used by BOTH scan and clean logic.
-    Case-insensitive substring matching ensures no bypass through casing tricks.
+_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+
+
+def _is_link_like(path):
+    """심볼릭 링크·디렉터리 정션·기타 재분석 지점이면 True.
+
+    os.walk(followlinks=False) 는 심볼릭 링크만 건너뛰고 정션은 따라 들어간다
+    (DirEntry.is_symlink() 가 정션에 False). %TEMP% 안에 문서 폴더를 가리키는 정션이
+    있으면 그 안의 파일이 '정크' 로 영구 삭제됐다. 판정하지 못하면 링크로 본다(안전 쪽).
     """
-    path_lower = file_path.lower()
-    return any(pr in path_lower for pr in PROTECTED_ROOTS)
+    try:
+        if os.path.islink(path):
+            return True
+        isjunction = getattr(os.path, 'isjunction', None)       # Python 3.12+
+        if isjunction and isjunction(path):
+            return True
+        return bool(getattr(os.lstat(path), 'st_file_attributes', 0) & _REPARSE_POINT)
+    except OSError:
+        return True
+
+
+def _walk_junk_tree(root):
+    """root 아래를 위에서부터 돈다. 링크·정션인 폴더는 들어가지 않는다.
+
+    (dirpath, filenames) 를 내고, 다 돈 뒤 방문한 하위 폴더 목록(깊은 것부터)을 돌려준다.
+    root 자체가 링크·정션이면 아무것도 돌지 않는다 — 어디로 이어지는지 모른다.
+    """
+    visited = []
+    if not os.path.isdir(root) or _is_link_like(root):
+        return visited, iter(())
+
+    def gen():
+        for dirpath, dirs, files in os.walk(root, topdown=True, followlinks=False):
+            # 여기서 dirs 를 줄여야 os.walk 가 들어가지 않는다(topdown=True 일 때만 된다)
+            dirs[:] = [d for d in dirs if not _is_link_like(os.path.join(dirpath, d))]
+            if dirpath != root:
+                visited.append(dirpath)
+            yield dirpath, files
+    return visited, gen()
+
+
+def _junk_candidate(file_path, root_real):
+    """정크로 영구 삭제해도 되는 파일인가. 스캔과 정리가 같은 기준을 쓴다.
+
+    - 링크·재분석 지점 파일은 건너뛴다
+    - 실경로(safe_delete.norm)가 정리 대상 루트 안에 있어야 한다. 정션을 놓쳐도
+      실경로가 루트 밖이면 여기서 걸린다
+    - safe_delete.is_protected 인 경로는 건너뛴다
+    - 확장자: 위험 확장자 제외, 안전 확장자이거나 확장자 없음(Chrome 캐시)만
+    """
+    from backend import safe_delete
+    name = os.path.basename(file_path)
+    ext = os.path.splitext(name)[1].lower()
+    if ext in DANGER_EXTS or (ext not in SAFE_JUNK_EXTS and ext != ''):
+        return False
+    if _is_link_like(file_path):
+        return False
+    real = safe_delete.norm(file_path)
+    if not safe_delete.is_inside(real, root_real) or real == safe_delete.norm(root_real):
+        return False
+    if safe_delete.is_protected(real):
+        return False
+    return True
+
+
+def _skipped_log_path():
+    from backend import config_manager
+    return os.path.join(config_manager.APPDATA_DIR, 'skipped_files.log')
 
 # ─────────────────────────────────────────────
 # Deep Optimization Engine (Background Thread)
@@ -192,43 +252,34 @@ def cancel_deep_optimization():
 # ─────────────────────────────────────────────
 
 def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
-    """Walk directory and sum file sizes. Sequential, safe.
-    
-    Zero-Risk Shield: Protected paths are filtered out during scan
-    so they never even appear in size calculations.
+    """정리가 실제로 지울 파일의 크기만 더한다. 링크·정션은 따라가지 않는다.
+
+    예전에는 폴더 안 모든 파일을 더해서, 정리 뒤 '건너뛴 용량' 이 부풀려졌고
+    정션을 따라 Temp 밖의 폴더까지 셌다.
     """
+    from backend import safe_delete
     total = 0
     file_count = 0
     start_time = time.time()
-
-    if not os.path.exists(dir_path):
-        return 0
+    root_real = safe_delete.norm(dir_path)
+    _, tree = _walk_junk_tree(dir_path)
     try:
-        for root, dirs, files in os.walk(dir_path):
-            # Zero-Risk Shield: Block traversal into protected directories
-            root_lower = root.lower()
-            if any(pr in root_lower for pr in PROTECTED_ROOTS):
-                dirs.clear()  # Stop os.walk from descending further
-                continue
-            
+        for dirpath, files in tree:
             for f in files:
-                fp = os.path.join(root, f)
+                fp = os.path.join(dirpath, f)
                 try:
-                    if not os.path.islink(fp):
-                        total += os.path.getsize(fp)
-                        file_count += 1
-                        
-                        if state_obj and file_count % 50 == 0:
-                            elapsed = time.time() - start_time
-                            rate = file_count / elapsed if elapsed > 0 else 1
-                            prog = min(99, int((file_count / max_files) * 100))
-                            eta = int((max_files - file_count) / rate) if rate > 0 else 0
-                            state_obj["progress"] = prog
-                            state_obj["eta_seconds"] = max(0, eta)
-                            
-                except (OSError, PermissionError):
+                    if not _junk_candidate(fp, root_real):
+                        continue
+                    total += os.path.getsize(fp)
+                    file_count += 1
+                    if state_obj and file_count % 50 == 0:
+                        elapsed = time.time() - start_time
+                        rate = file_count / elapsed if elapsed > 0 else 1
+                        state_obj["progress"] = min(99, int((file_count / max_files) * 100))
+                        state_obj["eta_seconds"] = max(0, int((max_files - file_count) / rate) if rate > 0 else 0)
+                except OSError:
                     pass
-    except (OSError, PermissionError):
+    except OSError:
         pass
     return round(total / (1024 * 1024), 2)
 
@@ -355,68 +406,46 @@ def clean_junk_background(category_ids, cancel_event):
         skipped_files_log = []
 
         def _clean_dir(path, max_files=5000):
-            """Delete junk files from a directory with Zero-Risk Shield protection.
-            
-            Uses module-level PROTECTED_ROOTS, DANGER_EXTS, and SAFE_JUNK_EXTS
-            constants to ensure consistent protection across all code paths.
+            """정크 파일을 영구 삭제한다. 링크·정션은 따라가지도, 지우지도 않는다.
+
+            파일마다 실경로가 정리 루트 안인지 삭제 직전에 확인한다(_junk_candidate).
+            빈 폴더는 깊은 것부터 os.rmdir 로만 지운다(비어 있지 않으면 실패한다).
             """
+            from backend import safe_delete
             nonlocal total_attempt_count, total_success_count, total_freed_bytes
             local_freed = 0
             file_count = 0
             start_time = time.time()
-            if not os.path.exists(path):
-                return 0
-            
-            for root, dirs, files in os.walk(path, topdown=False):
+            root_real = safe_delete.norm(path)
+            visited, tree = _walk_junk_tree(path)
+
+            for dirpath, files in tree:
                 if cancel_event and cancel_event.is_set():
                     break
-                    
-                # Zero-Risk Shield: Block protected directories
-                root_lower = root.lower()
-                if any(pr in root_lower for pr in PROTECTED_ROOTS):
-                    continue
-                    
                 for name in files:
                     if cancel_event and cancel_event.is_set():
                         break
-                    file_path = os.path.join(root, name)
-                    
-                    # Zero-Risk Shield: Cross-validate full path
-                    if _is_protected_path(file_path):
+                    file_path = os.path.join(dirpath, name)
+                    if not _junk_candidate(file_path, root_real):
                         continue
-                    
-                    # Strict extension check using module-level constants
-                    ext = os.path.splitext(name)[1].lower()
-                    if ext in DANGER_EXTS:
-                        continue
-                    
-                    # Chrome cache files usually have no extension, prefetch has .pf.
-                    # We will allow safe extensions and files with no extension.
-                    if ext not in SAFE_JUNK_EXTS and ext != '':
-                        continue
-                        
+
                     total_attempt_count += 1
                     try:
                         sz = os.path.getsize(file_path)
                         try:
                             os.remove(file_path)
-                        except (OSError, PermissionError):
+                        except OSError:
                             try:
                                 os.chmod(file_path, stat.S_IWRITE)
                                 os.remove(file_path)
                             except Exception as e:
-                                print(f"[LOCKED/SKIPPED] {file_path} - {e}")
-                                sys.stdout.flush()
+                                log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
                                 skipped_files_log.append({"path": file_path, "size_bytes": sz})
                                 continue
-                        
                         local_freed += sz
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
-                        print(f"[DELETED] {file_path} ({sz} bytes)")
-                        sys.stdout.flush()
-                        
                         if file_count % 50 == 0:
                             elapsed = time.time() - start_time
                             rate = file_count / elapsed if elapsed > 0 else 1
@@ -424,28 +453,25 @@ def clean_junk_background(category_ids, cancel_event):
                             eta = int((max_files - file_count) / rate) if rate > 0 else 0
                             _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4))
                             _junk_clean_state["eta_seconds"] = max(0, eta)
-                            print(f"[JunkPurger] 삭제 시도 파일 수: {total_attempt_count}, 성공: {total_success_count}, 누적 확보 용량: {total_freed_bytes} bytes")
-                            sys.stdout.flush()
                     except Exception as e:
-                        print(f"[LOCKED/SKIPPED] {file_path} (Failed to get size or other error) - {e}")
-                        sys.stdout.flush()
+                        log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
                         skipped_files_log.append({"path": file_path, "size_bytes": 0})
+
+            # 빈 폴더 정리: 깊은 것부터. 지우기 직전에 다시 확인한다.
+            for dir_path in reversed(visited):
+                if cancel_event and cancel_event.is_set():
+                    break
+                try:
+                    if _is_link_like(dir_path):
                         continue
-                        
-                for name in dirs:
-                    if cancel_event and cancel_event.is_set():
-                        break
-                    dir_path = os.path.join(root, name)
-                    
-                    # Zero-Risk Shield: Protect directories too
-                    if _is_protected_path(dir_path):
+                    real = safe_delete.norm(dir_path)
+                    if (not safe_delete.is_inside(real, root_real) or real == root_real
+                            or safe_delete.is_protected(real)):
                         continue
-                        
-                    try:
-                        os.rmdir(dir_path)
-                    except Exception:
-                        continue
-            
+                    os.rmdir(dir_path)
+                except OSError:
+                    continue
+
             return local_freed
 
         target_dirs = []
@@ -514,10 +540,14 @@ def clean_junk_background(category_ids, cancel_event):
         _junk_clean_state["freed_mb"] = freed_total_mb
         _junk_clean_state["skipped_mb"] = skipped_mb
         _junk_clean_state["details"] = details
+        _junk_clean_state["skipped_log"] = None
         
         if skipped_files_log:
             try:
-                log_path = os.path.join(os.path.expanduser("~"), "Desktop", "APEX_Skipped_Files.log")
+                # 바탕화면이 아니라 앱 데이터 폴더에 쓴다. 묻지 않고 사용자 바탕화면에
+                # 파일을 만들면 안 된다.
+                log_path = _skipped_log_path()
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
                 with open(log_path, "a", encoding="utf-8") as f:
                     from datetime import datetime
                     f.write(f"\n=== APEX CARE: 스킵 파일 로그 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ===\n")
@@ -525,6 +555,7 @@ def clean_junk_background(category_ids, cancel_event):
                     for item in skipped_files_log:
                         mb = round(item["size_bytes"] / (1024 * 1024), 2)
                         f.write(f"[{mb} MB] {item['path']}\n")
+                _junk_clean_state["skipped_log"] = log_path
             except Exception as e:
                 log.debug(f"Failed to write skipped files log: {e}")
         
