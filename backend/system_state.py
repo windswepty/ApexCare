@@ -24,6 +24,7 @@ import ctypes
 import json
 import logging
 import os
+import subprocess
 import uuid
 import winreg
 
@@ -349,6 +350,131 @@ def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=
 
 
 # ─────────────────────────────────────────────
+# 서비스 시작 유형
+# ─────────────────────────────────────────────
+# 레지스트리 Start 값을 직접 쓰지 않고 sc.exe 를 쓴다. SCM 이 설정을 캐시하고 있어서
+# 레지스트리만 바꾸면 재부팅 전까지 SCM 과 어긋난다. 확인은 레지스트리를 다시 읽어서 한다.
+
+_SERVICES_KEY = r'SYSTEM\CurrentControlSet\Services'
+START_TYPES = ('auto', 'delayed-auto', 'demand', 'disabled')
+_START_VALUE = {'auto': 2, 'delayed-auto': 2, 'demand': 3, 'disabled': 4}
+CREATE_NO_WINDOW = 0x08000000
+
+
+def _valid_service_name(service):
+    # 명령줄에 들어가는 값이다. 문자·숫자·_ . - 만 허용한다.
+    return (isinstance(service, str) and 0 < len(service) <= 256
+            and all(c.isascii() and (c.isalnum() or c in '_.-') for c in service))
+
+
+def read_service_start(service):
+    """(ok, Start, DelayedAutostart) 를 돌려준다. 서비스가 없거나 읽지 못하면 ok=False."""
+    if not _valid_service_name(service):
+        return False, None, None
+    path = f'{_SERVICES_KEY}\\{service}'
+    ok, start, _ = read_registry('HKLM', path, 'Start')
+    if not ok or not isinstance(start, int):
+        return False, None, None
+    has_delayed, delayed, _ = read_registry('HKLM', path, 'DelayedAutostart')
+    return True, start, (delayed if has_delayed else None)
+
+
+def service_start_type(service):
+    """'auto'·'delayed-auto'·'demand'·'disabled'·'boot'·'system' 또는 None(읽지 못함)."""
+    ok, start, delayed = read_service_start(service)
+    if not ok:
+        return None
+    if start == 2:
+        return 'delayed-auto' if delayed else 'auto'
+    return {0: 'boot', 1: 'system', 3: 'demand', 4: 'disabled'}.get(start)
+
+
+def _sc_config_start(service, start_type):
+    """sc.exe config <서비스> start= <유형>. shell=False, 절대 경로, 인자는 검증한 값만."""
+    if not _valid_service_name(service) or start_type not in _START_VALUE:
+        return {'rc': None, 'error': '허용되지 않은 인자'}
+    sysroot = os.environ.get('SystemRoot') or os.environ.get('WINDIR') or r'C:\Windows'
+    sc = os.path.join(sysroot, 'System32', 'sc.exe')
+    try:
+        r = subprocess.run([sc, 'config', service, 'start=', start_type], shell=False,
+                           capture_output=True, text=True, errors='replace',
+                           creationflags=CREATE_NO_WINDOW, timeout=30)
+    except Exception as e:
+        return {'rc': None, 'error': str(e) or type(e).__name__}
+    err = '' if r.returncode == 0 else (r.stderr or r.stdout or '').strip()[-200:]
+    return {'rc': r.returncode, 'error': err}
+
+
+def _write_service_start(service, start_type):
+    """쓰고 다시 읽어 확인한다. (ok, reason)"""
+    if service_start_type(service) == start_type:
+        return True, ''
+    r = _sc_config_start(service, start_type)
+    now = service_start_type(service)
+    if now != start_type:
+        detail = r.get('error') or ''
+        return False, (f'{service} 시작 유형을 {start_type} 로 바꾸지 못했습니다 '
+                       f'(sc 코드 {r.get("rc")}, 현재 {now}) {detail}').strip()
+    return True, ''
+
+
+def set_service_start(service, start_type, group, why=''):
+    """서비스 시작 유형을 바꾼다. 원래 Start·DelayedAutostart 를 먼저 기록한다.
+
+    원래 값을 읽지 못하거나 저널에 남기지 못하면 바꾸지 않는다.
+    반환: {'ok', 'changed', 'before', 'reason'}
+    """
+    if not _valid_service_name(service):
+        return {'ok': False, 'changed': False, 'reason': '서비스 이름이 올바르지 않습니다'}
+    if start_type not in START_TYPES:
+        return {'ok': False, 'changed': False, 'reason': f'알 수 없는 시작 유형입니다: {start_type}'}
+
+    ok, start, delayed = read_service_start(service)
+    if not ok:
+        return {'ok': False, 'changed': False,
+                'reason': '원래 시작 유형을 읽지 못해 바꾸지 않았습니다(서비스가 없을 수 있음)'}
+    before = service_start_type(service)
+    if before == start_type:
+        return {'ok': True, 'changed': False, 'before': before, 'reason': ''}
+    if before not in START_TYPES:
+        return {'ok': False, 'changed': False, 'before': before,
+                'reason': f'시작 유형이 일반적이지 않아({start}) 건드리지 않았습니다'}
+
+    key = f'svc:{service.lower()}'
+    _record(key, {
+        'kind': 'service', 'group': group, 'service': service,
+        'start': start, 'delayed': delayed, 'why': why,
+    })
+    # _record 는 저장 실패를 알리지 않는다. 기록이 실제로 남았는지 확인한 뒤에만 바꾼다.
+    if key not in _load()['entries']:
+        return {'ok': False, 'changed': False, 'before': before,
+                'reason': '되돌릴 정보를 저장하지 못해 바꾸지 않았습니다'}
+
+    w_ok, reason = _write_service_start(service, start_type)
+    return {'ok': w_ok, 'changed': w_ok, 'before': before, 'reason': reason}
+
+
+def _restore_service(e):
+    """기록한 원래 Start·DelayedAutostart 로 되돌린다. (ok, reason)"""
+    svc = e.get('service')
+    start = e.get('start')
+    if not _valid_service_name(svc) or not isinstance(start, int) or isinstance(start, bool):
+        return False, '기록 형식이 올바르지 않아 건드리지 않았습니다'
+    if start == 2:
+        target = 'delayed-auto' if e.get('delayed') else 'auto'
+    else:
+        target = {3: 'demand', 4: 'disabled'}.get(start)
+    if not target:
+        return False, f'원래 시작 유형({start})은 이 앱이 되돌리지 않습니다'
+    return _write_service_start(svc, target)
+
+
+def restore_service_start(service, start, delayed):
+    """저널 밖에 남은 기록(구버전 settings.json 백업)으로 되돌릴 때 쓴다. (ok, reason)"""
+    return _restore_service({'service': service, 'start': start, 'delayed': delayed})
+
+
+# ─────────────────────────────────────────────
 # 복구
 # ─────────────────────────────────────────────
 
@@ -414,10 +540,9 @@ def _restore(predicate):
                 done.append(key)
 
             elif kind == 'service':
-                from backend import service_ctl
-                r = service_ctl.set_start_type(e['service'], e['value'])
-                if not r.get('ok'):
-                    failed.append({'key': key, 'reason': r.get('reason', '서비스 복구 실패')})
+                ok, reason = _restore_service(e)
+                if not ok:
+                    failed.append({'key': key, 'reason': reason or '서비스 복구 실패'})
                     continue
                 done.append(key)
             else:
