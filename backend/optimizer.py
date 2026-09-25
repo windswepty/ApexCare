@@ -123,7 +123,7 @@ def _run_deep_optimization():
         ram_res = purge_ram()
         steps.append({"name": "대기 메모리 해제", "ok": bool(ram_res.get("success")),
                       "detail": "" if ram_res.get("success")
-                                else ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
+                                else ram_res.get("message") or ram_res.get("error", "관리자 권한이 필요할 수 있습니다")})
         _optimization_state["progress_pct"] = 60
         if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
@@ -616,44 +616,49 @@ def _enable_privilege(priv_name):
         return False
 
 def purge_ram():
-    """Smart Memory Optimizer: Safe standby cache purge.
-    
-    This function NO LONGER empties the working sets of active processes to avoid
-    crashing games and applications. It ONLY purges the Windows standby list
-    (global standby cache) using built-in system calls, which is 100% safe.
-    """
-    try:
-        ntdll = ctypes.WinDLL('ntdll', use_last_error=True)
-        
-        # Capture memory before purge
-        mem_before = psutil.virtual_memory().available
-        
-        # Safely purge standby list
-        try:
-            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-            if not is_admin:
-                return {"success": False, "error": "UAC_REQUIRED"}
-        except Exception:
-            return {"success": False, "error": "UAC_REQUIRED"}
+    """대기 목록(Standby list)을 비운다. 실행 중인 프로세스의 작업 집합은 건드리지 않는다.
 
-        _enable_privilege("SeProfileSingleProcessPrivilege")
-        _enable_privilege("SeDebugPrivilege")
+    예전 구현의 문제:
+      1. NtSetSystemInformation 이 실패해도 success=True 를 돌려줬다(standbyPurged 만 False).
+      2. '확보량' 을 available 전후 차이로 쟀는데, 대기 메모리는 원래 available 에 들어 있어서
+         비워도 available 은 거의 변하지 않는다. 늘 0 에 가까운 값이었다.
+      3. 필요 없는 SeDebugPrivilege 까지 켰다.
+
+    이제 호출이 STATUS_SUCCESS 일 때만 성공이고, 전후 대기·여유 메모리를
+    성능 카운터로 측정해 돌려준다(측정하지 못하면 None).
+    """
+    from backend import system_monitor
+
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        is_admin = False
+    if not is_admin:
+        return {"success": False, "error": "UAC_REQUIRED",
+                "message": "대기 메모리를 비우려면 관리자 권한이 필요합니다."}
+
+    try:
+        before = system_monitor.memory_lists()
+        priv_ok = _enable_privilege("SeProfileSingleProcessPrivilege")
+        ntdll = ctypes.WinDLL('ntdll', use_last_error=True)
         command = ctypes.c_int(4)  # MemoryPurgeStandbyList
-        status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command))
-        standby_purged = (status == 0)
-            
-        # Capture memory after purge and calculate freed MB
-        mem_after = psutil.virtual_memory().available
-        freed_mb = max(0, (mem_after - mem_before) / (1024 * 1024))
-        
+        # 80 = SystemMemoryListInformation
+        status = ntdll.NtSetSystemInformation(80, ctypes.byref(command), ctypes.sizeof(command)) & 0xFFFFFFFF
+        if status != 0:
+            hint = "" if priv_ok else " 권한(SeProfileSingleProcessPrivilege)을 켜지 못했습니다."
+            return {"success": False, "error": f"NTSTATUS 0x{status:08X}",
+                    "message": f"대기 메모리를 비우지 못했습니다 (NTSTATUS 0x{status:08X}).{hint}"}
+        after = system_monitor.memory_lists()
         return {
-            "success": True, 
-            "purgedProcesses": 0,
-            "standbyPurged": standby_purged,
-            "freed_mb": freed_mb
+            "success": True,
+            "standbyBeforeBytes": before['standby'] if before else None,
+            "standbyAfterBytes": after['standby'] if after else None,
+            "freeBeforeBytes": before['free'] if before else None,
+            "freeAfterBytes": after['free'] if after else None,
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        detail = str(e) or type(e).__name__
+        return {"success": False, "error": detail, "message": f"대기 메모리를 비우지 못했습니다: {detail}"}
 
 
 # ─────────────────────────────────────────────

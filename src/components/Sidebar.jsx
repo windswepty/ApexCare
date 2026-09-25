@@ -104,23 +104,8 @@ export default function Sidebar({ activeTab, setActiveTab }) {
         </nav>
       </div>
 
-        {/* System Status Summary Footer */}
-        <div className="p-3.5 mt-6 rounded-xl bg-white dark:bg-black border border-black/10 dark:border-white/10 shadow-sm transition-colors duration-300">
-          <div className="flex items-center justify-between text-xs mb-2">
-            <span className="text-gray-600 dark:text-gray-400">실시간 엔진 상태</span>
-            <span className="flex items-center gap-1.5 text-black dark:text-white font-semibold">
-              <span className="w-2 h-2 rounded-full bg-black dark:bg-white animate-pulse"></span>
-              ACTIVE
-            </span>
-          </div>
-          <div className="w-full bg-gray-100 dark:bg-zinc-900 h-1.5 rounded-full overflow-hidden">
-            <div className="bg-black dark:bg-white h-full w-[88%] rounded-full"></div>
-          </div>
-          <div className="flex justify-between text-[10px] font-mono text-gray-500 dark:text-gray-400 mt-2">
-            <span>AI 최적화 엔진 ON</span>
-            <span>99.4% 정상</span>
-          </div>
-        </div>
+        {/* 예전에는 여기 '실시간 엔진 상태 ACTIVE · AI 최적화 엔진 ON · 99.4% 정상' 과
+            88% 막대가 고정값으로 박혀 있었다. 뒷받침하는 기능이 없어 뺐다. */}
       </div>
     </aside>
   );
