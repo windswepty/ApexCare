@@ -267,12 +267,33 @@ def available_plans():
     return out
 
 
+_PLAN_KEY = 'power:active_plan'
+
+
 def set_active_plan(guid_str, group, why=''):
-    """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다."""
+    """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다.
+
+    활성 플랜은 하나라서 원래 값 기록도 하나다. 그 기록은 마지막으로 플랜을 바꾼 group 이
+    가진다. 다른 group 이 남긴 기록이 있으면 원래 값은 그대로 두고 소유만 넘겨받는다.
+    넘겨받지 않으면 이 group 을 되돌려도 플랜이 돌아오지 않는다(예: 구버전 맞춤 튜닝이
+    'hw_tuning' 으로 남긴 기록 때문에 성능 모드 전환이 플랜을 되돌리지 못했다).
+    원래 값 기록을 남기지 못하면 바꾸지 않는다.
+    """
     before = active_plan_guid()
-    _record('power:active_plan', {
+    _record(_PLAN_KEY, {
         'kind': 'power_plan', 'group': group, 'value': before, 'why': why,
     })
+    data = _load()
+    entry = data['entries'].get(_PLAN_KEY)
+    if entry is not None and entry.get('group') != group:
+        entry['group'] = group
+        entry['why'] = why or entry.get('why', '')
+        _save(data)
+        entry = _load()['entries'].get(_PLAN_KEY)
+    if entry is None or entry.get('group') != group:
+        return {'ok': False, 'verified': False,
+                'reason': '원래 전원 플랜 기록을 저장하지 못해 바꾸지 않았습니다'}
+
     if guid_str not in available_plans():
         return {'ok': False, 'verified': False,
                 'reason': f'이 PC 에 없는 전원 플랜입니다 ({KNOWN_PLANS.get(guid_str, guid_str)})'}

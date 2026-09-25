@@ -54,7 +54,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
     if (tier === 'LowEnd') {
       return {
         title: '저사양 PC용 설정',
-        desc: "SysMain 서비스를 끄고 전원 관리 프로필을 '균형 조정'으로 둡니다. Windows Search 는 건드리지 않아 시작 메뉴·탐색기 검색은 그대로입니다.",
+        desc: "SysMain 서비스를 끄고 대기 메모리를 한 번 비웁니다. Windows Search 는 건드리지 않아 시작 메뉴·탐색기 검색은 그대로입니다. 전원 플랜은 바꾸지 않습니다.",
         icon: Sliders,
         color: 'text-amber-400',
         bg: 'bg-amber-500/20',
@@ -63,7 +63,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
     }
     return {
       title: '일반·고사양 PC용 설정',
-      desc: "SysMain·Windows Search 서비스를 자동 시작으로 두고 전원 관리 프로필을 '고성능'으로 바꿉니다. 전력 소모와 발열이 늘 수 있습니다.",
+      desc: "SysMain·Windows Search 서비스를 자동 시작으로 둡니다. 전원 플랜은 바꾸지 않습니다. 고성능 플랜이 필요하면 성능 모드에서 '게이밍'을 고르세요.",
       icon: Gauge,
       color: 'text-cyan-400',
       bg: 'bg-cyan-500/20',
@@ -161,7 +161,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             <Zap className="w-16 h-16 text-yellow-400 animate-pulse mb-6" />
             <h2 className="text-2xl font-black mb-2 tracking-tight">설정 적용 중...</h2>
             <p className={`text-sm ${muted}`}>
-              서비스 시작 유형과 전원 관리 프로필을 바꾸고 있습니다.
+              서비스 시작 유형을 바꾸고 있습니다.
             </p>
           </div>
         ) : step === 'done' ? (
@@ -185,9 +185,9 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   </div>
                 </div>
               ))}
-              {/* 서비스 시작 유형과 전원 플랜 모두 system_state 저널의 hw_tuning 그룹에 기록된다(6a4f007) */}
+              {/* 서비스 시작 유형은 system_state 저널의 hw_tuning 그룹에 기록된다. 전원 플랜은 맞춤 튜닝이 바꾸지 않는다 */}
               <p className="text-xs pt-2 text-gray-500">
-                바꾼 설정은 '변경 내역 · 되돌리기' 탭의 '하드웨어 맞춤 튜닝' 에서 되돌릴 수 있습니다.
+                바꾼 설정은 '변경 내역 · 되돌리기' 탭의 '하드웨어 맞춤 튜닝' 에서 되돌릴 수 있습니다. 전원 플랜은 성능 모드에서 고릅니다.
               </p>
             </div>
             <div className={`p-6 border-t flex justify-end ${band}`}>

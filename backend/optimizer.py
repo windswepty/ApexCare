@@ -853,9 +853,12 @@ def _service_step(svc, target, why):
 
 
 def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
-    """사양에 맞춰 서비스 시작 유형과 전원 플랜을 조정한다.
+    """사양에 맞춰 서비스 시작 유형을 조정한다.
 
     저사양은 SysMain 만 끈다(WSearch 는 건드리지 않음). 고사양은 SysMain·WSearch 를 자동 시작으로 둔다.
+    전원 플랜은 바꾸지 않는다. 플랜은 성능 모드(perf_modes.apply_mode)만 바꾼다. 예전에는 여기서도
+    플랜을 바꿨는데, 저널의 플랜 기록이 하나뿐이라 성능 모드가 먼저 기록했으면 맞춤 튜닝을 되돌려도
+    플랜이 돌아오지 않았고, 마법사가 곧이어 표준 모드를 적용해 바꾼 플랜을 바로 덮어썼다.
 
     consent=False 는 '미리보기' 모드다. 실제로 아무것도 바꾸지 않고
     무엇이 바뀌는지 항목만 돌려준다. 프론트에서 사용자가
@@ -878,13 +881,11 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             changes = [
                 "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 변경합니다 — 다음 부팅부터 반영되고 재부팅 후에도 유지됩니다.",
                 "대기 메모리(Standby)를 한 번 비웁니다 — 일시적이며 실행 중인 프로그램은 건드리지 않습니다.",
-                "전원 관리 프로필을 '균형 조정'으로 변경합니다.",
             ]
         else:
             changes = [
                 "SysMain(수퍼패치) 서비스를 '자동 시작'으로 변경합니다 — 다음 부팅부터 반영됩니다.",
                 "Windows Search(WSearch) 서비스를 '자동 시작'으로 변경합니다 — 이미 '자동(지연된 시작)'이면 그대로 둡니다.",
-                "전원 관리 프로필을 '고성능'으로 변경합니다.",
             ]
 
         if not consent:
@@ -894,7 +895,7 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
                 "applied": False,
                 "tier": tier,
                 "changes": changes,
-                "message": "아래 항목이 바뀝니다. 복구 센터에서 되돌릴 수 있습니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
+                "message": "아래 항목이 바뀝니다. 복구 센터에서 되돌릴 수 있습니다. 전원 플랜은 바꾸지 않습니다(성능 모드에서 고릅니다). Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
             }
 
         steps = []
@@ -910,8 +911,6 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             else:
                 ram_detail = ram.get("message") or ram.get("error") or "관리자 권한이 필요할 수 있습니다"
             steps.append({"name": "대기 메모리 비우기", "ok": bool(ram.get("success")), "detail": ram_detail})
-
-            plan_target, plan_label, plan_why = POWER_PLAN_BALANCED, "균형 조정", '저사양 맞춤 튜닝'
         else:
             for svc in _HW_TUNING_SERVICES:
                 if system_state.service_start_type(svc) == 'delayed-auto':
@@ -920,14 +919,6 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
                                   "detail": "이미 자동(지연된 시작)이라 바꾸지 않았습니다"})
                     continue
                 steps.append(_service_step(svc, 'auto', f"고사양 맞춤 튜닝: {svc} 자동 시작"))
-            plan_target, plan_label, plan_why = POWER_PLAN_HIGH_PERF, "고성능", '고사양 맞춤 튜닝'
-
-        try:
-            p = system_state.set_active_plan(plan_target, group=HW_TUNING_GROUP, why=plan_why) or {}
-        except Exception as e:
-            p = {'ok': False, 'reason': str(e) or type(e).__name__}
-        steps.append({"name": f"전원 프로필 → {plan_label}", "ok": bool(p.get('ok')),
-                      "detail": "" if p.get('ok') else (p.get('reason') or "변경 실패")})
 
         failed = [s for s in steps if not s["ok"]]
         label = "저사양" if is_low_end else "고사양"

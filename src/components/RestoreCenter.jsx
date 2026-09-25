@@ -9,7 +9,7 @@ const api = () => (typeof window !== 'undefined' && window.pywebview && window.p
 /** 백엔드가 쓰는 그룹 키를 사람이 읽을 이름으로. */
 const GROUP_META = {
   perf_mode: { label: '성능 모드', icon: Zap, desc: '전원 플랜과 CPU 동작 설정' },
-  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스·전원 설정' },
+  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정' },
   network: { label: '네트워크 튜닝', icon: Network, desc: 'TCP·Winsock 설정' },
   기타: { label: '기타 변경', icon: HardDrive, desc: '' },
 };
