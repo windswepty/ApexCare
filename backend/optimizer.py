@@ -756,7 +756,9 @@ def init_optimization_mode():
 # 시작 유형 변경은 다음 부팅부터 반영된다.
 
 HW_TUNING_GROUP = 'hw_tuning'
-_HW_TUNING_SERVICES = ('SysMain', 'WSearch')
+_HW_TUNING_SERVICES = ('SysMain', 'WSearch')      # 이 기능이 건드린 적 있는 서비스(구버전 백업 복구 허용 목록)
+# 저사양에서 끄는 서비스. WSearch 는 뺐다. 끄면 시작 메뉴·탐색기·Outlook 검색이 망가진다.
+_LOW_END_DISABLE = ('SysMain',)
 _SERVICE_START_LABEL = {'auto': '자동', 'delayed-auto': '자동(지연된 시작)',
                         'demand': '수동', 'disabled': '사용 안 함'}
 
@@ -851,7 +853,9 @@ def _service_step(svc, target, why):
 
 
 def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
-    """사양에 맞춰 SysMain·WSearch 시작 유형과 전원 플랜을 조정한다.
+    """사양에 맞춰 서비스 시작 유형과 전원 플랜을 조정한다.
+
+    저사양은 SysMain 만 끈다(WSearch 는 건드리지 않음). 고사양은 SysMain·WSearch 를 자동 시작으로 둔다.
 
     consent=False 는 '미리보기' 모드다. 실제로 아무것도 바꾸지 않고
     무엇이 바뀌는지 항목만 돌려준다. 프론트에서 사용자가
@@ -873,7 +877,6 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
         if is_low_end:
             changes = [
                 "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 변경합니다 — 다음 부팅부터 반영되고 재부팅 후에도 유지됩니다.",
-                "Windows Search(WSearch) 서비스를 '사용 안 함'으로 변경합니다 — 다음 부팅부터 시작 메뉴 검색, 파일 탐색기 검색, Outlook 검색 색인이 중지됩니다.",
                 "대기 메모리(Standby)를 한 번 비웁니다 — 일시적이며 실행 중인 프로그램은 건드리지 않습니다.",
                 "전원 관리 프로필을 '균형 조정'으로 변경합니다.",
             ]
@@ -896,7 +899,7 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
 
         steps = []
         if is_low_end:
-            for svc in _HW_TUNING_SERVICES:
+            for svc in _LOW_END_DISABLE:
                 steps.append(_service_step(svc, 'disabled', f"저사양 맞춤 튜닝: {svc} 사용 안 함"))
 
             ram = purge_ram()

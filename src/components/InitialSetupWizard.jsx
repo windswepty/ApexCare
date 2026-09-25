@@ -47,7 +47,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
     if (tier === 'LowEnd') {
       return {
         title: '저사양 PC용 설정',
-        desc: "SysMain·Windows Search 서비스를 끄고 전원 관리 프로필을 '균형 조정'으로 둡니다. 검색 색인이 멈춰 시작 메뉴·탐색기 검색이 느려질 수 있습니다.",
+        desc: "SysMain 서비스를 끄고 전원 관리 프로필을 '균형 조정'으로 둡니다. Windows Search 는 건드리지 않아 시작 메뉴·탐색기 검색은 그대로입니다.",
         icon: Sliders,
         color: 'text-amber-400',
         bg: 'bg-amber-500/20',
