@@ -26,9 +26,9 @@ jobs:
         # 3.13 은 설치 파일에 들어가는 버전, 3.12 는 os.path.isjunction 이 생긴 최소 버전
         python-version: ['3.12', '3.13']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
