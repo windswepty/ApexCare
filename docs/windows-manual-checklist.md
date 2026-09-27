@@ -184,10 +184,11 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 10-1. 대용량 파일(500MB 이상)에 두 파일이 보이고, `C:\Windows`·`Program Files` 아래 파일은 나오지 않는다
 - [ ] 10-2. 중복 파일에 두 파일이 한 묶음으로 나온다
 - [ ] 10-3. `big2.bin` 삭제 → **휴지통**에 들어간다(휴지통에서 복원 가능)
-- [ ] 10-4. 중복 검사는 10MB 넘는 파일을 **쓰기 모드로 한 번 열어** 잠김 여부를 본다(`file_finder.scan_duplicates`).
-      검사 전후로 `(Get-Item C:\apex\big1.bin).LastWriteTime` 이 같아야 한다
-- [ ] 10-5. (OneDrive 를 로그인해 둔 경우) '온라인 전용'(구름 아이콘) 큰 파일이 중복 검사 뒤에도 **내려받아지지 않는다**
-      (아이콘이 그대로, OneDrive 전송 없음). 내려받아지면 출시 전에 고쳐야 한다
+- [ ] 10-4. 검사 전후로 `(Get-Item C:\apex\big1.bin).LastWriteTime` 이 같다(검사는 파일을 쓰기로 열지 않는다)
+- [ ] 10-5. OneDrive 에 로그인하고 600MB 파일 두 개(같은 내용)를 OneDrive 폴더에 넣어 동기화한 뒤, 하나를
+      우클릭 → **공간 확보**(구름 아이콘) → `(Get-Item 경로).Attributes` 에 `RecallOnDataAccess`(또는 `Offline`)가 보인다 →
+      대용량·중복 검사 → 구름 아이콘 파일은 **목록에 없고, 내려받아지지 않는다**(아이콘 그대로, OneDrive 전송 없음).
+      로컬에 있는 다른 하나는 대용량 목록에 나온다. 속성에 두 표시가 모두 없으면 이 판별이 이 Windows 에서 통하지 않는 것이니 알린다
 - [ ] 10-6. 끝나면 휴지통에서 지우고 `big1.bin` 도 지운다
 
 ---

@@ -1,4 +1,3 @@
-import sys
 import os
 import re
 import hashlib
@@ -21,6 +20,39 @@ _BLOCKED_COMPONENTS = {
     'steamlibrary', 'steamapps', 'origin games', 'riot games', 'epic games',
     'battle.net', 'ubisoft game launcher',
 }
+
+
+# OneDrive 같은 클라우드 동기화의 '온라인 전용' 파일 표시. 이 파일은 내용을 읽거나(해시) 쓰기로 열면
+# 내려받는다. 대용량·중복 검사 한 번에 수십 GB 가 내려받아질 수 있고, 로컬 공간도 쓰지 않으므로
+# 검사·삭제 대상이 아니다. 속성은 디렉터리 정보에서 읽으므로 확인해도 내려받지 않는다.
+_FILE_ATTRIBUTE_OFFLINE = 0x1000
+_FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x40000
+_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
+_CLOUD_ONLY_ATTRS = (_FILE_ATTRIBUTE_OFFLINE | _FILE_ATTRIBUTE_RECALL_ON_OPEN
+                     | _FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+
+
+def _is_cloud_only(path):
+    """내용이 로컬에 없는 파일(온라인 전용)이면 True. 확인하지 못하면 True(읽지 않는 쪽이 안전하다)."""
+    try:
+        attrs = getattr(os.lstat(path), 'st_file_attributes', 0)   # Windows 가 아니면 속성이 없다
+    except OSError:
+        return True
+    return bool(attrs & _CLOUD_ONLY_ATTRS)
+
+
+def _local_file_stat(path):
+    """검사해도 되는 로컬 파일이면 os.stat 결과, 아니면 None.
+
+    링크·정션·온라인 전용 파일은 None. 파일을 열지 않는다. 예전에는 잠김 여부를 보려고 모든 후보를
+    쓰기 모드('ab')로 열었다. 온라인 전용 파일은 그것만으로 내려받아질 수 있다.
+    """
+    if _is_link_like(path) or _is_cloud_only(path):
+        return None
+    try:
+        return os.stat(path)
+    except OSError:
+        return None
 
 
 def _system_roots():
@@ -98,32 +130,29 @@ def scan_large_files(min_mb=500):
                 if ext in DANGER_EXTS:
                     continue
                     
-                try:
-                    full_path = os.path.join(root, file)
-                    if not _is_link_like(full_path):
-                        size = os.path.getsize(full_path)
-                        if size >= min_bytes:
-                            try:
-                                with open(full_path, 'ab'):
-                                    pass
-                                large_files.append({
-                                    "path": full_path,
-                                    "name": file,
-                                    "sizeMB": round(size / (1024*1024), 2),
-                                    "modified": os.path.getmtime(full_path)
-                                })
-                            except (OSError, PermissionError) as e:
-                                print(f"[SCAN_SKIP] locked file: {full_path}")
-                                sys.stdout.flush()
-                except (OSError, PermissionError):
-                    pass
+                full_path = os.path.join(root, file)
+                st = _local_file_stat(full_path)
+                if st is None or st.st_size < min_bytes:
+                    continue
+                large_files.append({
+                    "path": full_path,
+                    "name": file,
+                    "sizeMB": round(st.st_size / (1024*1024), 2),
+                    "modified": st.st_mtime,
+                })
                     
     # Sort descending by size
     large_files.sort(key=lambda x: x["sizeMB"], reverse=True)
     return large_files
 
 def _hash_file(filepath, chunk_size=8192):
-    """Hash the entire file."""
+    """파일 전체의 해시. 읽지 못하면(잠김 등) None.
+
+    읽기 직전에 온라인 전용인지 다시 본다. 첫 번째 순회 뒤에 OneDrive 가 '공간 확보' 로
+    파일을 온라인 전용으로 바꿨을 수 있다. 그 파일을 읽으면 통째로 내려받는다.
+    """
+    if _is_cloud_only(filepath):
+        return None
     hasher = hashlib.md5()
     try:
         with open(filepath, 'rb') as f:
@@ -163,31 +192,21 @@ def scan_duplicates():
                     continue
                 # For duplicate scanning, we don't necessarily only allow SAFE_EXTS, but we strictly block DANGER_EXTS.
                 
-                try:
-                    full_path = os.path.join(root, file)
-                    if not _is_link_like(full_path):
-                        size = os.path.getsize(full_path)
-                        # Only consider files > 10MB to speed up duplicate scanning
-                        if size > 10 * 1024 * 1024:
-                            try:
-                                with open(full_path, 'ab'):
-                                    pass
-                                real = safe_delete.norm(full_path)
-                                if real in seen_real:
-                                    continue      # 같은 파일을 다른 경로로 또 만났다. 중복이 아니다.
-                                seen_real.add(real)
-                                if size not in file_sizes:
-                                    file_sizes[size] = []
-                                file_sizes[size].append({
-                                    "path": full_path,
-                                    "name": file,
-                                    "size": size,
-                                    "modified": os.path.getmtime(full_path)
-                                })
-                            except (OSError, PermissionError):
-                                pass
-                except (OSError, PermissionError):
-                    pass
+                full_path = os.path.join(root, file)
+                st = _local_file_stat(full_path)
+                # Only consider files > 10MB to speed up duplicate scanning
+                if st is None or st.st_size <= 10 * 1024 * 1024:
+                    continue
+                real = safe_delete.norm(full_path)
+                if real in seen_real:
+                    continue      # 같은 파일을 다른 경로로 또 만났다. 중복이 아니다.
+                seen_real.add(real)
+                file_sizes.setdefault(st.st_size, []).append({
+                    "path": full_path,
+                    "name": file,
+                    "size": st.st_size,
+                    "modified": st.st_mtime,
+                })
                     
     # Only keep groups with > 1 file
     potential_dupes = {sz: files for sz, files in file_sizes.items() if len(files) > 1}
@@ -242,6 +261,10 @@ def delete_files(paths):
         # 이 화면은 파일만 다룬다. 폴더 경로가 넘어오면 폴더째 휴지통으로 가지 않게 거부한다.
         if not os.path.isfile(p) or _is_link_like(p):
             rejected.append({"path": p, "reason": "일반 파일이 아닙니다(폴더·링크)"})
+            continue
+        if _is_cloud_only(p):
+            # 로컬 공간을 쓰지 않는다. 지우면 클라우드(OneDrive 등)의 원본이 지워진다.
+            rejected.append({"path": p, "reason": "클라우드에만 있는 파일(이 PC 의 공간을 쓰지 않음)"})
             continue
         reason = _blocked_reason(p)
         if reason:
