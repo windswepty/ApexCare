@@ -57,6 +57,7 @@ PROTECTED_PROCESSES = {
     "securityhealthsystray.exe",
     # --- APEX CARE 자신 (이름 기반 1차 방어. PID 기반은 get_own_pid_family) ---
     "apex care payload.exe",
+    "apex care.exe",                # 설치 마법사가 Payload 를 이 이름으로 복사한다
     "apex care uninstaller.exe",
 }
 

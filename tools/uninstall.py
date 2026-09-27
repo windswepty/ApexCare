@@ -11,6 +11,18 @@ APP_EXE = "APEX CARE.exe"
 REVERT_TIMEOUT_SEC = 300
 # backend/uninstall_prep.py 의 RESULT_NAME 과 같아야 한다
 RESULT_PATH = os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "uninstall_revert.json")
+# backend/debloater.py 의 REMOVED_NAME 과 같아야 한다
+REMOVED_APPS_PATH = os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "debloat_removed.json")
+
+
+def _removed_app_count():
+    """디블로터로 제거하고 아직 되살리지 않은 앱 수. 읽지 못하면 0."""
+    try:
+        with open(REMOVED_APPS_PATH, encoding="utf-8") as f:
+            apps = json.load(f).get("apps", [])
+        return len([a for a in apps if isinstance(a, dict)])
+    except Exception:
+        return 0
 
 
 def _message(icon, title, text, buttons=QMessageBox.StandardButton.Ok,
@@ -85,10 +97,14 @@ def _revert_system_changes(install_dir):
 def main():
     app = QApplication(sys.argv)
 
+    removed_apps = _removed_app_count()
+    # 사용자가 일부러 지운 앱을 프로그램 제거 때 다시 설치하지 않는다. 대신 그 사실을 먼저 알린다.
+    removed_note = (f"\n\n디블로터로 제거한 앱 {removed_apps}개는 다시 설치하지 않습니다. 필요하면 '아니요' 를 누르고 "
+                    "APEX CARE 디블로터 화면의 '제거한 앱' 에서 먼저 되살리세요." if removed_apps else "")
     if _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
                 "APEX CARE 프로그램을 완전히 삭제하시겠습니까?\n\n"
                 "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석 정책, "
-                "맞춤 튜닝, 꺼 둔 시작 프로그램)을 원래대로 되돌립니다.",
+                "맞춤 튜닝, 꺼 둔 시작 프로그램)을 원래대로 되돌립니다." + removed_note,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
         sys.exit(0)

@@ -61,7 +61,8 @@ const renderLineGraph = (history) => {
 };
 
 // 원클릭 최적화가 실제로 하는 일 (backend/optimizer.py _run_deep_optimization 과 같은 순서)
-const OPTIMIZATION_STEPS = ['임시 파일·캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
+// backend/optimizer.get_deep_optimization_plan 의 단계 이름과 같다(백엔드가 없을 때 보여 줄 목록)
+const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
 
 export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast }) {
   // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
@@ -161,6 +162,21 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
 
   const runMasterOptimization = async () => {
     if (isScanning) return;
+
+    // 되돌릴 수 없는 삭제(임시 파일·캐시)가 들어 있다. 무엇을 할지 먼저 보여 주고 확인을 받는다.
+    let plan = null;
+    try {
+      if (window.pywebview?.api?.getDeepOptimizationPlan) plan = await window.pywebview.api.getDeepOptimizationPlan();
+    } catch (e) {
+      plan = null;
+    }
+    const planLines = (plan?.steps || []).map((s, i) => `${i + 1}. ${s.name}\n    ${s.detail}`);
+    const body = planLines.length ? planLines.join('\n') : OPTIMIZATION_STEPS.map((n, i) => `${i + 1}. ${n}`).join('\n');
+    const excluded = plan?.excluded?.length
+      ? `\n\n하지 않는 것: ${plan.excluded.join(', ')} (저장공간 화면에서 직접 고를 수 있습니다)`
+      : '';
+    if (!window.confirm(`원클릭 최적화를 시작합니다.\n\n${body}${excluded}\n\n계속할까요?`)) return;
+
     setIsScanning(true);
     
     try {

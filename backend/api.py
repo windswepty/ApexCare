@@ -37,6 +37,10 @@ class Api:
             }
         return stats
 
+    def getDeepOptimizationPlan(self):
+        """원클릭이 할 일. 대시보드가 실행 전에 보여 주고 확인을 받는다."""
+        return optimizer.get_deep_optimization_plan()
+
     def startDeepOptimization(self):
         return optimizer.start_deep_optimization()
 
@@ -308,6 +312,8 @@ class Api:
                 return '원클릭 최적화'
             if optimizer.get_junk_clean_status().get('status') == 'running':
                 return '정크 파일 정리'
+            if debloater.is_busy():
+                return '기본 앱 제거·되살리기'
             for name, getter in (('SFC 검사', system_repair.get_sfc_status),
                                  ('DISM 복구', system_repair.get_dism_status),
                                  ('디스크 최적화', system_repair.get_trim_status)):

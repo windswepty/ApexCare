@@ -612,6 +612,11 @@ def get_debloat_status():
     return _debloat_state
 
 
+def is_busy():
+    """앱 제거나 되살리기가 진행 중인지. 창을 닫기 전에 확인한다(도중에 끝나면 기록과 실제가 어긋난다)."""
+    return bool(_debloat_state.get("running")) or _op_lock.locked()
+
+
 def _account_problem(account):
     """앱 제거를 막아야 할 계정 문제. 없으면 None."""
     desktop = _desktop_accounts()

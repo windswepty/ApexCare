@@ -109,6 +109,7 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 - [ ] 5-9. 표준 사용자 계정 `kim` 에 로그인한 채 UAC 창에서 **다른 관리자 계정**으로 APEX CARE 를 실행하면, 앱 제거가
       "다른 계정으로 실행 중" 이유로 거부되고 아무것도 지워지지 않는다
 - [ ] 5-10. 실패한 항목이 있으면 "완료" 가 아니라 무엇이 왜 실패했는지 나온다
+- [ ] 5-11. 앱 제거·되살리기 도중 창을 닫으려 하면 "기본 앱 제거·되살리기 진행 중" 안내가 나오고 닫히지 않는다
 
 ---
 
@@ -167,6 +168,10 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
       **바탕화면에 로그 파일이 생기지 않는다**. 결과 화면이 확보 용량과 건너뛴 용량을 보여준다
 - [ ] 8-4. `$lock.Close()` 로 잠금을 푼다
 - [ ] 8-5. 정리 도중 창을 닫으려 하면 "진행 중" 안내가 나온다
+- [ ] 8-6. 대시보드 **원클릭 최적화** → 시작 전에 확인 창이 뜨고 4단계(임시 파일·브라우저 캐시, 대기 메모리, DNS, 디스크 최적화)와
+      "하지 않는 것: Windows Update 다운로드 캐시, Prefetch, 휴지통" 이 보인다. **취소** 하면 아무것도 하지 않는다
+- [ ] 8-7. 원클릭을 실행해도 `C:\Windows\SoftwareDistribution\Download`·`C:\Windows\Prefetch` 의 파일 수가 그대로다
+      (`(Get-ChildItem C:\Windows\Prefetch).Count` 전후 비교). 결과 화면의 단계 이름이 확인 창과 같다
 
 ---
 
@@ -227,6 +232,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 13-1. APEX CARE 를 **켜 둔 채** 설정 → 앱에서 제거 → "실행 중이니 닫고 다시" 안내가 나오고 **아무것도 지우지 않는다**
       (강제 종료하지 않는다)
 - [ ] 13-2. APEX CARE 를 닫고 다시 제거 → 확인 창 → 잠시 뒤 제거 완료. 설치 폴더·바로가기·앱 목록 항목이 사라진다
+      (5절에서 제거한 앱이 남아 있으면, 확인 창에 "디블로터로 제거한 앱 N개는 다시 설치하지 않습니다" 가 함께 나온다)
 - [ ] 13-3. **스냅숏** `13-after` → **비교** `13-base` `13-after` 가 같다. 게이밍 모드·원격 분석 정책이 되돌아가고,
       꺼 둔 두 시작 프로그램이 **원래 Run 키**(HKCU 는 HKCU, HKLM 은 HKLM)에 돌아오고, `HKCU\Software\APEXCARE` 키가 없다.
       `[APEX CARE]` 부분은 달라도 된다(`optimization_mode = standard`, 저널 항목 0개)

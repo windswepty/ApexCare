@@ -121,6 +121,34 @@ _optimization_state = {
     "cancel_requested": False
 }
 
+# 원클릭이 정리하는 정크 분류(scan_junk_background 의 id). 1 = 임시 파일, 2 = Chrome 캐시.
+# Windows Update 다운로드 캐시(3)와 Prefetch(4)는 뺐다. 업데이트가 받는 중에 캐시를 지우면 설치가 실패할 수
+# 있고, Prefetch 는 저장공간 화면에서도 기본으로 꺼 둔 항목이다. 둘 다 저장공간 화면에서 직접 고를 때만 지운다.
+DEEP_OPT_JUNK_CATEGORIES = (1, 2)
+
+
+def get_deep_optimization_plan():
+    """원클릭이 실제로 할 일. 대시보드가 실행 전에 이 목록을 보여 주고 확인을 받는다.
+
+    _run_deep_optimization 과 같은 순서·같은 범위여야 한다(테스트가 확인한다).
+    """
+    return {
+        "steps": [
+            {"id": "junk", "name": "임시 파일·브라우저 캐시 정리",
+             "detail": "%TEMP%·Windows\\Temp 의 임시 파일과 Chrome 캐시를 지웁니다. 휴지통을 거치지 않아 "
+                       "되돌릴 수 없습니다. 사용 중인 파일은 건너뜁니다."},
+            {"id": "ram", "name": "대기 메모리 비우기",
+             "detail": "Windows 가 캐시로 잡아 둔 대기 메모리를 비웁니다. 실행 중인 프로그램은 건드리지 않습니다."},
+            {"id": "dns", "name": "DNS 캐시 초기화",
+             "detail": "저장된 DNS 조회 결과를 비웁니다."},
+            {"id": "trim", "name": "디스크 최적화(TRIM)",
+             "detail": "모든 드라이브에 Windows 디스크 최적화를 실행합니다(SSD 는 TRIM, HDD 는 조각 모음). "
+                       "HDD 는 오래 걸릴 수 있고, 시작되면 끝날 때까지 진행됩니다."},
+        ],
+        "excluded": ["Windows Update 다운로드 캐시", "Prefetch", "휴지통"],
+    }
+
+
 def get_deep_optimization_status():
     return _optimization_state
 
@@ -147,14 +175,14 @@ def _run_deep_optimization():
 
     try:
         # Step 1: Deep Junk Clean (synchronous within this thread)
-        _optimization_state["current_task"] = "브라우저 캐시, 임시 파일, 업데이트 잔여물 삭제 중..."
+        _optimization_state["current_task"] = "임시 파일·브라우저 캐시 정리 중..."
         _optimization_state["eta_seconds"] = 10
-        clean_junk_background([1, 2, 3, 4], cancel_event=_cancel_event)
+        clean_junk_background(list(DEEP_OPT_JUNK_CATEGORIES), cancel_event=_cancel_event)
         # 실제 상태 키는 'freed_mb'. 예전엔 'freedMB' 를 읽어서 항상 0MB 로 보고됐다.
         freed = _junk_clean_state.get("freed_mb", 0)
         _optimization_state["freed_mb"] += freed
         junk_ok = _junk_clean_state.get("status") in ("success", "cancelled")
-        steps.append({"name": "정크 파일 정리", "ok": junk_ok,
+        steps.append({"name": "임시 파일·브라우저 캐시 정리", "ok": junk_ok,
                       "detail": f"{freed}MB 확보" if junk_ok
                                 else _junk_clean_state.get("error", "실패")})
         _optimization_state["progress_pct"] = 40
