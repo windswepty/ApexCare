@@ -6,6 +6,12 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+# 제거 프로그램이 설치 폴더를 지우기 전에 부른다. 창을 띄우지 않고 이 앱이 바꾼 것만 되돌린 뒤 끝낸다.
+# Api 를 만들면 안 된다: 생성자가 저장된 성능 모드를 다시 적용하고 게임 부스트를 켠다.
+if __name__ == '__main__' and '--revert-for-uninstall' in sys.argv[1:]:
+    from backend import uninstall_prep
+    sys.exit(uninstall_prep.main_cli())
+
 import webview
 from backend.api import Api
 

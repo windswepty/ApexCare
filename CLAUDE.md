@@ -126,6 +126,10 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 | `uninstaller.py` · `debloater.py` | 앱 제거·잔여물, 기본 앱 제거 |
 | `system_repair.py` · `system_monitor.py` | TRIM·SFC·DISM·네트워크, 시스템 상태·프로세스 목록 |
 | `config_manager.py` | 설정 파일 |
+| `uninstall_prep.py` | APEX CARE 제거 전 되돌리기 (`main.py --revert-for-uninstall`) |
 
 UI 탭은 `src/components/Sidebar.jsx` 에 정의되고 `src/App.jsx` 가 라우팅합니다.
 설치·제거 프로그램 소스는 `tools/setup_wizard.py` 와 `tools/uninstall.py` 입니다.
+제거 프로그램은 설치 폴더를 지우기 전에 `APEX CARE.exe --revert-for-uninstall` 로 이 앱이 바꾼 것을 되돌리고,
+실패하면 목록을 보여주며 기본 선택 "아니요" 로 계속할지 묻습니다. 실행 중인 APEX CARE 를 강제 종료하지 않습니다.
+시스템을 바꾸는 기능을 새로 만들면 `uninstall_prep.revert_for_uninstall()` 이 그것도 되돌리는지 확인합니다.

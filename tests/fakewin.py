@@ -564,7 +564,8 @@ class FakeServices:
         REGISTRY.seed('HKLM', path, 'Start', _START_VALUE[start_type])
         if start_type == 'delayed-auto':
             REGISTRY.seed('HKLM', path, 'DelayedAutostart', 1)
-        elif start_type == 'auto':
+        elif start_type == 'auto' and REGISTRY.get('HKLM', path, 'DelayedAutostart') is not None:
+            # 원래 없던 값은 만들지 않는다. 없음과 0 은 같은 뜻(지연 시작 아님)이다.
             REGISTRY.seed('HKLM', path, 'DelayedAutostart', 0)
         return {'rc': 0, 'error': ''}
 
