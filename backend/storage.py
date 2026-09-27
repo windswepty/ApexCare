@@ -43,7 +43,7 @@ def _probe_media_type(mountpoint):
             ['powershell', '-NoProfile', '-Command',
              f"(Get-Partition -DriveLetter {letter} -ErrorAction SilentlyContinue | "
              f"Get-Disk | Get-PhysicalDisk).MediaType"],
-            capture_output=True, text=True, timeout=12,
+            capture_output=True, text=True, errors="replace", timeout=12,
             creationflags=0x08000000,
         )
         out = (r.stdout or '').strip().lower()

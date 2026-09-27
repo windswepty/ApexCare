@@ -209,3 +209,35 @@ def test_unusual_service_start_type_is_left_alone():
     SERVICES.add('Weird', 1)                        # 'system' 시작 — 이 앱이 건드리지 않는다
     r = ss.set_service_start('Weird', 'disabled', 't')
     assert r['ok'] is False and SERVICES.calls == []
+
+
+# ── 이 앱이 만든 키 (샌드박스 점검에서 찾은 문제: 원래 없던 키가 빈 채로 남았다) ──
+
+NEW = r'SOFTWARE\ApexCareNew\Deeper'
+
+
+def test_keys_created_for_a_value_are_removed_on_restore():
+    REGISTRY.seed_key('HKLM', 'SOFTWARE')
+    assert ss.set_registry('HKLM', NEW, 'V', 1, group='t')['ok']
+    assert ss.pending_changes()[f'reg:HKLM\{NEW}\V']['created_keys'] == [NEW, r'SOFTWARE\ApexCareNew']
+
+    assert ss.restore_group('t')['ok']
+
+    assert not REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')      # 만든 키는 깊은 것부터 사라진다
+    assert REGISTRY.has_key('HKLM', 'SOFTWARE')                       # 원래 있던 키는 남는다
+
+
+def test_created_key_is_kept_if_something_else_is_inside():
+    REGISTRY.seed_key('HKLM', 'SOFTWARE')
+    ss.set_registry('HKLM', NEW, 'V', 1, group='t')
+    REGISTRY.seed('HKLM', NEW, 'OtherProgram', 5)                    # 그 사이 다른 프로그램이 값을 넣었다
+    assert ss.restore_group('t')['ok']
+    assert REGISTRY.value('HKLM', NEW, 'OtherProgram') == 5
+
+
+def test_created_key_is_removed_only_after_all_its_values_are_restored():
+    REGISTRY.seed_key('HKLM', 'SOFTWARE')
+    ss.set_registry('HKLM', NEW, 'A', 1, group='t')                   # 이 기록이 키를 만들었다
+    ss.set_registry('HKLM', NEW, 'B', 1, group='t')                   # 이 기록 때는 키가 이미 있었다
+    assert ss.restore_group('t')['ok']
+    assert not REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')

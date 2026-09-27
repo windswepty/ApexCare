@@ -332,7 +332,7 @@ def kill_process(pid):
     # 폴백 2: taskkill. 셸을 거치지 않고 인자 리스트로 넘긴다.
     try:
         res = subprocess.run(["taskkill", "/F", "/PID", str(safe_pid)], shell=False,
-                             capture_output=True, text=True, creationflags=0x08000000, timeout=10)
+                             capture_output=True, text=True, errors='replace', creationflags=0x08000000, timeout=10)
         if res.returncode == 0:
             return {"success": True, "message": done_msg}
         fail_msg = "프로세스를 종료할 권한이 없습니다."

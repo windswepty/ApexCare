@@ -49,3 +49,21 @@ def test_sources_have_no_stray_control_characters():
                 if any(ord(c) < 32 and c not in '\r\n\t' for c in text):
                     bad.append(os.path.join(top, f))
     assert bad == [], bad
+
+
+def test_command_output_is_read_without_crashing_on_codepage():
+    # 콘솔 도구(ipconfig·defrag 등)는 OEM 코드 페이지로 출력한다. text=True 에 errors 가 없으면 UTF-8 로
+    # 읽다가 출력 읽기 스레드가 죽는다(샌드박스 점검에서 실제로 났다).
+    import ast
+    bad = []
+    for f in os.listdir(os.path.join(ROOT, 'backend')):
+        if not f.endswith('.py'):
+            continue
+        tree = ast.parse(_read(os.path.join('backend', f)))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                kw = {k.arg for k in node.keywords}
+                text = any(k.arg == 'text' and getattr(k.value, 'value', None) is True for k in node.keywords)
+                if text and 'errors' not in kw and 'encoding' not in kw:
+                    bad.append(f'{f}:{node.lineno}')
+    assert bad == [], bad

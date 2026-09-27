@@ -352,6 +352,10 @@ def DeleteKey(key, sub_key):
     REGISTRY.writes.append(('delete_key', _HIVE_NAMES[hive], '\\'.join(parts), None, None))
 
 
+def DeleteKeyEx(key, sub_key, access=KEY_WOW64_64KEY, reserved=0):
+    return DeleteKey(key, sub_key)
+
+
 def EnumKey(key, index):
     key = _handle(key)
     if not key.access & KEY_ENUMERATE_SUB_KEYS:
@@ -404,7 +408,7 @@ def _make_winreg_module():
         if name.startswith(('HKEY_', 'KEY_', 'REG_')):
             setattr(m, name, g[name])
     for fn in (OpenKey, CreateKey, CreateKeyEx, CloseKey, QueryValueEx,
-               SetValueEx, DeleteValue, DeleteKey, EnumKey, EnumValue, QueryInfoKey,
+               SetValueEx, DeleteValue, DeleteKey, DeleteKeyEx, EnumKey, EnumValue, QueryInfoKey,
                ConnectRegistry, ExpandEnvironmentStrings):
         setattr(m, fn.__name__, fn)
     m.OpenKeyEx = OpenKeyEx

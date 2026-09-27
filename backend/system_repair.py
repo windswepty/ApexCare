@@ -23,6 +23,7 @@ def _run_hidden_cmd(args, timeout=120):
             shell=False,
             capture_output=True,
             text=True,
+            errors="replace",           # 콘솔 도구는 OEM 코드 페이지로 출력한다. 못 읽는 바이트로 읽기 스레드가 죽지 않게
             creationflags=CREATE_NO_WINDOW,
             timeout=timeout
         )
@@ -50,6 +51,7 @@ def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
             shell=False,
             capture_output=True,
             text=True,
+            errors="replace",           # 콘솔 도구는 OEM 코드 페이지로 출력한다. 못 읽는 바이트로 읽기 스레드가 죽지 않게
             creationflags=CREATE_NO_WINDOW,
             timeout=timeout_sec
         )

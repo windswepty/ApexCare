@@ -312,6 +312,10 @@ def startup_legacy():
         reg_del('HKLM', r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', 'ApexSbxOld')
         reg_del('HKCU', legacy, 'ApexSbxOld')
         reg_del('HKCU', legacy + r'\_origin', 'ApexSbxOld')
+        # 점검 준비로 만든 예전 버전 키도 지운다(비었을 때만). 남기면 다음 점검의 '처음 상태' 가 달라진다.
+        from backend import system_state as ss
+        for path in (legacy + r'\_origin', legacy, r'Software\APEXCARE'):
+            ss._delete_key_if_empty('HKCU', path)
 
 
 @check('게임 부스트: Nagle 끄기 → 게임 종료 때 원래대로')
@@ -393,25 +397,43 @@ def junk_junction():
 def priority():
     import psutil
     from backend import process_boost
-    p = subprocess.Popen([os.path.join(os.environ['SystemRoot'], 'System32', 'PING.EXE'), '-t', '127.0.0.1'],
-                         shell=False, stdout=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    # 이 점검의 자식으로 띄우면 앱이 '자기 프로세스' 로 보고 막는다(맞는 동작). PowerShell 이 띄우고 먼저 끝나게 해
+    # 부모 없는 프로세스로 만든다. 사용자가 따로 실행한 프로그램과 같은 처지다.
+    ping = os.path.join(os.environ['SystemRoot'], 'System32', 'PING.EXE')
+    r = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                        f"(Start-Process -FilePath '{ping}' -ArgumentList '-t','127.0.0.3' "
+                        "-WindowStyle Hidden -PassThru).Id"],
+                       shell=False, capture_output=True, text=True, errors='replace',
+                       creationflags=CREATE_NO_WINDOW, timeout=60)
+    pid = int(r.stdout.strip().splitlines()[-1])
     problems = []
     try:
         time.sleep(1)
-        before = psutil.Process(p.pid).nice()
-        r = process_boost.set_priority(p.pid, 'high')
-        if not r.get('ok') or psutil.Process(p.pid).nice() != psutil.HIGH_PRIORITY_CLASS:
+        before = psutil.Process(pid).nice()
+        r = process_boost.set_priority(pid, 'high')
+        if not r.get('ok') or psutil.Process(pid).nice() != psutil.HIGH_PRIORITY_CLASS:
             problems.append(f'높음으로 바꾸지 못했습니다: {r}')
-        process_boost.restore(p.pid)
-        if psutil.Process(p.pid).nice() != before:
+        process_boost.restore(pid)
+        if psutil.Process(pid).nice() != before:
             problems.append('원래 우선순위로 돌아오지 않았습니다')
+        # 이 점검이 직접 띄운 자식은 앱이 자기 프로세스로 보고 막아야 한다
+        child = subprocess.Popen([ping, '-t', '127.0.0.4'], shell=False, stdout=subprocess.DEVNULL,
+                                 creationflags=CREATE_NO_WINDOW)
+        try:
+            if process_boost.set_priority(child.pid, 'high').get('ok'):
+                problems.append('자기 자식 프로세스의 우선순위를 바꿨습니다')
+        finally:
+            child.kill()
         for proc in psutil.process_iter(['name']):
             if (proc.info['name'] or '').lower() in ('csrss.exe', 'explorer.exe'):
                 if process_boost.set_priority(proc.pid, 'idle').get('ok'):
                     problems.append(f"{proc.info['name']} 의 우선순위를 바꿨습니다")
                 break
     finally:
-        p.kill()                                   # 이 점검이 띄운 ping 만 끝낸다
+        try:
+            psutil.Process(pid).kill()             # 이 점검이 띄운 ping 만 끝낸다
+        except psutil.Error:
+            pass
     return verdict(problems, [])
 
 

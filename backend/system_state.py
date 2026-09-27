@@ -159,6 +159,39 @@ def read_registry(hive, path, name):
         return False, None, None
 
 
+def _missing_keys(hive, path):
+    """path 중 지금 없는 키들(깊은 것부터). 모두 있으면 []. 확인하지 못하면 [](지우지 않는 쪽).
+
+    값을 쓰면서 없던 키를 만들었다면, 되돌린 뒤 그 키가 비어 있을 때 지워야 '원래대로' 다.
+    (샌드박스 점검에서 StartupApproved\\Run 이 원래 없던 PC 에 빈 키가 남았다)
+    """
+    parts = [x for x in path.split('\\') if x]
+    missing = []
+    for i in range(len(parts), 0, -1):
+        sub = '\\'.join(parts[:i])
+        try:
+            with winreg.OpenKey(HIVES[hive], sub, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY):
+                return missing
+        except FileNotFoundError:
+            missing.append(sub)
+        except OSError:
+            return []
+    return missing
+
+
+def _delete_key_if_empty(hive, path):
+    """값도 하위 키도 없을 때만 지운다. 다른 무엇이 들어 있으면 그대로 둔다."""
+    try:
+        with winreg.OpenKey(HIVES[hive], path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+            subkeys, values, _ = winreg.QueryInfoKey(k)
+        if subkeys or values:
+            return False
+        winreg.DeleteKeyEx(HIVES[hive], path, winreg.KEY_WOW64_64KEY, 0)
+        return True
+    except OSError:
+        return False
+
+
 def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why=''):
     """레지스트리 값을 바꾸고 결과를 검증한다.
 
@@ -179,6 +212,7 @@ def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why='')
         'kind': 'registry', 'group': group, 'hive': hive, 'path': path,
         'name': name, 'existed': existed, 'value': _enc(before),
         'type': before_type if existed else vtype, 'why': why,
+        'created_keys': [] if existed else _missing_keys(hive, path),
     }):
         return dict(_NOT_RECORDED)
 
@@ -612,6 +646,7 @@ def _restore(predicate):
     data = _load()
     entries = data['entries']
     done, failed, plans_touched = [], [], set()
+    created_keys = set()        # 되돌린 값을 쓰면서 이 앱이 만들었던 키. 끝에 비어 있으면 지운다.
 
     # 전원 플랜 전환은 마지막에 해야 한다. 먼저 하면 세부값을 엉뚱한 플랜에 쓴다.
     ordered = sorted(entries.items(), key=lambda kv: kv[1].get('kind') == 'power_plan')
@@ -626,6 +661,7 @@ def _restore(predicate):
                 if reason:
                     failed.append({'key': key, 'reason': reason})
                     continue
+                created_keys.update((e['hive'], k) for k in e.get('created_keys') or [])
                 done.append(key)
 
             elif kind == 'power_value':
@@ -675,6 +711,10 @@ def _restore(predicate):
     # 되돌린 세부값을 실제로 반영시킨다. 원래 플랜을 되돌린 '뒤' 이므로
     # 지금 활성 플랜만 다시 활성화한다.
     _reapply_if_active(plans_touched)
+
+    # 이 앱이 만든 키는 깊은 것부터, 비어 있을 때만 지운다. 같은 키의 다른 값이 아직 남아 있으면 그대로 둔다.
+    for hive, path in sorted(created_keys, key=lambda hp: hp[1].count('\\'), reverse=True):
+        _delete_key_if_empty(hive, path)
 
     # 성공한 것만 저널에서 지운다. 실패한 건 남겨야 다음에 다시 시도할 수 있다.
     if done:
