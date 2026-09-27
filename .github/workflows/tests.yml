@@ -1,6 +1,7 @@
-# 안전 규칙 테스트를 우분투에서 돌린다.
-# tests/fakewin.py 가 winreg·전원 API·sc.exe·APPDATA 를 가짜로 바꾸므로 Windows 가 필요 없고,
-# 실제 시스템을 바꾸는 호출은 부르는 즉시 예외가 난다.
+# 안전 규칙 테스트를 우분투와 Windows 에서 돌린다.
+# tests/fakewin.py 가 winreg·전원 API·sc.exe·APPDATA 를 가짜로 바꾸고, 실제 시스템을 바꾸는
+# 호출은 부르는 즉시 예외가 나게 막는다. Windows 러너에서는 진짜 winreg·ctypes.windll 이 있는
+# 상태에서도 가짜가 이기는지, 정션(os.walk 가 따라 들어가는 링크)에서도 정크 정리가 안전한지 확인한다.
 name: tests
 
 on:
@@ -18,14 +19,20 @@ concurrency:
 
 jobs:
   pytest:
-    # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다. 러너가 몰래 바뀌지 않게 고정한다.
-    runs-on: ubuntu-24.04
+    name: pytest (${{ matrix.os }}, ${{ matrix.python-version }})
+    # -latest 라벨은 새 OS 로 예고 없이 옮겨 간다(ubuntu-latest 는 2026-10-19 부터 Ubuntu 26).
+    # 러너가 몰래 바뀌지 않게 버전을 고정한다.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04, windows-2025]
         # 3.13 은 설치 파일에 들어가는 버전, 3.12 는 os.path.isjunction 이 생긴 최소 버전
         python-version: ['3.12', '3.13']
+    env:
+      # Windows 콘솔 기본 코드 페이지에서 한국어 테스트 메시지가 깨지지 않게 한다
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v7
 
