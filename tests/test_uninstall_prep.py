@@ -208,4 +208,85 @@ def test_uninstaller_reverts_first_and_never_force_kills():
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
     code = ast.unparse(main)
     # 되돌리기 → (실패하면 묻기) → 설치 폴더 삭제 순서
-    assert code.index('_app_running()') < code.index('_revert_system_changes(') < code.index('rmdir /s /q')
+    assert code.index('_app_running()') < code.index('_revert_system_changes(') < code.index('_write_cleanup_bat(')
+
+
+# ── 설치 폴더 지우기 (샌드박스 점검에서 설치 폴더가 남는 것이 드러났다) ──
+
+def _load_uninstaller(monkeypatch):
+    """제거 프로그램을 PyQt6·pywin32 없이 불러온다(창은 띄우지 않는다)."""
+    import importlib.util
+    import sys
+    import types
+    qtw = types.ModuleType('PyQt6.QtWidgets')
+    class QMessageBox:                                     # 함수 기본값에서 StandardButton.Ok 를 읽는다
+        class StandardButton:
+            Ok = Yes = No = 0
+    qtw.QApplication, qtw.QMessageBox = object, QMessageBox
+    qtc = types.ModuleType('PyQt6.QtCore')
+    qtc.Qt = object
+    win32 = types.ModuleType('win32com.client')
+
+    class Shell:
+        def SpecialFolders(self, name):
+            return r'C:\Users\u\Desktop'
+    win32.Dispatch = lambda name: Shell()
+    win32com = types.ModuleType('win32com')
+    win32com.client = win32
+    for name, mod in (('PyQt6', types.ModuleType('PyQt6')), ('PyQt6.QtWidgets', qtw), ('PyQt6.QtCore', qtc),
+                      ('win32com', win32com), ('win32com.client', win32)):
+        monkeypatch.setitem(sys.modules, name, mod)
+    spec = importlib.util.spec_from_file_location('apex_uninstaller', os.path.join(ROOT, 'tools', 'uninstall.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+INSTALL = r'C:\Users\u\AppData\Local\APEX CARE'
+BAT = r'C:\Users\u\AppData\Local\Temp\uninstall_apex.bat'
+
+
+def test_cleanup_runs_outside_install_dir_and_retries(monkeypatch):
+    un = _load_uninstaller(monkeypatch)
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\u\Desktop\APEX CARE.lnk'], r'C:\sm\APEX CARE')
+    body = [l for l in lines if l != '@echo off']
+    # 배치 파일이 설치 폴더를 작업 폴더로 물려받으면 그 폴더는 지워지지 않는다
+    assert body[0] == r'cd /d "C:\Users\u\AppData\Local\Temp"'
+    retry = lines.index(':retry')
+    rmdir = lines.index(f'if exist "{INSTALL}" rmdir /s /q "{INSTALL}"')
+    assert retry < rmdir < lines.index('if %tries% lss 30 goto retry')
+    assert not any(l.startswith('timeout') for l in lines)   # 창 없이 돌면 바로 끝나 기다리지 못한다
+
+
+def test_cleanup_reports_success_only_when_folder_is_gone(monkeypatch):
+    un = _load_uninstaller(monkeypatch)
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\u\Desktop\APEX CARE.lnk'], r'C:\sm\APEX CARE')
+    removed, failed = lines.index(':removed'), lines.index(':cleanup')
+    reg = next(i for i, l in enumerate(lines) if l.startswith('reg delete'))
+    ok = next(i for i, l in enumerate(lines) if l.startswith('msg *') and '제거되었습니다' in l)
+    fail = next(i for i, l in enumerate(lines) if l.startswith('msg *') and '지우지 못했습니다' in l)
+    # 폴더를 지웠을 때만 프로그램 목록에서 빼고 '제거되었습니다' 라고 한다. 못 지우면 경로를 알려 준다.
+    assert lines.index(f'if not exist "{INSTALL}" goto removed') < removed < reg < ok < failed < fail
+    assert INSTALL in lines[fail]
+    assert lines[ok + 1] == 'goto end'
+
+
+def test_cleanup_bat_never_writes_a_mangled_path(monkeypatch, tmp_path):
+    un = _load_uninstaller(monkeypatch)
+    monkeypatch.setattr(un, '_bat_encoding', lambda: 'ascii')
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [], r'C:\sm')
+    assert 'msg * APEX CARE has been removed.' in lines            # 코드 페이지에 없는 안내문은 영어로
+    # 경로가 코드 페이지로 나타나지 않으면 '?' 로 바꿔 쓰지 않고 실패한다(깨진 경로로 rmdir 을 부르지 않는다)
+    with pytest.raises(UnicodeEncodeError):
+        un._write_cleanup_bat(str(tmp_path / 'x.bat'), r'C:\Users\라브\AppData\Local\APEX CARE')
+    assert not os.path.exists(tmp_path / 'x.bat') or os.path.getsize(tmp_path / 'x.bat') == 0
+
+
+def test_uninstaller_starts_cleanup_with_its_own_working_dir():
+    main = next(n for n in ast.parse(_read('tools/uninstall.py')).body
+                if isinstance(n, ast.FunctionDef) and n.name == 'main')
+    code = ast.unparse(main)
+    assert 'os.startfile' not in code                          # 작업 폴더를 물려주는 실행 방식
+    popen = next(n for n in ast.walk(main) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'subprocess.Popen')
+    kw = {k.arg: ast.unparse(k.value) for k in popen.keywords}
+    assert kw.get('cwd') == 'temp_dir' and kw.get('shell') == 'False'

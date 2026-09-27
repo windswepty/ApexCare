@@ -1,4 +1,5 @@
 import json
+import ntpath
 import os
 import subprocess
 import sys
@@ -144,40 +145,85 @@ def main():
                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             sys.exit(1)
 
-    bat_path = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "uninstall_apex.bat")
+    temp_dir = os.environ.get("TEMP") or os.path.join(local_app_data, "Temp")
+    bat_path = os.path.join(temp_dir, "uninstall_apex.bat")
+    try:
+        _write_cleanup_bat(bat_path, install_dir)
+    except (OSError, UnicodeEncodeError) as e:
+        _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
+                 f"설정은 되돌렸지만 설치 폴더를 지우는 준비를 하지 못했습니다: {e}\n"
+                 f"아래 폴더를 직접 지워 주세요.\n{install_dir}")
+        sys.exit(1)
 
-    with open(bat_path, "w", encoding="euc-kr") as f:
-        f.write('@echo off\n')
-        f.write('timeout /t 2 /nobreak > NUL\n')  # wait for uninstaller to exit
-
-        # 1. Delete installation directory
-        f.write(f'rmdir /s /q "{install_dir}"\n')
-
-        # 2. Delete Desktop shortcuts
-        shell = win32com.client.Dispatch("WScript.Shell")
-        desktop = shell.SpecialFolders("Desktop")
-        f.write(f'del /q "{os.path.join(desktop, "APEX CARE.lnk")}" > NUL 2>&1\n')
-
-        # Try OneDrive desktop just in case
-        onedrive_desktop = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "바탕 화면")
-        if os.path.exists(onedrive_desktop):
-            f.write(f'del /q "{os.path.join(onedrive_desktop, "APEX CARE.lnk")}" > NUL 2>&1\n')
-
-        # 3. Delete Start Menu shortcut
-        start_menu = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "APEX CARE")
-        f.write(f'rmdir /s /q "{start_menu}" > NUL 2>&1\n')
-
-        # 4. Delete Registry key
-        f.write('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\APEX CARE" /f > NUL 2>&1\n')
-
-        # 5. Show completion message
-        f.write('msg * APEX CARE가 성공적으로 제거되었습니다.\n')
-
-        # 6. Delete self (the batch file)
-        f.write('del "%~f0"\n')
-
-    os.startfile(bat_path)
+    # 배치 파일의 작업 폴더를 설치 폴더 밖으로 둔다. 탐색기에서 제거 프로그램을 실행하면 작업 폴더가
+    # 설치 폴더이고, os.startfile 로 띄운 cmd 가 그것을 물려받는다. 어떤 프로세스의 작업 폴더인 폴더는
+    # 지울 수 없어서 샌드박스 점검에서 설치 폴더가 그대로 남았다.
+    subprocess.Popen([_system32("cmd.exe"), "/d", "/c", bat_path], shell=False, cwd=temp_dir,
+                     creationflags=CREATE_NO_WINDOW, close_fds=True)
     sys.exit(0)
+
+
+def _bat_encoding():
+    # cmd 는 배치 파일을 콘솔 코드 페이지(OEM)로 읽는다. euc-kr 로 고정하면 한국어가 아닌 Windows 에서 경로가 깨진다.
+    return "oem" if os.name == "nt" else "utf-8"
+
+
+def _fits(text):
+    try:
+        text.encode(_bat_encoding())
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _cleanup_bat_lines(bat_path, install_dir, shortcuts, start_menu):
+    """설치 폴더·바로 가기·프로그램 목록 키를 지우는 배치 파일 내용.
+
+    제거 프로그램(PyInstaller 부트로더 포함)이 끝나 exe 잠금이 풀릴 때까지 폴더 삭제를 최대 30번 다시 시도하고,
+    끝에 실제로 지워졌는지에 따라 다른 메시지를 띄운다(지우지 못했는데 '제거되었습니다' 라고 하지 않는다).
+    """
+    ok_msg = "APEX CARE가 제거되었습니다."
+    fail_msg = "APEX CARE 설치 폴더를 지우지 못했습니다. 이 폴더를 직접 지워 주세요:"
+    if not (_fits(ok_msg) and _fits(fail_msg)):
+        ok_msg, fail_msg = "APEX CARE has been removed.", "Could not delete the APEX CARE folder. Please delete it:"
+    lines = [
+        '@echo off',
+        f'cd /d "{ntpath.dirname(bat_path)}"',
+        'set /a tries=0',
+        ':retry',
+        'ping -n 2 127.0.0.1 > NUL',          # 창 없이 돌면 timeout 은 입력 리디렉션 오류로 바로 끝난다
+        f'if exist "{install_dir}" rmdir /s /q "{install_dir}"',
+        f'if not exist "{install_dir}" goto removed',
+        'set /a tries+=1',
+        'if %tries% lss 30 goto retry',
+        'goto cleanup',
+        ':removed',
+    ]
+    lines += [f'del /q "{p}" > NUL 2>&1' for p in shortcuts]
+    lines += [
+        f'rmdir /s /q "{start_menu}" > NUL 2>&1',
+        'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\APEX CARE" /f > NUL 2>&1',
+        f'msg * {ok_msg}',
+        'goto end',
+        ':cleanup',
+        f'msg * {fail_msg} {install_dir}',
+        ':end',
+        'del "%~f0"',
+    ]
+    return lines
+
+
+def _write_cleanup_bat(bat_path, install_dir):
+    shell = win32com.client.Dispatch("WScript.Shell")
+    shortcuts = [os.path.join(shell.SpecialFolders("Desktop"), "APEX CARE.lnk")]
+    onedrive_desktop = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "바탕 화면")
+    if os.path.exists(onedrive_desktop):
+        shortcuts.append(os.path.join(onedrive_desktop, "APEX CARE.lnk"))
+    start_menu = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "APEX CARE")
+    lines = _cleanup_bat_lines(bat_path, install_dir, shortcuts, start_menu)
+    # 경로를 코드 페이지로 나타낼 수 없으면 errors 없이 실패시킨다. 깨진 경로로 rmdir 을 부르지 않는다.
+    with open(bat_path, "w", encoding=_bat_encoding()) as f:
+        f.write("\n".join(lines) + "\n")
 
 if __name__ == "__main__":
     main()
