@@ -11,14 +11,21 @@
 ## 자동 점검 (Windows 샌드박스) — 먼저 이것부터
 
 손으로 하는 점검 중 백엔드가 하는 일(성능 모드, 디블로터 정책·앱, 맞춤 튜닝, 시작 프로그램, 게임 부스트 Nagle,
-정크 정리 정션, 프로세스 우선순위, 제거 전 되돌리기, 원클릭 범위)은 샌드박스에서 자동으로 확인할 수 있습니다.
+정크 정리 정션, 프로세스 우선순위, 제거 전 되돌리기, 원클릭 범위)과 **빌드한 설치 파일로 설치 → 제거 프로그램**
+(1-2, 13절의 설치 폴더·프로그램 목록 키·바로 가기 정리와 설치된 exe 의 되돌리기)은 샌드박스에서 자동으로 확인할 수 있습니다.
 샌드박스는 닫으면 안의 변경이 전부 사라져 개발 PC 는 바뀌지 않습니다.
 
 1. 한 번만: 관리자 PowerShell 에서 `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All` → 재부팅
-2. `powershell -ExecutionPolicy Bypass -File tools\sandbox\start_sandbox_check.ps1 -Wait`
-3. 결과 폴더의 `report.md` 를 봅니다. 실패 항목에는 처음 상태와 달라진 줄이 함께 적힙니다
+   (PowerShell 7 에서 "클래스가 등록되지 않았습니다" 가 나오면 `dism.exe /online /enable-feature /featurename:Containers-DisposableClientVM /all`)
+2. `build_all.bat` 로 `dist` 에 최신 설치 파일을 만든 뒤
+   `powershell -ExecutionPolicy Bypass -File tools\sandbox\start_sandbox_check.ps1 -Wait`
+   (`dist` 가 없으면 설치·제거 점검만 건너뜁니다. 다른 위치면 `-Dist <폴더>`)
+3. 샌드박스 창에 "업데이트하지 못했습니다" 가 뜨면 **아니요** 를 눌러야 부팅이 계속됩니다
+4. 결과 폴더의 `report.md` 를 봅니다. 실패 항목에는 처음 상태와 달라진 줄이 함께 적힙니다
 
-화면(확인 창·목록 표시), 설치·제거 프로그램, 재부팅 뒤 동작, OneDrive 는 자동 점검 범위 밖이라 아래 절차로 확인합니다.
+샌드박스에는 스토어 앱이 없어서 디블로터 앱 점검은 목록의 앱(Bing 뉴스 등) 대신 지워도 영향이 작은 시스템 앱으로
+같은 제거·기록·되살리기 경로를 확인합니다. **목록의 앱 자체는 5절로 실제 PC(가상 머신)에서 확인합니다.**
+화면(APEX CARE 창의 확인 창·목록 표시), 재부팅 뒤 동작, OneDrive 는 자동 점검 범위 밖이라 아래 절차로 확인합니다.
 
 ## 0. 준비
 

@@ -103,6 +103,8 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 - **시스템을 바꾸는 코드를 개발 PC 에서 실행하지 않습니다.** 모드 적용, 정크 정리, 디블로터, 서비스·네트워크 변경이 모두 해당됩니다.
   로직은 `python -m pytest tests`(가짜 Windows)로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
   백엔드 동작은 Windows 샌드박스에서 `tools/sandbox/real_checks.py` 가 자동으로 확인합니다(샌드박스 계정이 아니면 실행을 거부).
+  `dist` 에 설치 파일이 있으면 설치 마법사 → 제거 프로그램도 창을 눌러(`tools/sandbox/ui_drive.ps1`, UI Automation) 확인하므로,
+  설치·제거 프로그램을 고쳤으면 `build_all.bat` 뒤에 샌드박스 점검을 돌립니다. 무인 설치 옵션을 따로 만들지 않습니다.
   시스템을 바꾸는 기능을 추가·수정하면 그 점검도 `real_checks.py` 에 더합니다.
   그 절차는 `docs/windows-manual-checklist.md`(가상 머신에서, `tools/snapshot_state.ps1` 로 전후 상태 비교)에 있습니다.
   시스템을 바꾸는 기능을 추가·수정하면 이 점검표와 `snapshot_state.ps1` 이 담는 값도 함께 고칩니다.
@@ -142,4 +144,6 @@ UI 탭은 `src/components/Sidebar.jsx` 에 정의되고 `src/App.jsx` 가 라우
 설치·제거 프로그램 소스는 `tools/setup_wizard.py` 와 `tools/uninstall.py` 입니다.
 제거 프로그램은 설치 폴더를 지우기 전에 `APEX CARE.exe --revert-for-uninstall` 로 이 앱이 바꾼 것을 되돌리고,
 실패하면 목록을 보여주며 기본 선택 "아니요" 로 계속할지 묻습니다. 실행 중인 APEX CARE 를 강제 종료하지 않습니다.
+설치 폴더는 제거 프로그램이 끝난 뒤 정리 배치가 지웁니다. 배치는 작업 폴더를 `%TEMP%` 로 두고 띄웁니다(설치 폴더를
+작업 폴더로 물려받으면 그 폴더를 지울 수 없어 남습니다). 폴더를 지웠을 때만 프로그램 목록 키를 지우고 "제거되었습니다" 를 띄웁니다.
 시스템을 바꾸는 기능을 새로 만들면 `uninstall_prep.revert_for_uninstall()` 이 그것도 되돌리는지 확인합니다.

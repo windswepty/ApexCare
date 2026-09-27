@@ -59,3 +59,13 @@ def test_sandbox_launcher_maps_repo_and_python_read_only():
     with open(os.path.join(ROOT, 'tools', 'sandbox', 'run_in_sandbox.cmd'), encoding='utf-8') as f:
         cmd = f.read()
     assert 'set APEX_SANDBOX=1' in cmd and 'real_checks.py' in cmd
+
+
+def test_sandbox_shuts_itself_down_but_never_a_real_pc():
+    # 끝난 샌드박스가 열려 있으면 연결된 dist 의 파일을 잡아 다음 build_all.bat 이 실패한다(실제로 났다).
+    # 그래서 스스로 닫지만, 이 파일이 실제 PC 에서 실행돼도 그 PC 를 끄면 안 된다.
+    with open(os.path.join(ROOT, 'tools', 'sandbox', 'run_in_sandbox.cmd'), encoding='utf-8') as f:
+        lines = [l for l in f.read().splitlines() if 'shutdown' in l.lower() and not l.lower().startswith('rem')]
+    assert lines
+    for line in lines:
+        assert line.lower().startswith('if /i "%username%"=="wdagutilityaccount" ')
