@@ -98,10 +98,17 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
       DiagTrack 이 **지금 멈추지는 않는다**(`Get-Service DiagTrack`)
 - [ ] 5-2. **Cortana 끄기** → `AllowCortana = 0`
 - [ ] 5-3. 복구 센터 "전부 원래대로" → `base` 와 같다(원래 없던 정책 값은 **지워져야** 함)
-- [ ] 5-4. 앱 제거 항목에 "되돌릴 수 없음" 표시가 있고, 실행 전에 확인을 받는다
-- [ ] 5-5. (스냅숏에서만) **Bing 앱** 제거 → `[Appx]` 에서 Bing 항목만 사라지고
-      `Microsoft.XboxGamingOverlay`(게임 바)·`Microsoft.GamingApp`(새 Xbox 앱)은 남는다. 끝나면 가상 머신 검사점으로 되돌린다
-- [ ] 5-6. 실패한 항목이 있으면 "완료" 가 아니라 무엇이 왜 실패했는지 나온다
+- [ ] 5-4. 앱 제거 항목에 "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기" 표시가 있고, 실행 전에 패키지 이름과 함께 확인을 받는다
+- [ ] 5-5. **Bing 앱**·**영화 및 TV** 제거 → `[Appx]` 에서 `Microsoft.BingNews`·`BingWeather`·`ZuneVideo` 만 사라지고
+      `Microsoft.ZuneMusic`(미디어 플레이어)·`XboxGamingOverlay`(게임 바)·`GamingApp`(새 Xbox 앱)은 남는다.
+      화면 아래 '제거한 앱' 에 지운 패키지가 나오고 `%APPDATA%\APEX_CARE_DATA\debloat_removed.json` 에 기록이 있다
+- [ ] 5-6. 다른 계정에서는 그대로다: 두 번째 로컬 계정으로 로그인하면 Bing 앱이 남아 있다(현재 계정에서만 제거)
+- [ ] 5-7. '모두 되살리기' → 결과에 되살린 개수가 나오고, **스냅숏** 의 `[Appx]` 가 제거 전과 같다. 시작 메뉴에서 앱이 열린다.
+      '제거한 앱' 목록이 비고 `debloat_removed.json` 의 `apps` 가 빈 목록이다
+- [ ] 5-8. 설치돼 있지 않은 항목(예: 3D Builder)을 고르면 "완료" 가 아니라 "설치돼 있지 않아 변경 없음" 으로 나온다
+- [ ] 5-9. 표준 사용자 계정 `kim` 에 로그인한 채 UAC 창에서 **다른 관리자 계정**으로 APEX CARE 를 실행하면, 앱 제거가
+      "다른 계정으로 실행 중" 이유로 거부되고 아무것도 지워지지 않는다
+- [ ] 5-10. 실패한 항목이 있으면 "완료" 가 아니라 무엇이 왜 실패했는지 나온다
 
 ---
 

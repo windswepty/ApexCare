@@ -57,6 +57,10 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 - 경로 경계는 `safe_delete.norm()` 으로 정규화(realpath)한 뒤 `is_protected()` / `is_inside()` 로 판단합니다. 문자열 부분 일치로 판단하지 않습니다.
 - 영구 삭제는 임시 파일·캐시 정리와 휴지통 비우기뿐입니다. 휴지통 비우기는 기본으로 선택 해제하고, 되돌릴 수 없다는 확인을 받은 뒤에만 실행합니다.
 - 이름으로 폴더를 추정해서 지우지 않습니다. 언인스톨러 잔여물은 `InstallLocation` 을 기준으로 찾고, 이름은 정규화 후 정확히 일치할 때만 후보로 올립니다.
+- 기본 앱(Appx) 제거는 정확한 패키지 이름으로, APEX CARE 를 실행한 계정에서만 합니다. `-AllUsers`·`Remove-AppxProvisionedPackage`·와일드카드를
+  쓰지 않습니다(설치 파일까지 사라져 되살릴 수 없습니다). 지우기 전에 `debloat_removed.json` 에 기록하고, 기록하지 못하면 지우지 않습니다.
+  되살리기는 WindowsApps·SystemApps 안의 `AppxManifest.xml` 만 등록하고, 등록 뒤 설치됐는지 다시 확인합니다.
+- 클라우드 동기화의 온라인 전용 파일(OneDrive 등)은 읽거나 쓰기로 열지 않습니다(`file_finder._is_cloud_only`). 내용에 손대면 내려받아집니다.
 
 ### 시스템 변경 (레지스트리·전원·서비스)
 

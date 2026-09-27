@@ -240,6 +240,14 @@ class Api:
     def startDebloater(self, selectedIds):
         return debloater.start_debloater(selectedIds)
 
+    def getRemovedDebloatApps(self):
+        """디블로터가 이 계정에서 제거한 앱 목록(되살리기 화면)."""
+        return debloater.get_removed_apps()
+
+    def restoreRemovedDebloatApps(self, names=None):
+        """제거한 앱을 되살린다. names 가 없으면 전부. 앱마다 성패를 돌려준다."""
+        return debloater.restore_removed_apps(names)
+
     # === Game Booster API ===
     def getGameBoosterStatus(self):
         return game_booster.get_booster_status()

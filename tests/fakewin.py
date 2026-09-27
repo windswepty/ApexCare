@@ -839,9 +839,8 @@ def reset():
     SERVICES.reset()
     from backend import config_manager, system_state
     patch_system_state(system_state)
-    for path in (system_state.JOURNAL_PATH, config_manager.CONFIG_FILE):
-        for p in (path, path + '.tmp', path + '.corrupt'):
-            try:
-                os.remove(p)
-            except FileNotFoundError:
-                pass
+    # 저널·설정·제거 기록·로그 등 앱이 남기는 파일을 모두 비운다. 임시 샌드박스 안일 때만.
+    data_dir = os.path.realpath(config_manager.APPDATA_DIR)
+    assert SANDBOX and data_dir.startswith(os.path.realpath(SANDBOX) + os.sep), data_dir
+    shutil.rmtree(data_dir, ignore_errors=True)
+    os.makedirs(data_dir, exist_ok=True)
