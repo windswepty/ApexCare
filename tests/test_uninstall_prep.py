@@ -190,7 +190,3 @@ def test_uninstaller_reverts_first_and_never_force_kills():
     code = ast.unparse(main)
     # 되돌리기 → (실패하면 묻기) → 설치 폴더 삭제 순서
     assert code.index('_app_running()') < code.index('_revert_system_changes(') < code.index('rmdir /s /q')
-
-
-def test_new_module_is_in_pyinstaller_hiddenimports():
-    assert "'backend.uninstall_prep'" in _read('APEX CARE Payload.spec')

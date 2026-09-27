@@ -8,6 +8,10 @@ from PyQt6.QtWidgets import (QApplication, QWizard, QWizardPage, QVBoxLayout,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 
+# 버전은 여기 한 곳에서 정한다. 'APEX CARE Setup 1.0.1.spec' 이 이 줄을 읽어 설치 파일 이름을 짓고,
+# package.json 의 version 과 다르면 빌드를 멈춘다.
+APP_VERSION = '1.0.1'
+
 class InstallWorker(QThread):
     progress_update = pyqtSignal(int)
     finished_install = pyqtSignal(bool, str)
@@ -220,7 +224,7 @@ class SetupWizard(QWizard):
             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, install_dir)
             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, self.installed_path)
             winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "APEX CARE Team")
-            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.1")
+            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, APP_VERSION)
             winreg.CloseKey(key)
         except Exception:
             pass
