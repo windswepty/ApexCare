@@ -94,6 +94,9 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 
 - **시스템을 바꾸는 코드를 개발 PC 에서 실행하지 않습니다.** 모드 적용, 정크 정리, 디블로터, 서비스·네트워크 변경이 모두 해당됩니다.
   로직은 `python -m pytest tests`(가짜 Windows)로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
+  그 절차는 `docs/windows-manual-checklist.md`(가상 머신에서, `tools/snapshot_state.ps1` 로 전후 상태 비교)에 있습니다.
+  시스템을 바꾸는 기능을 추가·수정하면 이 점검표와 `snapshot_state.ps1` 이 담는 값도 함께 고칩니다.
+  `snapshot_state.ps1` 은 UTF-8 BOM 으로 저장합니다(Windows PowerShell 5.1 이 BOM 없는 한국어를 깨뜨립니다).
 - 테스트에서 fakewin 을 우회하지 않습니다. `fakewin.REAL` 의 진짜 객체는 문지기 자가 테스트(별도 파이썬 프로세스)에만 씁니다.
   backend 를 직접 부르는 스크립트를 `tests/` 밖에 새로 만들지 않습니다. 성능 모드를 바꾸고 대기 메모리를 비우던 옛 스크립트
   (`test_performance.py`, `test_standby.py`, `tools/test_full.py`, `tools/test_backend.py`)는 그래서 지웠습니다.
