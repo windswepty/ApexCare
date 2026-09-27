@@ -36,4 +36,4 @@ def test_uninstaller_mentions_removed_apps_it_will_not_reinstall():
     assert debloater.REMOVED_NAME in src                      # 기록 파일 이름이 앱과 같다
     call = 'removed_apps = _removed_app_count()'
     assert call in src and '+ removed_note' in src          # 확인 창 문구에 붙는다
-    assert src.index(call) < src.index('_revert_system_changes(install_dir)')
+    assert src.index(call) < src.index('reverted, why = _revert_system_changes(install_dir)')
