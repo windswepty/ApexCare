@@ -51,7 +51,11 @@ def test_sandbox_launcher_maps_repo_and_python_read_only():
     with open(os.path.join(ROOT, 'tools', 'sandbox', 'start_sandbox_check.ps1'), encoding='utf-8-sig') as f:
         src = f.read()
     assert '<Networking>Disable</Networking>' in src
-    assert src.count('<ReadOnly>true</ReadOnly>') == 2 and src.count('<ReadOnly>false</ReadOnly>') == 1
+    # 저장소·파이썬·설치 파일(dist)은 읽기 전용, 결과 폴더만 쓰기 가능
+    assert src.count('<ReadOnly>true</ReadOnly>') == 3 and src.count('<ReadOnly>false</ReadOnly>') == 1
+    assert '<SandboxFolder>C:\\apex\\out</SandboxFolder><ReadOnly>false' in src
+    for folder in ('repo', 'python', 'dist'):
+        assert f'<SandboxFolder>C:\\apex\\{folder}</SandboxFolder><ReadOnly>true' in src
     with open(os.path.join(ROOT, 'tools', 'sandbox', 'run_in_sandbox.cmd'), encoding='utf-8') as f:
         cmd = f.read()
     assert 'set APEX_SANDBOX=1' in cmd and 'real_checks.py' in cmd

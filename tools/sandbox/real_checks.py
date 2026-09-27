@@ -437,10 +437,68 @@ def priority():
     return verdict(problems, [])
 
 
-@check('디블로터 앱: 이 계정에서 제거 → 되살리기')
+# 샌드박스에는 디블로터 목록의 앱(Bing 뉴스 등)이 없다. 그때는 샌드박스에 있는 다른 앱 하나로
+# 같은 코드 경로(설치 확인 → 기록 → 이 계정에서 제거 → 매니페스트 재등록 → 설치 재확인)를 돌린다.
+# 제품의 디블로터 목록은 바꾸지 않는다. 대상 지정은 이 점검 안에서만 한다.
+_SANDBOX_APPX_PREFERRED = (
+    'Microsoft.WindowsCalculator', 'Microsoft.WindowsAlarms', 'Microsoft.MicrosoftStickyNotes',
+    'Microsoft.WindowsSoundRecorder', 'Microsoft.ScreenSketch', 'Microsoft.Paint', 'Microsoft.WindowsNotepad',
+    'Microsoft.Windows.Photos', 'Microsoft.WindowsCamera', 'Microsoft.GetHelp', 'Microsoft.Getstarted',
+)
+# 샌드박스에는 스토어 앱이 하나도 없고 SystemApps 의 시스템 앱만 있다(4회차에서 확인). 그중 지워도 샌드박스의
+# 다른 점검에 영향이 없는 작은 대화 상자류만 쓴다. SystemApps 에서는 이 목록 밖의 앱을 고르지 않는다.
+_SANDBOX_SYSTEMAPPS_OK = (
+    'Microsoft.Windows.XGpuEjectDialog', 'Microsoft.Windows.NarratorQuickStart', 'Microsoft.Windows.CapturePicker',
+    'Microsoft.Windows.PinningConfirmationDialog', 'Microsoft.Windows.SecureAssessmentBrowser',
+    'Microsoft.Windows.ParentalControls', 'Microsoft.MicrosoftEdgeDevToolsClient',
+    'Microsoft.Windows.PrintQueueActionCenter', 'Microsoft.Windows.PeopleExperienceHost',
+)
+# 지우면 다른 앱 설치·보안 화면이 망가질 수 있는 것은 고르지 않는다(샌드박스라도 뒤 점검에 영향이 간다)
+_SANDBOX_APPX_AVOID = ('store', 'appinstaller', 'desktopappinstaller', 'sechealth', 'windowsterminal',
+                       'shellexperience', 'startmenu', 'client.', 'windows.cbs', 'aad.', 'accountscontrol')
+
+_PS_LIST_ALL = r"""
+foreach ($p in @(Get-AppxPackage)) {
+  [void]$out.Add([ordered]@{
+    name = [string]$p.Name; fullName = [string]$p.PackageFullName; familyName = [string]$p.PackageFamilyName
+    installLocation = [string]$p.InstallLocation
+    nonRemovable = [bool]$p.NonRemovable; isFramework = [bool]$p.IsFramework
+  })
+}
+"""
+
+
+def _sandbox_appx_item():
+    """샌드박스에 설치된 앱 중 점검에 쓸 것 하나. (item, 설치된 이름 목록). 없으면 item 은 None."""
+    from backend import debloater
+    ok, rows, err = debloater._run_ps_json(_PS_LIST_ALL, {}, debloater.QUERY_TIMEOUT_SEC)
+    if not ok:
+        raise RuntimeError(f'설치된 앱 목록을 읽지 못했습니다: {err}')
+    windowsapps, systemapps = (os.path.normcase(r) + os.sep for r in debloater._windowsapps_roots())
+    usable, seen = {}, []
+    for r in rows:
+        name = str(r.get('name') or '')
+        loc = os.path.normcase(str(r.get('installLocation') or ''))
+        seen.append(f"{name}{' [F]' if r.get('isFramework') else ''}{' [고정]' if r.get('nonRemovable') else ''}")
+        if (r.get('isFramework') or r.get('nonRemovable') or not debloater._PKG_RE.match(name)
+                or any(a in name.lower() for a in _SANDBOX_APPX_AVOID)
+                or debloater._manifest_path(r.get('installLocation')) is None):
+            continue
+        if loc.startswith(windowsapps) or (loc.startswith(systemapps) and name in _SANDBOX_SYSTEMAPPS_OK):
+            usable[name] = r
+    names = sorted(seen)
+    pick = (next((n for n in _SANDBOX_APPX_PREFERRED if n in usable), None)
+            or next((n for n in sorted(usable) if n not in _SANDBOX_SYSTEMAPPS_OK), None)
+            or next((n for n in _SANDBOX_SYSTEMAPPS_OK if n in usable), None))
+    if not pick:
+        return None, names
+    return {'id': 'sandbox-check', 'name': f'점검용 앱 {pick}', 'kind': 'appx', 'packages': [pick]}, names
+
+
+@check('디블로터 앱: 이 계정에서 제거 → 기록 → 되살리기')
 def appx_round_trip():
     from backend import debloater
-    item = None
+    item, note = None, ''
     for x in debloater.DEBLOAT_SAFE_LIST:
         if x['kind'] == 'appx':
             ok, rows, _ = debloater._query_packages(x['packages'])
@@ -448,16 +506,48 @@ def appx_round_trip():
                 item = x
                 break
     if not item:
-        return 'SKIP', '샌드박스에 목록의 앱이 설치돼 있지 않습니다', []
-    before = snapshot('appx_before')
+        item, installed = _sandbox_appx_item()
+        if not item:
+            return 'SKIP', f'제거·되살리기에 쓸 앱이 없습니다. 설치된 앱: {installed}', []
+        note = f"목록의 앱이 없어 {item['packages'][0]} 로 확인했습니다. "
+    account = debloater._current_account()
     problems = []
-    status, detail = debloater._apply_appx_item(item, debloater._current_account())
+    why = debloater._account_problem(account)
+    if why:
+        return 'FAIL', f'계정 판정이 제거를 막았습니다: {why}', []
+
+    ok, rows, err = debloater._query_packages(item['packages'])
+    if not ok:
+        return 'FAIL', f'설치 상태 확인 실패: {err}', []
+    original = {r['familyName'].lower(): r['fullName'] for r in rows if not r.get('error')}
+    before = snapshot('appx_before')
+
+    status, detail = debloater._apply_appx_item(item, account)
     if status != 'removed':
         problems.append(f"{item['name']} 제거: {status} {detail}")
-    r = debloater.restore_removed_apps()
+    ok, rows, err = debloater._query_packages(item['packages'])
+    if not ok or [r for r in rows if not r.get('error')]:
+        problems.append(f'제거 뒤에도 설치돼 있습니다(또는 확인 실패: {err})')
+    recorded = {a.get('fullName'): a for a in debloater.get_removed_apps()}
+    for fam, full in original.items():
+        a = recorded.get(full)
+        if not a:
+            problems.append(f'{full} 이 제거 기록에 없습니다')
+        elif (a.get('account') or '').lower() != account.lower() or not a.get('manifestFound'):
+            problems.append(f"제거 기록이 이상합니다: account={a.get('account')} manifestFound={a.get('manifestFound')}")
+
+    r = debloater.restore_removed_apps(item['packages'])
     if not r.get('success'):
         problems.append(f"되살리기: {r.get('message')} {r.get('failed')}")
-    return verdict(problems, diff(before, snapshot('appx_after')))
+    ok, rows, err = debloater._query_packages(item['packages'])
+    now = {r['familyName'].lower(): r['fullName'] for r in rows if not r.get('error')} if ok else {}
+    if now != original:
+        problems.append(f'되살린 뒤 설치 상태가 처음과 다릅니다: {original} → {now}')
+    left = [a.get('fullName') for a in debloater.get_removed_apps() if a.get('fullName') in original.values()]
+    if left:
+        problems.append(f'되살렸는데 제거 기록에 남았습니다: {left}')
+    status, why, changes = verdict(problems, diff(before, snapshot('appx_after')))
+    return status, (note + why).strip(), changes
 
 
 @check('APEX CARE 제거 전 되돌리기: main.py --revert-for-uninstall')
@@ -518,6 +608,160 @@ def one_click():
     detail = '; '.join(f"{s['name']}={'성공' if s['ok'] else '실패'}({s.get('detail', '')})" for s in st.get('steps', []))
     status, why, changes = verdict(problems, [])
     return status, (why + ' ' + detail).strip(), changes
+
+
+# ─────────────────────────────────────────────
+# 설치 마법사 → 제거 프로그램 (빌드한 설치 파일 그대로)
+# ─────────────────────────────────────────────
+# 창은 tools/sandbox/ui_drive.ps1 이 UI Automation 으로 누른다. 설치 프로그램에 무인 설치 옵션을 만들지 않는다.
+
+DIST = os.environ.get('APEX_DIST') or r'C:\apex\dist'
+UI_PS1 = os.path.join(REPO, 'tools', 'sandbox', 'ui_drive.ps1')
+UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE'
+
+
+def ui(window, action, name='', timeout=30):
+    """ui_drive.ps1 을 한 번 부른다. {'ok', 'error', 'names'}"""
+    args = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', UI_PS1,
+            '-Window', window, '-Action', action, '-TimeoutSec', str(timeout)]
+    if name:
+        args += ['-Name', name]
+    r = subprocess.run(args, shell=False, capture_output=True, text=True, errors='replace',
+                       creationflags=CREATE_NO_WINDOW, timeout=timeout + 90)
+    for line in reversed((r.stdout or '').splitlines()):
+        if line.strip().startswith('{'):
+            try:
+                return json.loads(line)
+            except ValueError:
+                break
+    return {'ok': False, 'error': ((r.stderr or '') + (r.stdout or '')).strip()[-400:], 'names': []}
+
+
+def _ui_step(problems, what, window, action, name='', timeout=30):
+    res = ui(window, action, name, timeout)
+    if not res.get('ok'):
+        problems.append(f"{what}: {res.get('error')} 보인 컨트롤={res.get('names', [])[:25]}")
+    return bool(res.get('ok'))
+
+
+def _app_version():
+    import re
+    with open(os.path.join(REPO, 'tools', 'setup_wizard.py'), encoding='utf-8') as f:
+        return re.search(r"^APP_VERSION = '([^']+)'", f.read(), re.M).group(1)
+
+
+def _wait(cond, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(1)
+    return cond()
+
+
+def _desktop_shortcut():
+    return os.path.join(os.environ['USERPROFILE'], 'Desktop', 'APEX CARE.lnk')
+
+
+@check('설치 마법사 → 제거 프로그램: 설치, 제거 전 되돌리기(빌드한 exe), 흔적 정리')
+def install_uninstall():
+    setup = os.path.join(DIST, f'APEX CARE Setup {_app_version()}.exe')
+    if not os.path.isfile(setup):
+        return 'SKIP', f'설치 파일이 없습니다: {setup} (build_all.bat 로 만든 뒤 다시 돌리세요)', []
+    from backend import optimizer, perf_modes, uninstall_prep
+    install_dir = os.path.join(os.environ['LOCALAPPDATA'], 'APEX CARE')
+    app_exe = os.path.join(install_dir, 'APEX CARE.exe')
+    uninst_exe = os.path.join(install_dir, 'APEX CARE Uninstaller.exe')
+    if os.path.exists(install_dir) or reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is not None:
+        return 'FAIL', '점검 전에 이미 설치돼 있습니다(샌드박스가 깨끗하지 않음)', []
+    built = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(setup)))
+    problems = []
+
+    # ── 설치: 사용권 동의 → 다음 → 다음(설치) → 완료 화면에서 '실행하기' 끄고 종료
+    win = '설치 - APEX CARE'
+    proc = subprocess.Popen([setup], shell=False, cwd=DIST)
+    try:
+        ok = (_ui_step(problems, '사용권 동의', win, 'select', '조항에 동의합니다', 90)
+              and _ui_step(problems, '다음(사용권)', win, 'click', '다음')
+              and _ui_step(problems, '준비 화면', win, 'wait', '대상 위치')
+              and _ui_step(problems, '다음(설치 시작)', win, 'click', '다음')
+              and _ui_step(problems, '완료 화면', win, 'wait', '실행하기', 120)
+              and _ui_step(problems, "'실행하기' 끄기", win, 'uncheck', '실행하기')
+              and _ui_step(problems, '종료', win, 'click', '종료'))
+        if ok and not _wait(lambda: proc.poll() is not None, 60):
+            problems.append('종료를 눌렀는데 설치 마법사가 끝나지 않았습니다')
+    finally:
+        if proc.poll() is None:
+            proc.kill()                            # 이 점검이 띄운 설치 마법사만 끝낸다
+    if problems:
+        return 'FAIL', f'설치 파일 {built}. ' + '; '.join(problems), []
+
+    installed = {
+        'exe': os.path.isfile(app_exe), 'uninstaller': os.path.isfile(uninst_exe),
+        'DisplayVersion': reg_get('HKCU', UNINSTALL_KEY, 'DisplayVersion'),
+        'InstallLocation': reg_get('HKCU', UNINSTALL_KEY, 'InstallLocation'),
+        'UninstallString': reg_get('HKCU', UNINSTALL_KEY, 'UninstallString'),
+        'shortcut': os.path.exists(_desktop_shortcut()),
+    }
+    if not (installed['exe'] and installed['uninstaller']):
+        problems.append(f'설치 폴더에 파일이 없습니다: {installed}')
+    if installed['DisplayVersion'] != _app_version():
+        problems.append(f"프로그램 목록의 버전이 {installed['DisplayVersion']} 입니다")
+    if os.path.normcase(installed['InstallLocation'] or '') != os.path.normcase(install_dir):
+        problems.append(f"InstallLocation 이 다릅니다: {installed['InstallLocation']}")
+    if os.path.normcase(installed['UninstallString'] or '') != os.path.normcase(f'"{uninst_exe}"'):
+        problems.append(f"UninstallString 이 다릅니다: {installed['UninstallString']}")
+    if problems:
+        return 'FAIL', '; '.join(problems), []
+
+    # ── 바꿔 둔 뒤 제거: 제거 프로그램이 설치된 exe(PyInstaller 빌드)로 되돌리는지 본다
+    reg_set('HKCU', RUN_U, 'ApexSbxInstalled', r'C:\Windows\System32\notepad.exe')
+    try:
+        before = snapshot('install_before_changes')
+        perf_modes.apply_mode('gaming')
+        optimizer.toggle_startup_app('HKCU:ApexSbxInstalled', False)
+        try:
+            os.remove(uninstall_prep.result_path())
+        except OSError:
+            pass
+        proc = subprocess.Popen([uninst_exe], shell=False, cwd=install_dir)
+        try:
+            if _ui_step(problems, '삭제 확인', 'APEX CARE 삭제', 'click', r'^(Yes|예)', 60):
+                # 되돌리기(최대 300초)가 끝나면 제거 프로그램이 끝나거나, 실패 목록 창을 띄운다
+                done = _wait(lambda: proc.poll() is not None
+                             or ui('설정을 모두 되돌리지 못했습니다', 'exists', timeout=1).get('ok'), 330)
+                if proc.poll() is None:
+                    names = ui('설정을 모두 되돌리지 못했습니다', 'names', timeout=2).get('names', [])
+                    problems.append(f'되돌리기 실패 창이 떴습니다: {names[:10]}' if done
+                                    else '제거 프로그램이 330초 안에 끝나지 않았습니다')
+                    _ui_step(problems, "실패 창 '아니요'", '설정을 모두 되돌리지 못했습니다', 'click', r'^(No|아니요)', 5)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        try:
+            res = json.load(open(uninstall_prep.result_path(), encoding='utf-8'))
+            if not res.get('success'):
+                problems.append(f"설치된 exe 의 되돌리기 결과: {res.get('failed')}")
+        except Exception as e:
+            problems.append(f'설치된 exe 가 되돌리기 결과를 남기지 않았습니다: {e}')
+
+        # 제거 프로그램이 띄운 배치 파일이 2초 뒤 폴더·바로 가기·프로그램 목록 키를 지운다
+        gone = _wait(lambda: not os.path.exists(install_dir)
+                     and reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is None, 90)
+        if not gone:
+            import psutil
+            left = sorted(os.listdir(install_dir)) if os.path.isdir(install_dir) else []
+            alive = sorted({p.info['name'] for p in psutil.process_iter(['name'])
+                            if (p.info['name'] or '').lower().startswith(('apex care', 'cmd.exe'))})
+            problems.append(f"제거 뒤에도 남았습니다: 폴더={os.path.exists(install_dir)} 남은 파일={left} "
+                            f"목록 키={reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is not None} 실행 중={alive}")
+        if os.path.exists(_desktop_shortcut()):
+            problems.append('바탕 화면 바로 가기가 남았습니다')
+        changes = diff(before, snapshot('install_after_uninstall'))
+    finally:
+        reg_del('HKCU', RUN_U, 'ApexSbxInstalled')
+    status, why, changes = verdict(problems, changes)
+    return status, f"설치 파일 {built}. {why}".strip(), changes
 
 
 # ─────────────────────────────────────────────

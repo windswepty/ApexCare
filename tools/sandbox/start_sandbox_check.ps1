@@ -4,7 +4,8 @@
 
 .DESCRIPTION
   개발 PC 는 바꾸지 않는다. 샌드박스는 닫으면 안의 변경이 전부 사라지는 일회용 Windows 다.
-  저장소와 파이썬 폴더는 읽기 전용으로, 결과 폴더만 쓰기 가능으로 넘기고 네트워크는 끈다.
+  저장소와 파이썬 폴더, 설치 파일 폴더(dist, 있으면)는 읽기 전용으로, 결과 폴더만 쓰기 가능으로 넘기고 네트워크는 끈다.
+  dist 에 설치 파일이 있으면 설치 마법사 → 제거 프로그램 점검도 돈다(없으면 그 점검만 건너뜀).
   샌드박스가 켜지면 real_checks.py 가 알아서 돌고, 결과를 결과 폴더의 report.md 에 남긴다.
 
   준비(한 번만, 관리자 PowerShell, 재부팅 필요):
@@ -15,6 +16,7 @@
 #>
 param(
     [string]$Out = (Join-Path $env:TEMP ('apexcare-sandbox-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))),
+    [string]$Dist = '',
     [switch]$Wait,
     [int]$TimeoutMin = 40
 )
@@ -39,6 +41,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $pyDir 'Lib\site-packages\psutil')))
     exit 2
 }
 
+if (-not $Dist) { $Dist = Join-Path $repo 'dist' }
+$distMap = ''
+if (Test-Path -LiteralPath $Dist) {
+    $distMap = "    <MappedFolder><HostFolder>$([System.Security.SecurityElement]::Escape((Resolve-Path -LiteralPath $Dist).Path))</HostFolder><SandboxFolder>C:\apex\dist</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>`n"
+} else {
+    Write-Host "설치 파일 폴더($Dist)가 없어 설치·제거 프로그램 점검은 건너뜁니다."
+}
+
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $esc = { param($s) [System.Security.SecurityElement]::Escape($s) }
 $wsb = Join-Path $Out 'apexcare-check.wsb'
@@ -49,7 +59,7 @@ $xml = @"
     <MappedFolder><HostFolder>$(& $esc $repo)</HostFolder><SandboxFolder>C:\apex\repo</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
     <MappedFolder><HostFolder>$(& $esc $pyDir)</HostFolder><SandboxFolder>C:\apex\python</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
     <MappedFolder><HostFolder>$(& $esc $Out)</HostFolder><SandboxFolder>C:\apex\out</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
-  </MappedFolders>
+$distMap  </MappedFolders>
   <LogonCommand><Command>C:\apex\repo\tools\sandbox\run_in_sandbox.cmd</Command></LogonCommand>
 </Configuration>
 "@

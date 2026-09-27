@@ -42,9 +42,9 @@ def test_python_sources_compile_without_warnings():
 def test_sources_have_no_stray_control_characters():
     # '\a' 가 벨 문자(0x07)로 바뀌는 식의 실수는 문법상 문제가 없어 컴파일로는 안 잡힌다
     bad = []
-    for top in ('backend', 'tests', os.path.join('src', 'components')):
+    for top in ('backend', 'tests', 'tools', os.path.join('tools', 'sandbox'), os.path.join('src', 'components')):
         for f in os.listdir(os.path.join(ROOT, top)):
-            if f.endswith(('.py', '.js', '.jsx')):
+            if f.endswith(('.py', '.js', '.jsx', '.ps1', '.cmd')):
                 text = _read(os.path.join(top, f))
                 if any(ord(c) < 32 and c not in '\r\n\t' for c in text):
                     bad.append(os.path.join(top, f))
