@@ -46,6 +46,8 @@ def _seed_pc():
     REGISTRY.seed_key('HKLM', NAGLE_IF)
     # Windows 에 원래 있는 정책 키. 값만 없다(있으면 사용자가 정한 정책이다).
     REGISTRY.seed_key('HKLM', r'SOFTWARE\Policies\Microsoft\Windows\DataCollection')
+    REGISTRY.seed_key('HKCU', r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run')
+    REGISTRY.seed_key('HKLM', r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run')
     SERVICES.add('DiagTrack', 2)
     SERVICES.add('SysMain', 2)
     REGISTRY.seed('HKCU', RUN_USER, 'UserApp', r'"C:\apps\user.exe" --tray', fakewin.REG_SZ)
@@ -110,6 +112,23 @@ def test_failures_are_reported_and_kept_for_retry():
     assert REGISTRY.value('HKCU', RUN_USER, 'UserApp') is not None
     assert SERVICES.start_of('DiagTrack')[0] == 2
 
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_legacy_hidden_startup_apps_come_back_before_uninstall():
+    # 예전 버전이 Run 에서 지우고 HKCU\Software\APEXCARE 에 숨긴 항목. 앱을 지우면 영영 꺼진 채 남았다.
+    _seed_pc()
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup', 'OldTool', r'C:\apps\old.exe', fakewin.REG_SZ)
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup\_origin', 'OldTool', 'HKLM|' + RUN_MACHINE,
+                  fakewin.REG_SZ)
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    assert res['success'], res['failed']
+    assert REGISTRY.value('HKLM', RUN_MACHINE, 'OldTool') == r'C:\apps\old.exe'
+    assert optimizer._approved_state('HKLM', 'OldTool') != 'disabled'
+    assert not REGISTRY.has_key('HKCU', r'Software\APEXCARE')
+    assert ss.pending_changes() == {}
 
 def test_without_admin_nothing_is_changed_and_it_fails():
     _seed_pc()

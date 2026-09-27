@@ -4,18 +4,27 @@ import {
   Power
 } from 'lucide-react';
 
-// 백엔드 get_startup_apps() 의 location 값 → 화면 표시
+// 백엔드 get_startup_apps() 의 location 값 → 화면 표시 (백엔드가 locationLabel 을 주면 그것을 쓴다)
 const LOCATION_LABEL = {
   HKCU: '현재 사용자',
   HKLM: '모든 사용자',
   HKLM32: '모든 사용자 (32비트)',
-  disabled: 'APEX CARE 에서 끔',
+  LEGACY: '예전 버전에서 끔',
 };
 
 export default function StartupManager({ addToast }) {
   const [startupApps, setStartupApps] = useState([]);
   // 요청 중인 항목. 결과를 받기 전에는 스위치를 바꾸지 않는다.
   const [pendingId, setPendingId] = useState(null);
+
+  const reload = async () => {
+    try {
+      const apps = await window.pywebview.api.getStartupApps();
+      if (Array.isArray(apps)) setStartupApps(apps);
+    } catch (e) {
+      console.error('Error reloading startup apps:', e);
+    }
+  };
 
   useEffect(() => {
     const fetchStartup = async () => {
@@ -54,13 +63,11 @@ export default function StartupManager({ addToast }) {
 
     setPendingId(id);
     try {
-      const res = await window.pywebview.api.toggleStartupApp(appName, newEnabled);
+      // 이름이 아니라 id(위치:이름)로 부른다. 같은 이름이 여러 위치에 있어도 정확히 하나만 바뀐다.
+      const res = await window.pywebview.api.toggleStartupApp(id, newEnabled);
       if (res?.success) {
-        setStartupApps(prev => prev.map(a =>
-          a.id === id
-            ? { ...a, enabled: newEnabled, location: newEnabled ? (res.origin || a.location) : 'disabled' }
-            : a
-        ));
+        // 결과는 레지스트리에서 다시 읽는다(예전 버전에서 끈 항목은 켜면 원래 위치로 옮겨 간다)
+        await reload();
         if (addToast) addToast(res.message || `[${appName}] 시작 프로그램 상태가 변경되었습니다.`, 'success');
       } else {
         if (addToast) addToast(res?.message || `시작 프로그램(${appName}) 상태 변경에 실패했습니다.`, 'error');
@@ -87,7 +94,7 @@ export default function StartupManager({ addToast }) {
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white">시작 프로그램 관리</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-            Windows 로그인 시 자동으로 실행되도록 레지스트리(Run 키)에 등록된 프로그램을 켜고 끕니다. 끈 항목은 언제든 다시 켤 수 있습니다.
+            Windows 로그인 시 자동으로 실행되도록 레지스트리(Run 키)에 등록된 프로그램을 켜고 끕니다. 작업 관리자와 같은 방식이라 끈 항목도 작업 관리자·Windows 설정에 그대로 보이고, 복구 센터의 '전부 원래대로' 로도 되돌릴 수 있습니다. 다음 로그인부터 적용됩니다.
           </p>
         </div>
       </div>
@@ -138,9 +145,9 @@ export default function StartupManager({ addToast }) {
                 <div className="min-w-0 flex-1 pr-2">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{app.name}</span>
-                    {LOCATION_LABEL[app.location] && (
+                    {(app.locationLabel || LOCATION_LABEL[app.location]) && (
                       <span className="text-[10px] font-mono flex-shrink-0 px-1.5 py-0.5 rounded bg-black/5 dark:bg-slate-800 text-gray-600 dark:text-slate-400">
-                        {LOCATION_LABEL[app.location]}
+                        {app.locationLabel || LOCATION_LABEL[app.location]}
                       </span>
                     )}
                   </div>

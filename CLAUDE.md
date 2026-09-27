@@ -74,6 +74,9 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 - 성능 모드 전환은 `perf_modes.apply_mode()` 한 곳에서만 합니다. 새 모드를 적용하기 전에 이전 모드를 먼저 되돌립니다.
   '표준' 은 되돌리기만 하고 전원 플랜을 바꾸지 않습니다. 게임 부스트는 `persist=False` 로 게임 동안만 게이밍 모드를 쓰고 끝나면 게임 전 모드로 돌아갑니다.
 - 구버전이 `settings.json` 에 남긴 백업(`network_tweak_backup`, `service_start_backup`)은 있을 때만 그 값으로 복구합니다. 없으면 아무것도 쓰지 않습니다.
+- 시작 프로그램은 Run 값을 지우지 않고 `Explorer\StartupApproved\Run(/Run32)` 표시만 `set_registry` 로 바꿉니다(작업 관리자와 같은 방식,
+  group `startup:<위치>:<이름>`). 저널은 bytes 를 `{'__bytes__': 16진수}` 로 담습니다. 예전 버전이 `HKCU\Software\APEXCARE\DisabledStartup` 에
+  숨긴 항목은 켤 때 기록된 원래 Run 위치(허용 목록으로 검증)로 되살립니다.
 - 저널 위치: `%APPDATA%\APEX_CARE_DATA\system_state.json`. 설정 파일: 같은 폴더의 `settings.json`.
 
 ### 프로세스

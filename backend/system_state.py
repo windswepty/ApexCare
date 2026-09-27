@@ -96,6 +96,23 @@ _NOT_RECORDED = {'ok': False, 'verified': False,
                  'reason': '원래 값을 기록하지 못해 바꾸지 않았습니다 (저널 저장 실패)'}
 
 
+def _enc(value):
+    """저널(JSON)에 넣을 수 있게 바꾼다. bytes(REG_BINARY 등)는 {'__bytes__': 16진수}."""
+    if isinstance(value, (bytes, bytearray)):
+        return {'__bytes__': bytes(value).hex()}
+    return value
+
+
+def _dec(value):
+    """_enc 의 반대. 형식이 깨졌으면 None."""
+    if isinstance(value, dict) and '__bytes__' in value:
+        try:
+            return bytes.fromhex(value['__bytes__'])
+        except (TypeError, ValueError):
+            return None
+    return value
+
+
 def _forget(keys):
     data = _load()
     for k in keys:
@@ -160,7 +177,7 @@ def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why='')
 
     if not _record(entry_key, {
         'kind': 'registry', 'group': group, 'hive': hive, 'path': path,
-        'name': name, 'existed': existed, 'value': before,
+        'name': name, 'existed': existed, 'value': _enc(before),
         'type': before_type if existed else vtype, 'why': why,
     }):
         return dict(_NOT_RECORDED)
@@ -567,10 +584,13 @@ def restore_all():
 def _restore_registry(e):
     """레지스트리 항목 하나를 되돌리고 되읽어 확인한다. 실패 사유 또는 None."""
     hive, path, name = HIVES[e['hive']], e['path'], e['name']
+    original = _dec(e.get('value'))
     if e.get('existed'):
+        if original is None:
+            return '기록된 원래 값의 형식이 올바르지 않아 건드리지 않았습니다'
         with winreg.CreateKeyEx(hive, path, 0,
                                 winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
-            winreg.SetValueEx(k, name, 0, e.get('type') or winreg.REG_DWORD, e['value'])
+            winreg.SetValueEx(k, name, 0, e.get('type') or winreg.REG_DWORD, original)
     else:
         # 원래 없던 값이다. 되돌린다는 건 '지운다'는 뜻이다.
         try:
@@ -581,8 +601,8 @@ def _restore_registry(e):
             pass
     existed, now, _ = read_registry_strict(e['hive'], path, name)
     if e.get('existed'):
-        if not existed or now != e['value']:
-            return f"되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {e['value']}, 실제 {now})"
+        if not existed or now != original:
+            return f"되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {original}, 실제 {now})"
     elif existed:
         return '원래 없던 값을 지웠지만 아직 남아 있습니다'
     return None

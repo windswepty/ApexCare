@@ -36,7 +36,11 @@ function RegAllValues([string]$path) {
     $item = Get-Item -LiteralPath $path
     $names = @($item.GetValueNames() | Sort-Object)
     if ($names.Count -eq 0) { Line "  <값 없음>"; return }
-    foreach ($n in $names) { Line ("  {0} = {1}" -f $n, $item.GetValue($n, $null, 'DoNotExpandEnvironmentNames')) }
+    foreach ($n in $names) {
+        $v = $item.GetValue($n, $null, 'DoNotExpandEnvironmentNames')
+        if ($v -is [byte[]]) { $v = 'hex:' + (($v | ForEach-Object { $_.ToString('x2') }) -join '') }
+        Line ("  {0} = {1}" -f $n, $v)
+    }
 }
 
 # ── 전원 ───────────────────────────────────────────
@@ -111,6 +115,9 @@ foreach ($l in (netsh int tcp show global)) { if ($l.Trim() -and $l -match ':') 
 foreach ($rk in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
                   'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
                   'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+                  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+                  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+                  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32',
                   'HKCU:\Software\APEXCARE\DisabledStartup',
                   'HKCU:\Software\APEXCARE\DisabledStartup\_origin')) {
     Line "[시작 프로그램] $rk"

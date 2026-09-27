@@ -26,3 +26,26 @@ def test_setup_version_matches_package_json():
     m = re.search(r"^APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]", _read('tools/setup_wizard.py'), re.M)
     assert m, 'tools/setup_wizard.py 에 APP_VERSION 이 없습니다'
     assert m.group(1) == json.loads(_read('package.json'))['version']
+
+
+def test_python_sources_compile_without_warnings():
+    # 문서 문자열 속 '\S' 같은 잘못된 이스케이프는 경고로만 드러나고, 앞으로 오류가 된다
+    import warnings
+    files = [os.path.join('backend', f) for f in os.listdir(os.path.join(ROOT, 'backend')) if f.endswith('.py')]
+    files += ['main.py', os.path.join('tools', 'uninstall.py'), os.path.join('tools', 'setup_wizard.py')]
+    for rel in files:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            compile(_read(rel), rel, 'exec')
+
+
+def test_sources_have_no_stray_control_characters():
+    # '\a' 가 벨 문자(0x07)로 바뀌는 식의 실수는 문법상 문제가 없어 컴파일로는 안 잡힌다
+    bad = []
+    for top in ('backend', 'tests', os.path.join('src', 'components')):
+        for f in os.listdir(os.path.join(ROOT, top)):
+            if f.endswith(('.py', '.js', '.jsx')):
+                text = _read(os.path.join(top, f))
+                if any(ord(c) < 32 and c not in '\r\n\t' for c in text):
+                    bad.append(os.path.join(top, f))
+    assert bad == [], bad

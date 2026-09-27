@@ -181,11 +181,16 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 `reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v ApexTestMachine /d "C:\Windows\System32\notepad.exe"` →
 **스냅숏** `09-before`
 
-- [ ] 9-1. 두 항목을 앱에서 끔 → Run 키에서 빠지고 `HKCU\Software\APEXCARE\DisabledStartup` 에 들어간다
-- [ ] 9-2. 다시 켬 → **원래 위치**(HKCU 는 HKCU, HKLM 은 HKLM)로 돌아간다 → **비교** `09-before` 와 같다
-      (`DisabledStartup` 키는 빈 채로 남을 수 있음)
-- [ ] 9-3. 목록에 "영향도"·"부팅 +1.4s" 같은 지어낸 수치가 없다
-- [ ] 9-4. 끝나면 두 테스트 항목을 `reg delete` 로 지운다
+- [ ] 9-1. 두 항목을 앱에서 끔 → **Run 값은 그대로** 남고 `Explorer\StartupApproved\Run` 에 `hex:03...` 값이 생긴다.
+      작업 관리자 '시작 앱' 탭과 설정 → 앱 → 시작 프로그램에도 **사용 안 함** 으로 보인다. 복구 센터에 두 항목이 나온다
+- [ ] 9-2. 앱에서 다시 켬 → **비교** `09-before` 와 같다(StartupApproved 값까지 원래대로)
+- [ ] 9-3. 다시 끈 뒤 복구 센터 "전부 원래대로" → 두 항목이 켜지고 `09-before` 와 같다
+- [ ] 9-4. 작업 관리자에서 끈 항목을 앱에서 켰다가 다시 끄면 `StartupApproved` 값이 작업 관리자가 쓴 값과 **같은 바이트** 로 돌아간다
+- [ ] 9-5. 예전 버전 흉내: `reg add HKCU\Software\APEXCARE\DisabledStartup /v ApexOld /d "C:\Windows\System32\notepad.exe"` 와
+      `reg add HKCU\Software\APEXCARE\DisabledStartup\_origin /v ApexOld /d "HKLM|SOFTWARE\Microsoft\Windows\CurrentVersion\Run"` →
+      목록에 '예전 버전에서 끔' 으로 보인다 → 켬 → `HKLM\...\Run` 에 되살아나 켜지고 `APEXCARE` 의 기록이 사라진다
+- [ ] 9-6. 목록에 "영향도"·"부팅 +1.4s" 같은 지어낸 수치가 없다
+- [ ] 9-7. 끝나면 테스트 항목(ApexTestUser·ApexTestMachine·ApexOld)을 `reg delete` 로 지운다
 
 ---
 

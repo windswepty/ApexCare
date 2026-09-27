@@ -996,185 +996,279 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
 # ─────────────────────────────────────────────
 # Startup Manager (winreg)
 # ─────────────────────────────────────────────
+# 작업 관리자와 같은 방식으로 켜고 끈다. Run 값은 지우지 않고
+# Explorer\StartupApproved\Run(/Run32) 의 표시만 system_state 를 거쳐 바꾼다(원래 값 기록 → 되읽기 확인).
+# 그래서 끈 항목도 작업 관리자·Windows 설정에 그대로 보이고 거기서 다시 켤 수 있으며,
+# 복구 센터의 '전부 원래대로' 와 APEX CARE 제거가 같은 저널로 되돌린다.
+# 예전에는 Run 값을 지우고 HKCU\Software\APEXCARE\DisabledStartup 에만 숨겨 둬서, 앱을 지우면
+# 되살릴 방법이 없었다. 그 기록('구버전에서 끈 항목')은 켤 때 원래 위치로 되살린다.
 import winreg
 
-def get_startup_apps():
-    """Run 키에 등록된 시작 프로그램(켜짐)과 APEX CARE 가 꺼 둔 항목(꺼짐)을 돌려준다.
+_RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_APPROVED = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved"
 
-    레지스트리에서 읽은 사실만 담는다: 이름, 명령줄(command), 등록 위치(location), 켜짐 여부.
-    예전에는 명령줄 길이로 '영향도' 와 '+1.4s' 같은 부팅 시간을 지어냈다. 측정값이 아니므로 뺐다.
-    """
-    apps = []
-    app_id = 1
+# tag: (system_state 하이브 이름, winreg 하이브, Run 경로, StartupApproved 경로, 표시 이름)
+RUN_LOCATIONS = {
+    'HKCU': ('HKCU', winreg.HKEY_CURRENT_USER, _RUN, _APPROVED + r"\Run", '현재 사용자'),
+    'HKLM': ('HKLM', winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run", '모든 사용자'),
+    'HKLM32': ('HKLM', winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+               r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32", '모든 사용자 (32비트)'),
+}
 
-    def _clean(s):
-        if isinstance(s, str): return s.replace('\x00', '').strip()
-        return s
+_LEGACY_BACKUP = r"Software\APEXCARE\DisabledStartup"
+_LEGACY_ORIGIN = r"Software\APEXCARE\DisabledStartup\_origin"
 
-    registry_paths = [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 'HKCU'),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 'HKLM'),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", 'HKLM32')
-    ]
+# StartupApproved 값: 첫 바이트가 짝수면 켜짐, 홀수면 꺼짐(작업 관리자와 같은 판정). 뒤 8바이트는 끈 시각.
+_APPROVED_ENABLED = b'\x02' + b'\x00' * 11
 
-    seen = set()
 
-    for hkey, path, tag in registry_paths:
-        try:
-            run_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_READ)
+def _clean(s):
+    return s.replace('\x00', '').strip() if isinstance(s, str) else s
+
+
+def _reg_read(hive, path, name):
+    """(있음, 값, 타입). 읽지 못하면 없음으로 본다(표시용)."""
+    try:
+        with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+            v, t = winreg.QueryValueEx(k, name)
+            return True, v, t
+    except OSError:
+        return False, None, None
+
+
+def _reg_values(hive, path):
+    out = []
+    try:
+        with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
             i = 0
             while True:
                 try:
-                    name, value, _ = winreg.EnumValue(run_key, i)
-                    name_clean = _clean(name)
-                    if name_clean not in seen:
-                        seen.add(name_clean)
-                        apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
-                                     "location": tag, "enabled": True})
-                        app_id += 1
-                    i += 1
+                    out.append(winreg.EnumValue(k, i))
                 except OSError:
                     break
-            winreg.CloseKey(run_key)
-        except Exception:
-            pass
-            
-    # Read disabled apps backup (only HKCU for now to keep it safe)
-    try:
-        backup_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\APEXCARE\DisabledStartup", 0, winreg.KEY_READ)
-        i = 0
-        while True:
-            try:
-                name, value, _ = winreg.EnumValue(backup_key, i)
-                name_clean = _clean(name)
-                if name_clean not in seen:
-                    seen.add(name_clean)
-                    apps.append({"id": app_id, "name": name_clean, "command": _clean(value),
-                                 "location": "disabled", "enabled": False})
-                    app_id += 1
                 i += 1
-            except OSError:
-                break
-        winreg.CloseKey(backup_key)
-    except Exception:
+    except OSError:
         pass
-    
-    # Sort alphabetically
-    apps.sort(key=lambda x: x["name"].lower())
+    return out
+
+
+def _approved_state(tag, name):
+    """'enabled'·'disabled'·'none'(값 없음 = 켜짐)."""
+    loc = RUN_LOCATIONS[tag]
+    exists, val, _ = _reg_read(loc[1], loc[3], name)
+    if not exists:
+        return 'none'
+    if isinstance(val, (bytes, bytearray)) and len(val) >= 1:
+        return 'disabled' if (val[0] & 1) else 'enabled'
+    return 'enabled'
+
+
+def _approved_disabled_bytes():
+    ft = int((time.time() + 11644473600) * 10 ** 7)          # 1601-01-01 기준 100ns (FILETIME)
+    return b'\x03\x00\x00\x00' + ft.to_bytes(8, 'little')
+
+
+def _make_id(tag, name):
+    return f"{tag}:{name}"
+
+
+def _parse_id(app_id):
+    if not isinstance(app_id, str) or ':' not in app_id:
+        return None, None
+    tag, name = app_id.split(':', 1)
+    if tag not in RUN_LOCATIONS and tag != 'LEGACY':
+        return None, None
+    return tag, name
+
+
+def _legacy_entries():
+    """구버전이 Run 에서 지우고 숨겨 둔 항목: [(이름, 값, 타입, 출처문자열|None)]"""
+    origins = {n: v for n, v, _ in _reg_values(winreg.HKEY_CURRENT_USER, _LEGACY_ORIGIN)}
+    return [(n, v, t, origins.get(n)) for n, v, t in _reg_values(winreg.HKEY_CURRENT_USER, _LEGACY_BACKUP)]
+
+
+def _legacy_target(origin):
+    """구버전 출처 기록을 RUN_LOCATIONS 로 검증한다. (tag, 출처를 아는가) 또는 (None, 이유).
+
+    기록은 사용자 레지스트리에 있어 다른 프로그램이 고칠 수 있다. 허용된 Run 경로가 아니면 쓰지 않는다.
+    """
+    if origin is None:
+        return 'HKCU', False                     # 출처 기록이 없는 아주 옛 항목은 현재 사용자로 되살린다
+    if not isinstance(origin, str) or '|' not in origin:
+        return None, '원래 위치 기록 형식이 올바르지 않습니다'
+    tag, path = origin.split('|', 1)
+    loc = RUN_LOCATIONS.get(tag)
+    if not loc or path.strip().lower() != loc[2].lower():
+        return None, '원래 위치 기록이 허용된 시작 프로그램 위치가 아닙니다'
+    return tag, True
+
+
+def get_startup_apps():
+    """Run 키 3곳의 시작 프로그램과 켜짐/꺼짐 상태, 그리고 구버전에서 끈 항목.
+
+    레지스트리에서 읽은 사실만 담는다. 같은 이름도 위치가 다르면 따로 보여 준다(id 로 구분).
+    """
+    apps = []
+    for tag, loc in RUN_LOCATIONS.items():
+        for raw_name, value, _ in _reg_values(loc[1], loc[2]):
+            state = _approved_state(tag, raw_name)
+            apps.append({
+                "id": _make_id(tag, raw_name), "name": _clean(raw_name),
+                "command": _clean(value) if isinstance(value, str) else str(value),
+                "location": tag, "locationLabel": loc[4],
+                "enabled": state != 'disabled', "legacy": False,
+            })
+
+    for raw_name, value, _, origin in _legacy_entries():
+        tag, known = _legacy_target(origin)
+        if tag and _reg_read(RUN_LOCATIONS[tag][1], RUN_LOCATIONS[tag][2], raw_name)[0]:
+            continue                               # 프로그램이 스스로 다시 등록했다
+        apps.append({
+            "id": _make_id('LEGACY', raw_name), "name": _clean(raw_name),
+            "command": _clean(value) if isinstance(value, str) else str(value),
+            "location": 'LEGACY',
+            "locationLabel": '예전 버전에서 끔' + ('' if known else ' (원래 위치 모름)'),
+            "enabled": False, "legacy": True,
+        })
+
+    apps.sort(key=lambda a: (a["name"].lower(), a["location"]))
     return apps
 
-def toggle_startup_app(name, enabled):
-    """시작 프로그램을 켜고 끈다.
 
-    기존 구현의 문제:
-      1. 항목을 어느 Run 키에서도 찾지 못해도 success=True 를 돌려줬다.
-         found 플래그를 만들어 놓고 한 번도 검사하지 않았다.
-         사용자는 '껐다' 고 생각하지만 실제로는 아무 일도 없었다.
-      2. 다시 켤 때 무조건 HKCU 의 Run 키에 복원했다. 원래 HKLM(모든 사용자)에
-         있던 항목이 HKCU(현재 사용자)로 옮겨져 적용 범위가 조용히 바뀐다.
-      3. 복원 경로 전체가 except: pass 로 감싸여 실패해도 성공으로 보고됐다.
+def _startup_group(tag, name):
+    return f"startup:{tag}:{name}"
 
-    이제 끌 때 '어느 하이브의 어느 경로에 있었는지' 를 함께 기록하고,
-    켤 때 정확히 그 자리로 되돌린다.
-    """
-    RUN_LOCATIONS = [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 'HKCU'),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 'HKLM'),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", 'HKLM32'),
-    ]
-    HIVE_BY_TAG = {'HKCU': winreg.HKEY_CURRENT_USER,
-                   'HKLM': winreg.HKEY_LOCAL_MACHINE,
-                   'HKLM32': winreg.HKEY_LOCAL_MACHINE}
-    BACKUP = r"Software\APEXCARE\DisabledStartup"
-    ORIGIN = r"Software\APEXCARE\DisabledStartup\_origin"
 
-    if not name or not isinstance(name, str):
-        return {"success": False, "message": "프로그램 이름이 올바르지 않습니다."}
+def _journal_entry(group):
+    for e in system_state.pending_changes().values():
+        if e.get('group') == group and e.get('kind') == 'registry':
+            return e
+    return None
 
-    try:
-        if not enabled:
-            # ── 끄기: 원래 위치를 기록한 뒤 Run 키에서 제거 ──
-            for hive, path, tag in RUN_LOCATIONS:
-                try:
-                    with winreg.OpenKey(hive, path, 0, winreg.KEY_ALL_ACCESS) as run_key:
-                        try:
-                            val, vtype = winreg.QueryValueEx(run_key, name)
-                        except FileNotFoundError:
-                            continue
-                        # 먼저 백업한다. 백업에 실패하면 삭제하지 않는다.
-                        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, BACKUP, 0,
-                                                winreg.KEY_SET_VALUE) as bk:
-                            winreg.SetValueEx(bk, name, 0, vtype, val)
-                        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, ORIGIN, 0,
-                                                winreg.KEY_SET_VALUE) as ok_:
-                            winreg.SetValueEx(ok_, name, 0, winreg.REG_SZ, f"{tag}|{path}")
-                        winreg.DeleteValue(run_key, name)
-                        log.info(f"시작 프로그램 비활성화: {name} ({tag})")
-                        return {"success": True, "enabled": False, "origin": tag,
-                                "message": f"'{name}' 을 시작 프로그램에서 제외했습니다."}
-                except PermissionError:
-                    return {"success": False,
-                            "message": f"'{name}' 은 관리자 권한이 있어야 끌 수 있습니다."}
-                except FileNotFoundError:
-                    continue
-                except Exception as e:
-                    log.debug(f"{tag} 확인 실패: {e}")
 
-            # 어느 Run 키에도 없었다. 이것을 성공이라고 하면 안 된다.
-            return {"success": False,
-                    "message": f"'{name}' 을 시작 프로그램 목록에서 찾지 못했습니다. "
-                               "이미 제거되었거나 다른 방식(작업 스케줄러 등)으로 "
-                               "등록된 항목일 수 있습니다."}
+def _entry_original_enabled(e):
+    """저널에 기록된 원래 StartupApproved 값이 '켜짐' 이었는가. 알 수 없으면 None."""
+    if not e.get('existed'):
+        return True
+    b = system_state._dec(e.get('value'))
+    if not isinstance(b, (bytes, bytearray)) or not b:
+        return None
+    return not (b[0] & 1)
 
-        # ── 켜기: 기록해둔 원래 자리로 되돌린다 ──
+
+def _set_approved(tag, name, enabled):
+    """StartupApproved 표시를 system_state 로 바꾼다. 원래 상태로 돌아가는 거면 기록을 되돌린다. (ok, 이유)"""
+    loc = RUN_LOCATIONS[tag]
+    group = _startup_group(tag, name)
+    entry = _journal_entry(group)
+    if entry is not None and _entry_original_enabled(entry) == enabled:
+        # 원래 상태로 되돌리는 것이다. 새 값을 쓰지 않고 기록한 원래 값을 되살린다.
+        r = system_state.restore_group(group)
+        reason = '; '.join(f.get('reason', '') for f in r.get('failed', [])) or '원래 값 복구 실패'
+        return bool(r.get('ok')), ('' if r.get('ok') else reason)
+    data = _APPROVED_ENABLED if enabled else _approved_disabled_bytes()
+    r = system_state.set_registry(loc[0], loc[3], name, data, group, vtype=winreg.REG_BINARY,
+                                  why=f"시작 프로그램 '{_clean(name)}' ({loc[4]}) {'켜기' if enabled else '끄기'}")
+    return bool(r.get('ok')), r.get('reason', '')
+
+
+def _drop_legacy_value(raw_name):
+    """앱 자체 키(HKCU\\Software\\APEXCARE)의 구버전 기록을 지운다."""
+    for path in (_LEGACY_BACKUP, _LEGACY_ORIGIN):
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, BACKUP, 0, winreg.KEY_READ) as bk:
-                val, vtype = winreg.QueryValueEx(bk, name)
-        except FileNotFoundError:
-            return {"success": False,
-                    "message": f"'{name}' 의 백업을 찾지 못했습니다. "
-                               "이 프로그램으로 끈 항목만 다시 켤 수 있습니다."}
-
-        tag, path = 'HKCU', RUN_LOCATIONS[0][1]
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, ORIGIN, 0, winreg.KEY_READ) as ok_:
-                origin = winreg.QueryValueEx(ok_, name)[0]
-                tag, path = origin.split('|', 1)
-        except Exception:
-            # 구버전에서 끈 항목은 출처 기록이 없다. HKCU 로 복원하고 그 사실을 알린다.
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as k:
+                winreg.DeleteValue(k, raw_name)
+        except OSError:
             pass
 
-        hive = HIVE_BY_TAG.get(tag, winreg.HKEY_CURRENT_USER)
-        access = winreg.KEY_SET_VALUE
-        if tag == 'HKLM32':
-            access |= winreg.KEY_WOW64_32KEY
-        try:
-            with winreg.CreateKeyEx(hive, path, 0, access) as run_key:
-                winreg.SetValueEx(run_key, name, 0, vtype, val)
-        except PermissionError:
+
+def _migrate_one_legacy(raw_name):
+    """구버전이 숨긴 항목 하나를 원래 Run 위치에 되살리고 '꺼짐' 으로 표시한다(아직 켜지 않는다)."""
+    match = [e for e in _legacy_entries() if e[0] == raw_name]
+    if not match:
+        return {'ok': False, 'reason': '구버전 기록을 찾지 못했습니다'}
+    _, value, vtype, origin = match[0]
+    tag, known = _legacy_target(origin)
+    if tag is None:
+        return {'ok': False, 'reason': known}
+    if vtype not in (winreg.REG_SZ, winreg.REG_EXPAND_SZ) or not isinstance(value, str) or not value.strip():
+        return {'ok': False, 'reason': '저장된 명령줄 형식이 올바르지 않습니다'}
+    loc = RUN_LOCATIONS[tag]
+
+    if _reg_read(loc[1], loc[2], raw_name)[0]:
+        # 프로그램이 스스로 다시 등록했다. 지금 상태를 존중하고 구버전 기록만 정리한다.
+        _drop_legacy_value(raw_name)
+        return {'ok': True, 'tag': tag}
+
+    # 1) 먼저 '꺼짐' 표시. 이게 안 되면 Run 을 되살리지 않는다(되살리는 순간 켜져 버린다).
+    if _approved_state(tag, raw_name) != 'disabled':
+        ok, why = _set_approved(tag, raw_name, False)
+        if not ok or _approved_state(tag, raw_name) != 'disabled':
+            return {'ok': False, 'reason': f"'꺼짐' 표시를 쓰지 못했습니다: {why}"}
+
+    # 2) Run 값을 되살린다. 새 변경이 아니라 구버전이 지운 사용자 값의 복원이라 저널에 넣지 않는다
+    #    (넣으면 '전부 원래대로' 가 이 값을 다시 지운다).
+    try:
+        with winreg.CreateKeyEx(loc[1], loc[2], 0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
+            winreg.SetValueEx(k, raw_name, 0, vtype, value)
+    except PermissionError:
+        return {'ok': False, 'reason': f'{loc[4]} 위치에 쓰려면 관리자 권한이 필요합니다'}
+    except OSError as e:
+        return {'ok': False, 'reason': str(e)}
+    exists, back, _ = _reg_read(loc[1], loc[2], raw_name)
+    if not exists or back != value:
+        return {'ok': False, 'reason': '되살린 값을 다시 읽으니 다릅니다'}
+
+    _drop_legacy_value(raw_name)
+    return {'ok': True, 'tag': tag}
+
+
+def toggle_startup_app(app_id, enabled):
+    """시작 프로그램을 켜고 끈다. app_id 는 get_startup_apps 의 id('HKCU:이름' 등).
+
+    Run 값은 지우지 않는다. 같은 이름이 여러 위치에 있어도 id 로 정확히 하나만 바꾼다.
+    이름만 넘어오면(구 호출) 같은 이름이 하나뿐일 때만 받는다. 바꾼 뒤 다시 읽어 확인한다.
+    """
+    enabled = bool(enabled)
+    tag, name = _parse_id(app_id)
+    if tag is None:
+        if not isinstance(app_id, str) or not app_id.strip():
+            return {"success": False, "message": "프로그램 이름이 올바르지 않습니다."}
+        same = [a for a in get_startup_apps() if a["name"] == _clean(app_id)]
+        if len(same) != 1:
             return {"success": False,
-                    "message": f"'{name}' 을 원래 위치({tag})로 되돌리려면 관리자 권한이 필요합니다."}
+                    "message": ("같은 이름이 여러 위치에 있어 어느 항목인지 알 수 없습니다."
+                                if same else f"'{app_id}' 을 시작 프로그램 목록에서 찾지 못했습니다.")}
+        tag, name = _parse_id(same[0]["id"])
 
-        # 되읽어 확인한다
-        try:
-            with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | (winreg.KEY_WOW64_32KEY if tag == 'HKLM32' else 0)) as run_key:
-                back = winreg.QueryValueEx(run_key, name)[0]
-            if back != val:
-                return {"success": False, "message": "복원 후 값이 일치하지 않습니다."}
-        except Exception as e:
-            return {"success": False, "message": f"복원 확인에 실패했습니다: {e}"}
+    shown = _clean(name)
+    try:
+        if tag == 'LEGACY':
+            if not enabled:
+                return {"success": True, "enabled": False, "message": f"'{shown}' 은 이미 꺼져 있습니다."}
+            m = _migrate_one_legacy(name)
+            if not m.get('ok'):
+                return {"success": False, "message": f"'{shown}' 을 되살리지 못했습니다: {m.get('reason')}"}
+            tag = m['tag']
 
-        for key_path in (BACKUP, ORIGIN):
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as k:
-                    winreg.DeleteValue(k, name)
-            except Exception:
-                pass
+        loc = RUN_LOCATIONS[tag]
+        if not _reg_read(loc[1], loc[2], name)[0]:
+            return {"success": False,
+                    "message": f"'{shown}' 을 {loc[4]} 시작 프로그램에서 찾지 못했습니다. 이미 제거되었을 수 있습니다."}
 
-        log.info(f"시작 프로그램 활성화: {name} -> {tag}")
-        return {"success": True, "enabled": True, "origin": tag,
-                "message": f"'{name}' 을 원래 위치({tag})로 되돌렸습니다."}
+        if (_approved_state(tag, name) != 'disabled') == enabled:
+            return {"success": True, "enabled": enabled, "id": _make_id(tag, name), "origin": tag,
+                    "message": f"'{shown}' 은 이미 {'켜져' if enabled else '꺼져'} 있습니다."}
 
+        ok, why = _set_approved(tag, name, enabled)
+        after = _approved_state(tag, name) != 'disabled'
+        if not ok or after != enabled:
+            return {"success": False, "enabled": after, "id": _make_id(tag, name),
+                    "message": f"'{shown}' 설정을 바꾸지 못했습니다" + (f": {why}" if why else ".")}
+        log.info(f"시작 프로그램 {'켜기' if enabled else '끄기'}: {shown} ({tag})")
+        return {"success": True, "enabled": enabled, "id": _make_id(tag, name), "origin": tag,
+                "message": f"'{shown}' 을 {'켰' if enabled else '껐'}습니다. 다음 로그인부터 적용됩니다."}
     except Exception as e:
-        log.error(f"시작 프로그램 전환 실패 {name}: {e}")
+        log.error(f"시작 프로그램 전환 실패 {shown}: {e}")
         return {"success": False, "message": f"시작 프로그램 설정 변경에 실패했습니다: {e}"}

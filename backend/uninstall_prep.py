@@ -10,8 +10,9 @@ APEX CARE — 제거하기 전에 이 앱이 바꾼 것을 되돌린다.
   전원 설정과 레지스트리, 이 앱으로 꺼 둔 시작 프로그램이 그대로 남았고, 되돌릴 앱이 사라져 방법도 없었다.
 
 되돌리는 것:
-  1. 복구 센터의 '전부 원래대로'(perf_modes.revert_everything): system_state 저널 전부와 구버전 백업
-  2. 이 앱으로 꺼 둔 시작 프로그램을 원래 자리(HKCU·HKLM)로 되켠다
+  1. 복구 센터의 '전부 원래대로'(perf_modes.revert_everything): system_state 저널 전부와 구버전 백업.
+     이 앱으로 끈 시작 프로그램(StartupApproved 표시)도 저널에 있어 여기서 되켜진다
+  2. 예전 버전이 Run 에서 지우고 HKCU\\Software\\APEXCARE 에 숨겨 둔 시작 프로그램을 원래 자리로 되살려 켠다
   3. 게임 부스트의 '게임 전 모드' 기록을 지운다. 남겨 두면 다시 설치했을 때 그 모드가 적용된다
 실패한 항목은 저널·백업에 그대로 남는다(다시 시도할 수 있게). 제거 여부는 제거 프로그램이 사용자에게 묻는다.
 """
@@ -64,11 +65,11 @@ def _delete_key_if_empty(path):
 
 
 def _restore_disabled_startup():
-    """이 앱으로 꺼 둔 시작 프로그램을 원래 자리로 되켠다. 항목별 step 목록."""
+    """예전 버전이 숨겨 둔 시작 프로그램을 원래 자리로 되살려 켠다. 항목별 step 목록."""
     from backend import optimizer
     steps = []
     for name in _disabled_startup_names():
-        r = optimizer.toggle_startup_app(name, True)
+        r = optimizer.toggle_startup_app(f'LEGACY:{name}', True)
         ok = bool(r.get('success'))
         steps.append({'name': f"시작 프로그램 '{name}' 다시 켜기", 'ok': ok,
                       'detail': '' if ok else r.get('message', '실패')})
