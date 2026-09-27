@@ -591,8 +591,9 @@ REALTIME_PRIORITY_CLASS = 0x100
 
 class FakeProc:
     def __init__(self, pid, name, nice=NORMAL_PRIORITY_CLASS, created=1000.0,
-                 username='user', cpu=0.0):
+                 username='user', cpu=0.0, ppid=None):
         self.pid = pid
+        self.ppid = ppid                   # 부모 PID (표에 없으면 부모 없음)
         self.name = name
         self.nice = nice
         self.created = created
@@ -660,10 +661,23 @@ class FakeProcessTable:
                 return self._live().cpu
 
             def parent(self):
-                return None
+                pp = self._live().ppid
+                return Process(pp) if pp in table.procs else None
+
+            def parents(self):
+                out, cur, seen = [], self.parent(), set()
+                while cur is not None and cur.pid not in seen:
+                    seen.add(cur.pid)
+                    out.append(cur)
+                    cur = cur.parent()
+                return out
 
             def children(self, recursive=False):
-                return []
+                kids = [Process(q) for q, fp in table.procs.items() if fp.ppid == self.pid]
+                if recursive:
+                    for k in list(kids):
+                        kids += k.children(recursive=True)
+                return kids
 
             def exe(self):
                 return ''

@@ -147,9 +147,19 @@ def get_own_pid_family():
 
 
 def is_own_process(pid):
-    """True if pid belongs to APEX CARE (self / bootloader parent / child)."""
+    """True if pid belongs to APEX CARE (self / bootloader parent / child).
+
+    가족 목록은 2초 동안 캐시한다. 그 사이 새로 생긴 자식은 목록에 없으므로, 목록에 없으면
+    그 프로세스의 부모를 거슬러 올라가 우리 프로세스가 있는지 직접 본다(샌드박스 점검에서
+    막 띄운 자식의 우선순위가 바뀌는 것이 드러났다).
+    """
     try:
-        return pid in get_own_pid_family()
+        family = get_own_pid_family()
+        if pid in family:
+            return True
+        return any(a.pid in family for a in psutil.Process(pid).parents())
+    except psutil.NoSuchProcess:
+        return False
     except Exception as e:
         log.debug(f"is_own_process error for PID {pid}: {e}")
         return False

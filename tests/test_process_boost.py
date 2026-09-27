@@ -82,3 +82,19 @@ def test_access_denied_is_reported_as_failure(procs):
     p.deny = True
     r = process_boost.set_priority(500, 'idle')
     assert r['ok'] is False and p.nice == NORMAL_PRIORITY_CLASS
+
+
+def test_child_spawned_after_family_was_cached_is_still_own(procs):
+    # 샌드박스 점검에서 찾은 틈: 가족 목록을 캐시한 뒤 2초 안에 생긴 자식을 자기 프로세스로 못 알아봤다
+    import os
+    from backend import process_guard
+    me = os.getpid()
+    procs.add(me, 'python.exe')
+    procs.add(700, 'ping.exe')                                   # 남의 프로세스
+    assert process_boost.set_priority(700, 'high')['ok']         # 이때 가족 목록이 캐시된다
+    procs.add(701, 'ping.exe', ppid=me)                          # 캐시 뒤에 생긴 우리 자식
+    procs.add(702, 'helper.exe', ppid=701)                       # 그 자식의 자식
+    assert process_guard.is_own_process(701) and process_guard.is_own_process(702)
+    assert process_boost.set_priority(701, 'high')['ok'] is False
+    assert process_boost.set_priority(702, 'idle')['ok'] is False
+    assert not process_guard.is_own_process(700)
