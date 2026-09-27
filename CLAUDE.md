@@ -31,6 +31,7 @@ build_all.bat          # 프론트 → Payload.exe → Uninstaller.exe → Setup
 python -c "import backend.api"   # 백엔드 전체 import 확인
 pip install -r requirements-dev.txt   # 테스트 의존성 (psutil, pytest)
 python -m pytest tests                # 안전 규칙 테스트. 가짜 Windows 위에서 돈다 (리눅스·윈도우 모두)
+powershell -ExecutionPolicy Bypass -File tools\sandbox\start_sandbox_check.ps1 -Wait   # 실제 Windows 점검(샌드박스 안에서만)
 ```
 
 `tests/fakewin.py` 가 winreg·전원 API·sc.exe·APPDATA 를 가짜로 바꾸고, ctypes.WinDLL·subprocess·psutil 의
@@ -101,6 +102,8 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 
 - **시스템을 바꾸는 코드를 개발 PC 에서 실행하지 않습니다.** 모드 적용, 정크 정리, 디블로터, 서비스·네트워크 변경이 모두 해당됩니다.
   로직은 `python -m pytest tests`(가짜 Windows)로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
+  백엔드 동작은 Windows 샌드박스에서 `tools/sandbox/real_checks.py` 가 자동으로 확인합니다(샌드박스 계정이 아니면 실행을 거부).
+  시스템을 바꾸는 기능을 추가·수정하면 그 점검도 `real_checks.py` 에 더합니다.
   그 절차는 `docs/windows-manual-checklist.md`(가상 머신에서, `tools/snapshot_state.ps1` 로 전후 상태 비교)에 있습니다.
   시스템을 바꾸는 기능을 추가·수정하면 이 점검표와 `snapshot_state.ps1` 이 담는 값도 함께 고칩니다.
   `snapshot_state.ps1` 은 UTF-8 BOM 으로 저장합니다(Windows PowerShell 5.1 이 BOM 없는 한국어를 깨뜨립니다).

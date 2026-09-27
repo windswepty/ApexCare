@@ -8,6 +8,18 @@
 
 ---
 
+## 자동 점검 (Windows 샌드박스) — 먼저 이것부터
+
+손으로 하는 점검 중 백엔드가 하는 일(성능 모드, 디블로터 정책·앱, 맞춤 튜닝, 시작 프로그램, 게임 부스트 Nagle,
+정크 정리 정션, 프로세스 우선순위, 제거 전 되돌리기, 원클릭 범위)은 샌드박스에서 자동으로 확인할 수 있습니다.
+샌드박스는 닫으면 안의 변경이 전부 사라져 개발 PC 는 바뀌지 않습니다.
+
+1. 한 번만: 관리자 PowerShell 에서 `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All` → 재부팅
+2. `powershell -ExecutionPolicy Bypass -File tools\sandbox\start_sandbox_check.ps1 -Wait`
+3. 결과 폴더의 `report.md` 를 봅니다. 실패 항목에는 처음 상태와 달라진 줄이 함께 적힙니다
+
+화면(확인 창·목록 표시), 설치·제거 프로그램, 재부팅 뒤 동작, OneDrive 는 자동 점검 범위 밖이라 아래 절차로 확인합니다.
+
 ## 0. 준비
 
 - [ ] **개발 PC 에서 하지 않습니다.** Hyper-V·VirtualBox 등의 Windows 11 가상 머신(한국어판 권장)을 쓰고,
