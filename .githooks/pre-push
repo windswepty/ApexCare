@@ -1,0 +1,51 @@
+#!/bin/sh
+# main 에 푸시하기 전에 안전 규칙 테스트(python -m pytest tests)를 돌린다. 실패하면 푸시를 멈춘다.
+#
+# 왜: 비공개 개인 저장소라 GitHub 규칙(필수 체크)이 적용되지 않는다. CI 는 푸시 '뒤에' 돌아
+#     실패해도 이미 main 에 들어간 뒤다. 이 훅이 푸시 '전에' 막는 무료 방어선이다.
+# 무엇을 시험하나: 작업 폴더가 아니라 푸시하려는 커밋 그 자체. 커밋하지 않은 수정이 있어도
+#     결과가 흔들리지 않게 커밋을 임시 폴더에 풀어서 돌린다.
+# 설치: git config core.hooksPath .githooks   (클론마다 한 번)
+# 테스트는 가짜 Windows(tests/fakewin.py) 위에서 돌아 실제 시스템을 바꾸지 않는다.
+
+z40=0000000000000000000000000000000000000000
+targets=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$remote_ref" = "refs/heads/main" ] || continue
+    case "$local_sha" in
+        "$z40"|0000000000000000000000000000000000000000000000000000000000000000) continue ;;  # 삭제
+    esac
+    targets="$targets $local_sha"
+done
+[ -n "$targets" ] || exit 0
+
+# pytest 가 설치된 파이썬을 찾는다. Windows 의 python3 은 Store 바로가기일 수 있어 import 로 확인한다.
+PY=""
+for c in python python3 py; do
+    if "$c" -c "import pytest, psutil" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+if [ -z "$PY" ]; then
+    echo "pre-push: pytest 가 설치된 파이썬이 없어 main 푸시를 멈췄습니다." >&2
+    echo "pre-push: pip install -r requirements-dev.txt 로 설치한 뒤 다시 푸시하세요." >&2
+    exit 1
+fi
+
+export PYTHONUTF8=1
+for sha in $targets; do
+    tmp=$(mktemp -d 2>/dev/null || mktemp -d -t apexcare-prepush)
+    if ! git archive "$sha" | tar -x -C "$tmp"; then
+        rm -rf "$tmp"
+        echo "pre-push: 커밋 $sha 를 풀지 못해 main 푸시를 멈췄습니다." >&2
+        exit 1
+    fi
+    short=$(git rev-parse --short "$sha")
+    echo "pre-push: main 으로 갈 커밋 $short 의 테스트를 돌립니다 ($PY -m pytest tests)" >&2
+    (cd "$tmp" && "$PY" -m pytest tests -q -p no:cacheprovider) >&2
+    rc=$?
+    rm -rf "$tmp"
+    if [ $rc -ne 0 ]; then
+        echo "pre-push: 테스트가 실패해 main 푸시를 멈췄습니다 (커밋 $short). 고친 뒤 다시 푸시하세요." >&2
+        exit 1
+    fi
+done
+exit 0

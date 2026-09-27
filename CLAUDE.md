@@ -39,6 +39,9 @@ python -m pytest tests                # 안전 규칙 테스트. 가짜 Windows 
 안전 규칙을 고치거나 새로 만들면 `tests/` 에 테스트를 더하고, 고친 부분을 되돌리면 그 테스트가 실패하는지 확인합니다.
 새로 흉내 내야 하는 Win32 호출이 생기면 테스트에서 진짜를 풀지 말고 `fakewin` 에 가짜를 더합니다.
 GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분투 24.04 와 Windows Server 2025(각각 Python 3.12·3.13)에서 같은 테스트를 돌립니다.
+비공개 개인 저장소라 GitHub 규칙(`main-tests` 필수 체크)은 적용되지 않습니다. 대신 `.githooks/pre-push` 가 main 으로
+갈 커밋을 임시 폴더에 풀어 테스트하고, 실패하면 푸시를 멈춥니다. 클론마다 `git config core.hooksPath .githooks` 로 켭니다.
+훅이 푸시를 막으면 테스트를 고칩니다. `git push --no-verify` 로 건너뛰지 않습니다.
 
 `build_setup.bat` 는 Setup 만 다시 쌉니다. Setup 은 `dist\APEX CARE Payload.exe` 를 그대로 담고, 빌드가 끝나면 그 파일을 지웁니다.
 그래서 **앱 코드를 고쳤으면 반드시 `build_all.bat`** 를 씁니다.
