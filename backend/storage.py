@@ -7,8 +7,12 @@ APEX CARE — 저장공간 현황.
 
 import logging
 import os
+import re
+import subprocess
 
 import psutil
+
+from backend import safe_delete
 
 log = logging.getLogger('Storage')
 
@@ -32,18 +36,23 @@ def _media_type(mountpoint):
     return result
 
 
+def _powershell():
+    root = os.environ.get('SystemRoot') or 'C:\\Windows'
+    return os.path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+
+
 def _probe_media_type(mountpoint):
     try:
-        import subprocess
         letter = os.path.splitdrive(mountpoint)[0].rstrip(':')
-        if not letter:
+        # 드라이브 문자 한 글자만 명령에 넣는다. 폴더에 마운트된 볼륨 등은 조회하지 않는다.
+        if not re.fullmatch(r'[A-Za-z]', letter or ''):
             return 'unknown'
-        # PowerShell 의 MSFT_PhysicalDisk 가 가장 정확하다
+        # PowerShell 의 MSFT_PhysicalDisk 가 가장 정확하다 (읽기 전용 조회)
         r = subprocess.run(
-            ['powershell', '-NoProfile', '-Command',
+            [_powershell(), '-NoProfile', '-NonInteractive', '-Command',
              f"(Get-Partition -DriveLetter {letter} -ErrorAction SilentlyContinue | "
              f"Get-Disk | Get-PhysicalDisk).MediaType"],
-            capture_output=True, text=True, timeout=12,
+            capture_output=True, text=True, timeout=12, shell=False,
             creationflags=0x08000000,
         )
         out = (r.stdout or '').strip().lower()
@@ -59,13 +68,20 @@ def _probe_media_type(mountpoint):
 
 
 def get_drives(detect_media=True):
-    """로컬 드라이브별 용량. 네트워크·CD 드라이브는 제외한다."""
+    """로컬 드라이브별 용량. 네트워크·CD 드라이브는 제외한다.
+
+    driveType 을 함께 준다. 대용량·중복 검색과 휴지통 이동은 고정 디스크(fixed)에서만 한다.
+    """
     drives = []
     for part in psutil.disk_partitions(all=False):
         try:
             if not part.fstype or 'cdrom' in (part.opts or ''):
                 continue
+            dtype = safe_delete.letter_drive_type(part.mountpoint)
+            if dtype in ('network', 'cdrom'):
+                continue
             usage = psutil.disk_usage(part.mountpoint)
+            fixed = dtype == 'fixed'
             drives.append({
                 'mount': part.mountpoint,
                 'label': os.path.splitdrive(part.mountpoint)[0] or part.mountpoint,
@@ -74,7 +90,11 @@ def get_drives(detect_media=True):
                 'usedGB': round(usage.used / 1024 ** 3, 1),
                 'freeGB': round(usage.free / 1024 ** 3, 1),
                 'percent': usage.percent,
-                'mediaType': _media_type(part.mountpoint) if detect_media else 'unknown',
+                # 이동식 드라이브는 매체 조회(PowerShell)를 하지 않는다
+                'mediaType': _media_type(part.mountpoint) if (detect_media and fixed) else 'unknown',
+                'driveType': dtype,
+                # 고정 디스크만 파일 검색·휴지통 이동 대상이다
+                'searchable': fixed,
                 # 여유 공간이 10% 미만이면 Windows 자체가 느려지기 시작한다
                 'low': usage.percent >= 90,
             })
@@ -97,4 +117,5 @@ def get_overview():
         'usedGB': round(total - free, 1),
         'percent': round((total - free) / total * 100, 1) if total else 0,
         'lowDrives': [d['label'] for d in drives if d['low']],
+        'removableDrives': [d['label'] for d in drives if not d['searchable']],
     }

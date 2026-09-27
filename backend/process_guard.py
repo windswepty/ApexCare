@@ -4,6 +4,8 @@ Single gate that decides whether a user-initiated request may kill or
 re-prioritize a given PID. Zero backend dependencies (stdlib + psutil only)
 so this module can never take part in an import cycle.
 """
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 import time
@@ -14,7 +16,7 @@ log = logging.getLogger('ProcessGuard')
 
 # 보호 대상 목록. psutil.Process.name() 이 돌려주는 실제 문자열을 소문자로 적는다.
 # (작업관리자의 "Memory Compression" 은 psutil 에서 "MemCompression" 이다)
-# game_booster.WHITELIST 와 목적이 다르다: 저쪽은 "자동으로 길들이지 말 것"(steam/discord 포함),
+# process_boost.NEVER_THROTTLE 과 목적이 다르다: 저쪽은 "자동으로 낮추지 말 것"(런처·통화 앱 포함),
 # 여기는 "사용자가 절대 죽이거나 우선순위를 바꾸면 안 되는 것"이다.
 PROTECTED_PROCESSES = {
     # --- 커널 / 세션 코어 : 종료 시 BSOD(CRITICAL_PROCESS_DIED) 또는 즉시 재부팅 ---
@@ -55,10 +57,37 @@ PROTECTED_PROCESSES = {
     "nissrv.exe",
     "securityhealthservice.exe",
     "securityhealthsystray.exe",
+    # --- Windows 업데이트·설치 : 중간에 끊으면 업데이트 실패·롤백, 반쯤 설치된 앱이 남는다 ---
+    "tiworker.exe",
+    "trustedinstaller.exe",
+    "msiexec.exe",
+    "mousocoreworker.exe",
+    "usocoreworker.exe",
+    "usoclient.exe",
+    "wuauclt.exe",
+    "wusa.exe",
+    "setuphost.exe",
+    "setupprep.exe",
+    "dismhost.exe",
+    "dism.exe",
+    "sfc.exe",
     # --- APEX CARE 자신 (이름 기반 1차 방어. PID 기반은 get_own_pid_family) ---
+    "apex care.exe",                # 설치본 실행 파일 (setup_wizard 가 이 이름으로 복사한다)
     "apex care payload.exe",
     "apex care uninstaller.exe",
 }
+
+# 빌드된 실행 파일이면 실제 파일 이름도 보호한다(이름이 바뀌어도 빠지지 않게).
+# 개발 실행에서는 python.exe 라서 넣지 않는다. 넣으면 사용자의 모든 파이썬 프로그램이 막힌다.
+if getattr(sys, "frozen", False):
+    try:
+        PROTECTED_PROCESSES.add(os.path.basename(sys.executable).strip().lower())
+    except Exception:
+        pass
+
+# 서비스 계정. 이 계정으로 도는 프로세스는 사용자가 띄운 앱이 아니다.
+# (이름은 영문 Windows 기준이다. 세션 검사가 먼저 걸러내므로 이것은 2차 방어다)
+_SERVICE_ACCOUNT_DOMAINS = {"nt authority", "nt service", "window manager", "font driver host"}
 
 # 프론트 노출 API 가 허용하는 우선순위. 'realtime' 은 의도적으로 제외한다.
 # REALTIME_PRIORITY_CLASS 는 csrss.exe 와 입력 스택보다 위에서 스케줄되므로
@@ -166,6 +195,62 @@ def is_protected_name(proc_name):
     return proc_name.strip().lower() in PROTECTED_PROCESSES
 
 
+def _session_id(pid):
+    """프로세스가 속한 로그온 세션 번호. 읽지 못하면 None."""
+    try:
+        sid = ctypes.wintypes.DWORD()
+        if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.wintypes.DWORD(pid), ctypes.byref(sid)):
+            return sid.value
+    except Exception as e:
+        log.debug(f"ProcessIdToSessionId failed for PID {pid}: {e}")
+    return None
+
+
+_own_session = {"value": None}
+
+
+def _own_session_id():
+    if _own_session["value"] is None:
+        _own_session["value"] = _session_id(os.getpid())
+    return _own_session["value"]
+
+
+def _is_service_account(username):
+    if "\\" not in username:
+        return False
+    return username.split("\\", 1)[0].strip().lower() in _SERVICE_ACCOUNT_DOMAINS
+
+
+def _ownership_error(safe_pid, proc_name):
+    """사용자 세션의 사용자 프로세스가 아니면 이유를 돌려준다. 통과하면 None.
+
+    이 앱은 관리자 권한으로 돌기 때문에 서비스(세션 0)나 다른 사용자의 프로세스도
+    열 수 있다. 이름 목록에 없는 서드파티 서비스(DB·백업 에이전트 등)를 종료하거나
+    우선순위를 바꾸는 것까지 허용하면 안 된다. 판정할 수 없으면 막는다(fail-safe).
+    """
+    own = _own_session_id()
+    target = _session_id(safe_pid)
+    if own is None or target is None:
+        return (f"'{proc_name}'이(가) 어느 세션에서 실행 중인지 확인할 수 없어 "
+                "안전을 위해 차단했습니다.")
+    if target != own:
+        if target == 0:
+            return (f"'{proc_name}'은(는) Windows 서비스로 실행 중인 프로세스입니다. "
+                    "서비스는 APEX CARE에서 제어하지 않습니다.")
+        return f"'{proc_name}'은(는) 다른 사용자 세션의 프로세스라 제어하지 않습니다."
+    try:
+        username = psutil.Process(safe_pid).username() or ""
+    except psutil.NoSuchProcess:
+        return "해당 프로세스를 찾을 수 없습니다. 이미 종료되었을 수 있습니다."
+    except Exception:
+        return (f"'{proc_name}'의 소유자를 확인할 수 없어 안전을 위해 차단했습니다. "
+                "(보호된 프로세스일 수 있습니다)")
+    if not username or _is_service_account(username):
+        return (f"'{proc_name}'은(는) 시스템 계정으로 실행 중인 프로세스라 "
+                "APEX CARE에서 제어하지 않습니다.")
+    return None
+
+
 def check_controllable(pid, action="kill"):
     """Zero-Risk Shield: the SINGLE gate for user-initiated process control.
 
@@ -197,5 +282,9 @@ def check_controllable(pid, action="kill"):
             f"'{proc_name}'은(는) Windows 시스템 필수 프로세스입니다. "
             "우선순위를 변경하면 시스템 전체가 불안정해질 수 있어 APEX CARE가 차단했습니다."
         )
+
+    owner_err = _ownership_error(safe_pid, proc_name)
+    if owner_err:
+        return False, safe_pid, proc_name, owner_err
 
     return True, safe_pid, proc_name, None
