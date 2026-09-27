@@ -21,25 +21,8 @@ log = logging.getLogger('Optimizer')
 # ─────────────────────────────────────────────
 # 보호 상수
 # ─────────────────────────────────────────────
-# PROTECTED_ROOTS 는 file_finder 가 쓰는 부분 문자열 목록이다(휴지통 삭제 경로).
-# 정크 정리(영구 삭제)는 이것을 쓰지 않는다. 아래 _junk_candidate 를 본다.
-
-PROTECTED_ROOTS = [
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\system32',
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\syswow64',
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\winsxs',
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\assembly',
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\servicing',
-    os.environ.get('WINDIR', 'C:\\Windows').lower() + '\\installer',
-    os.environ.get('PROGRAMFILES', 'C:\\Program Files').lower(),
-    os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)').lower(),
-    os.environ.get('APPDATA', '').lower(),
-    os.environ.get('LOCALAPPDATA', '').lower() + '\\microsoft',
-    # Game platforms — absolute no-touch
-    'steamlibrary', 'steamapps',
-    'origin games', 'riot games', 'epic games',
-    'battle.net', 'ubisoft game launcher',
-]
+# 경로 경계 판정은 safe_delete(norm·is_inside·is_protected)로 한다. 예전의 부분 문자열
+# 목록(PROTECTED_ROOTS)은 짧은 이름·정션을 못 막고 무관한 파일을 막아서 지웠다.
 
 # Extensions that must NEVER be deleted under any circumstances
 DANGER_EXTS = frozenset({
