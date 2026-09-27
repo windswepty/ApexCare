@@ -29,7 +29,15 @@ npm run build          # React → dist_react/
 python main.py         # 개발 실행 (dist_react 가 없으면 localhost:5173 을 띄움)
 build_all.bat          # 프론트 → Payload.exe → Uninstaller.exe → Setup (최종: dist\APEX CARE Setup 1.0.1.exe)
 python -c "import backend.api"   # 백엔드 전체 import 확인
+pip install -r requirements-dev.txt   # 테스트 의존성 (psutil, pytest)
+python -m pytest tests                # 안전 규칙 테스트. 가짜 Windows 위에서 돈다 (리눅스·윈도우 모두)
 ```
+
+`tests/fakewin.py` 가 winreg·전원 API·sc.exe·APPDATA 를 가짜로 바꾸고, ctypes.WinDLL·subprocess·psutil 의
+우선순위 변경은 부르는 즉시 예외가 나게 막습니다. `tests/conftest.py` 는 가짜를 끼우기 전에 backend import 를 막는
+문지기를 먼저 세우므로, 가짜가 빠지면 테스트는 수집 단계에서 멈춥니다.
+안전 규칙을 고치거나 새로 만들면 `tests/` 에 테스트를 더하고, 고친 부분을 되돌리면 그 테스트가 실패하는지 확인합니다.
+새로 흉내 내야 하는 Win32 호출이 생기면 테스트에서 진짜를 풀지 말고 `fakewin` 에 가짜를 더합니다.
 
 `build_setup.bat` 는 Setup 만 다시 쌉니다. Setup 은 `dist\APEX CARE Payload.exe` 를 그대로 담고, 빌드가 끝나면 그 파일을 지웁니다.
 그래서 **앱 코드를 고쳤으면 반드시 `build_all.bat`** 를 씁니다.
@@ -81,8 +89,11 @@ python -c "import backend.api"   # 백엔드 전체 import 확인
 ## 개발 중 하지 말 것
 
 - **시스템을 바꾸는 코드를 개발 PC 에서 실행하지 않습니다.** 모드 적용, 정크 정리, 디블로터, 서비스·네트워크 변경이 모두 해당됩니다.
-  로직은 가짜 객체로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
-- 옛 테스트 스크립트는 실제 시스템을 바꿉니다. `test_performance.py` 는 성능 모드를 전환하고, `tools/test_full.py` 와 `tools/test_backend.py` 는 `purge_ram()` 을 호출합니다. 실행하지 않습니다.
+  로직은 `python -m pytest tests`(가짜 Windows)로 검증하고, 실제 적용 후 되돌리기까지 확인하는 테스트는 사용자가 관리자 권한으로 실행하도록 안내합니다.
+- 테스트에서 fakewin 을 우회하지 않습니다. `fakewin.REAL` 의 진짜 객체는 문지기 자가 테스트(별도 파이썬 프로세스)에만 씁니다.
+  backend 를 직접 부르는 스크립트를 `tests/` 밖에 새로 만들지 않습니다. 성능 모드를 바꾸고 대기 메모리를 비우던 옛 스크립트
+  (`test_performance.py`, `test_standby.py`, `tools/test_full.py`, `tools/test_backend.py`)는 그래서 지웠습니다.
+  남은 `tools/test_logic.py`, `tools/test_comprehensive.py` 는 읽기만 합니다.
 - 개발 PC 에는 구버전이 남긴 설정(`NetworkThrottlingIndex=0xFFFFFFFF`, `HwSchMode=2`)이 남아 있습니다. 이 값을 "원래 값"으로 가정하지 않습니다.
 - 초기 설정 마법사는 `settings.json` 의 `setup_wizard_done` 이 없을 때만 뜹니다. 마법사를 닫는 것(`markSetupWizardDone`)은 시스템을 바꾸지 않습니다.
 

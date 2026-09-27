@@ -1,0 +1,9 @@
+# APEX CARE — 테스트 전용 의존성 (설치 파일에는 들어가지 않는다)
+# 설치: pip install -r requirements-dev.txt
+# 실행: python -m pytest tests   (가짜 Windows 위에서 돈다. 실제 시스템을 바꾸지 않는다)
+#
+# requirements.txt 를 -r 로 포함하지 않는다. pywin32 는 리눅스에 설치되지 않고,
+# 테스트는 pywebview·pywin32 없이 돈다(tests/fakewin.py 가 Windows 쪽을 대신한다).
+
+psutil>=7.2.2
+pytest>=8.0
