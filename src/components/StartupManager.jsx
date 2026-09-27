@@ -107,7 +107,7 @@ export default function StartupManager({ addToast }) {
         </div>
 
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">APEX CARE 에서 끈 항목</span>
+          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">꺼진 시작 프로그램</span>
           <div className="text-3xl font-black font-mono text-slate-400 my-1">{disabledCount}개</div>
         </div>
       </div>
