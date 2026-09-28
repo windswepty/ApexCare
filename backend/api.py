@@ -159,6 +159,15 @@ class Api:
         """모드 카드에 표시할 정보. 무엇이 바뀌는지 미리 보여주기 위한 것."""
         return perf_modes.list_modes()
 
+    def runCpuBenchmark(self):
+        """지금 모드에서 3초 동안 CPU 를 재서 모드별로 남긴다. 계산만 하고 시스템은 바꾸지 않는다."""
+        from backend import perf_bench
+        return perf_bench.run()
+
+    def getCpuBenchmarks(self):
+        from backend import perf_bench
+        return perf_bench.get_results()
+
     def revertAllSystemChanges(self):
         """이 앱이 바꾼 모든 시스템 설정을 원래대로 되돌린다."""
         game_booster.forget_power_mode_restore()

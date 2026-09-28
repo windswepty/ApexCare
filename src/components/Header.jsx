@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun, Thermometer, Cpu } from 'lucide-react';
 import { clockLabel } from '../cpuClock';
 
-export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsDarkMode }) {
+// 헤더에는 상태만 보여 준다. 예전의 표준·게이밍·에코 스위치는 화면의 선택만 바꾸고 실제 모드는 바꾸지 않아
+// '게이밍' 으로 보이는데 PC 는 에코로 도는 일이 있었다. 모드 전환은 '성능 부스트 모드' 탭 한 곳에서만 한다.
+export default function Header({ isDarkMode, setIsDarkMode }) {
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [osLabel, setOsLabel] = useState('Windows');
   const [cpuLabel, setCpuLabel] = useState('Loading...');
@@ -119,35 +121,6 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             </div>
           );
         })()}
-
-        {/* Mode 3-Way Toggle Switch */}
-        <div className="bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 p-1 rounded-full flex items-center relative shadow-inner overflow-hidden w-[260px] h-9 transition-colors duration-300">
-          {/* Moving background indicator */}
-          <div 
-            className={`absolute top-1 bottom-1 w-[32%] rounded-full bg-white dark:bg-black border border-black/10 dark:border-white/10 shadow-sm transition-all duration-500 ease-out z-0 ${
-              currentMode === 'standard' ? 'left-[2%]' :
-              currentMode === 'gaming' ? 'left-[34%]' :
-              'left-[66%] w-[32%]'
-            }`}
-          ></div>
-          
-          {/* Switch Labels */}
-          {['standard', 'gaming', 'eco'].map((mode) => (
-            <button
-              key={mode}
-              onClick={() => {
-                setCurrentMode(mode);
-              }}
-              className={`flex-1 relative z-10 text-[11px] font-bold transition-colors duration-300 h-full flex items-center justify-center ${
-                currentMode === mode ? 'text-black dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-black dark:text-white'
-              }`}
-            >
-              {mode === 'standard' && '표준'}
-              {mode === 'gaming' && '⚡ 게이밍'}
-              {mode === 'eco' && '🌱 에코'}
-            </button>
-          ))}
-        </div>
       </div>
     </header>
   );

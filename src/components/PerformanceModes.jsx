@@ -7,6 +7,7 @@ import { usePolling } from '../usePolling';
 import { clockLabel } from '../cpuClock';
 
 const MODE_ICON = { standard: Gauge, gaming: Gamepad2, eco: Leaf };
+const MODE_LABEL = { standard: '표준', gaming: '게이밍', eco: '에코' };
 const MODE_ACCENT = {
   standard: { text: 'text-sky-400', ring: 'border-sky-500/60', glow: 'bg-sky-500/10' },
   gaming: { text: 'text-rose-400', ring: 'border-rose-500/60', glow: 'bg-rose-500/10' },
@@ -29,6 +30,38 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
     }
   }, []);
   usePolling(readLive, 2000, active);
+
+  // 모드별 CPU 측정 결과. 같은 계산을 3초 돌린 점수라 모드의 효과를 숫자로 비교할 수 있다.
+  const [bench, setBench] = useState({});
+  const [benching, setBenching] = useState(false);
+  const loadBench = useCallback(async () => {
+    const a = api();
+    if (!a?.getCpuBenchmarks) return;
+    try {
+      const r = await a.getCpuBenchmarks();
+      if (r && typeof r === 'object') setBench(r);
+    } catch (e) {
+      // 결과를 못 읽으면 표를 비워 둔다
+    }
+  }, []);
+  useEffect(() => { loadBench(); }, [loadBench]);
+  const runBench = async () => {
+    const a = api();
+    if (!a?.runCpuBenchmark || benching) return;
+    setBenching(true);
+    try {
+      const r = await a.runCpuBenchmark();
+      if (r?.success) {
+        setBench(r.results || {});
+        addToast?.(`${MODE_LABEL[r.mode] || r.mode} 모드 측정: ${r.result.score} MB/s`, 'success');
+      } else {
+        addToast?.(r?.message || '측정하지 못했습니다.', 'error');
+      }
+    } catch (e) {
+      addToast?.(`측정하지 못했습니다: ${e}`, 'error');
+    }
+    setBenching(false);
+  };
 
   const [modes, setModes] = useState([]);
   const [applying, setApplying] = useState(null);      // 적용 중인 모드 id
@@ -186,6 +219,36 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               <p><strong className="text-rose-400">게이밍</strong>: 부스트를 공격적으로 써서 기본 클럭보다 높게 돌고, 가만히 있어도 속도를 낮추지 않습니다.</p>
               <p><strong className="text-emerald-400">에코</strong>: 부스트를 끄고 상한을 낮춰 기본 클럭보다 낮게 돕니다. 발열·소음·전력이 줄어듭니다.</p>
               <p className="mt-1">모드를 바꾸고 몇 초 뒤 이 숫자가 달라집니다. 그래픽카드가 한계인 게임은 FPS 차이가 작을 수 있습니다.</p>
+            </div>
+            <div className="md:ml-auto md:border-l md:pl-5 border-black/5 dark:border-slate-800 min-w-[220px]">
+              <button
+                onClick={runBench}
+                disabled={benching || !!applying}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-black/10 dark:border-slate-700 text-sm font-bold hover:border-cyan-500 transition-colors disabled:opacity-50"
+              >
+                {benching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gauge className="w-4 h-4" />}
+                {benching ? '측정 중 (3초)…' : '지금 모드 성능 측정 (3초)'}
+              </button>
+              {(() => {
+                const rows = ['gaming', 'standard', 'eco'].filter((m) => bench[m]);
+                if (rows.length === 0) {
+                  return <p className="text-[11px] text-gray-500 mt-2 leading-snug">모드마다 한 번씩 측정하면 여기서 비교됩니다. 측정은 계산만 하고 설정은 바꾸지 않습니다.</p>;
+                }
+                const best = Math.max(...rows.map((m) => bench[m].score || 0)) || 1;
+                return (
+                  <div className="mt-2 space-y-1">
+                    {rows.map((m) => (
+                      <div key={m} className="flex justify-between text-xs font-mono">
+                        <span className="text-gray-500 font-sans">{MODE_LABEL[m]}</span>
+                        <span className="text-black dark:text-white">
+                          {bench[m].score} MB/s · {Math.round((bench[m].score / best) * 100)}%
+                          {bench[m].clockMHz ? ` · ${(bench[m].clockMHz / 1000).toFixed(2)} GHz` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         );

@@ -184,9 +184,7 @@ export default function App() {
           
           {/* Fixed Header */}
           <div className="pt-6 px-6 flex-shrink-0 z-30">
-            <Header 
-              currentMode={currentMode} 
-              setCurrentMode={setCurrentMode} 
+            <Header
               isDarkMode={isDarkMode}
               setIsDarkMode={setIsDarkMode}
             />
