@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
+import { usePolling } from '../usePolling';
 import {
   Cpu,
   Zap,
@@ -17,13 +18,12 @@ import {
 
 const fmtGB = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)} GB` : '알 수 없음');
 
-export default function RamBooster({ addToast }) {
+export default function RamBooster({ addToast, active = true }) {
   // null: 아직 받지 못함. { error: true }: 받지 못했음.
   const [ram, setRam] = useState(null);
   const [processes, setProcesses] = useState(null);
 
-  useEffect(() => {
-    const fetchRealData = async () => {
+  const fetchRealData = useCallback(async () => {
       const api = window.pywebview && window.pywebview.api;
       if (!api) return;
       if (typeof api.getSystemStats === 'function') {
@@ -57,12 +57,9 @@ export default function RamBooster({ addToast }) {
           console.error('Error fetching processes:', e);
         }
       }
-    };
-
-    fetchRealData();
-    const interval = setInterval(fetchRealData, 2000);
-    return () => clearInterval(interval);
   }, []);
+  // 이 탭이 보일 때만 2초마다 갱신한다(프로세스 목록 수집이 가장 무거운 호출이다).
+  usePolling(fetchRealData, 2000, active);
 
   const [isPurging, setIsPurging] = useState(false);
   const [purgeResult, setPurgeResult] = useState(null);

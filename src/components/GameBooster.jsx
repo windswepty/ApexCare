@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { usePolling } from '../usePolling';
 import {
   Crosshair, Gamepad2, Activity, Zap, ShieldCheck, AlertTriangle,
   RotateCcw, Loader2, Cpu, ChevronUp, ChevronDown, Minus, Search
@@ -44,7 +45,7 @@ const RISK_STYLE = {
   high: 'text-rose-400',
 };
 
-export default function GameBooster({ addToast }) {
+export default function GameBooster({ addToast, active = true }) {
   const [status, setStatus] = useState(null);
   const [settings, setSettings] = useState({});
   const [procs, setProcs] = useState([]);
@@ -73,12 +74,12 @@ export default function GameBooster({ addToast }) {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 4000);
     const onReady = () => refresh();
     window.addEventListener('pywebviewready', onReady);
-    return () => { clearInterval(id); window.removeEventListener('pywebviewready', onReady); };
+    return () => window.removeEventListener('pywebviewready', onReady);
   }, [refresh]);
+  // 이 탭이 보일 때만 갱신한다. 탭을 열면 바로 한 번 새로 읽는다.
+  usePolling(refresh, 4000, active);
 
   const toggleBooster = async () => {
     const a = api();

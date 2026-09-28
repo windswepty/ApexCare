@@ -44,7 +44,8 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
     let tickCount = 0;
     const timer = setInterval(() => {
       tickCount++;
-      if (tickCount >= 5) {
+      // 창이 최소화·가려져 있으면 백엔드를 부르지 않는다(가동 시간 숫자만 센다).
+      if (tickCount >= 5 && !document.hidden) {
         fetchInfo();
         tickCount = 0;
       }

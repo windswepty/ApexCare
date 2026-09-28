@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { usePolling } from '../usePolling';
 import {
   History, RotateCcw, ShieldCheck, Loader2, CheckCircle2,
   AlertTriangle, Cpu, Zap, Network, Server, HardDrive, Gamepad2, ShieldOff
@@ -17,7 +18,7 @@ const GROUP_META = {
   기타: { label: '기타 변경', icon: HardDrive, desc: '' },
 };
 
-export default function RestoreCenter({ addToast }) {
+export default function RestoreCenter({ addToast, active = true }) {
   const [pending, setPending] = useState({ count: 0, groups: {} });
   const [procCount, setProcCount] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -38,12 +39,12 @@ export default function RestoreCenter({ addToast }) {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 5000);
     const onReady = () => refresh();
     window.addEventListener('pywebviewready', onReady);
-    return () => { clearInterval(id); window.removeEventListener('pywebviewready', onReady); };
+    return () => window.removeEventListener('pywebviewready', onReady);
   }, [refresh]);
+  // 이 탭이 보일 때만 갱신한다. 탭을 열면 바로 한 번 새로 읽는다.
+  usePolling(refresh, 5000, active);
 
   const revertSystem = async () => {
     const a = api();

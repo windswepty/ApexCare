@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { usePolling } from '../usePolling';
 import { 
   Zap, 
   RotateCw, 
@@ -64,7 +65,7 @@ const renderLineGraph = (history) => {
 // backend/optimizer.get_deep_optimization_plan 의 단계 이름과 같다(백엔드가 없을 때 보여 줄 목록)
 const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
 
-export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast }) {
+export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast, active = true }) {
   // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
   // '최상 / 최적화 필요' 를 판정했다. 측정한 건강 상태가 아니므로 없앴다.
   const [lastRun, setLastRun] = useState(null);   // 이번 실행의 단계별 결과
@@ -107,8 +108,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
 
   const optPollInterval = useRef(null);
 
-  useEffect(() => {
-    const fetchRealStats = async () => {
+  const fetchRealStats = useCallback(async () => {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
           const stats = await window.pywebview.api.getSystemStats();
@@ -145,20 +145,12 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
           // Keep previous data if failed
         }
       }
-    };
-
-    fetchRealStats();
-
-    const interval = setInterval(() => {
-      if (!isScanning) {
-        fetchRealStats();
-      }
-    }, 3000);
-    return () => {
-      clearInterval(interval);
-      if (optPollInterval.current) clearInterval(optPollInterval.current);
-    };
-  }, [isScanning]);
+  }, []);
+  // 대시보드가 보일 때만 3초마다 갱신한다. 원클릭 최적화 중에는 멈춘다(예전 동작과 같다).
+  usePolling(fetchRealStats, 3000, active && !isScanning);
+  useEffect(() => () => {
+    if (optPollInterval.current) clearInterval(optPollInterval.current);
+  }, []);
 
   const runMasterOptimization = async () => {
     if (isScanning) return;

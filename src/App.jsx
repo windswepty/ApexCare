@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Lenis from 'lenis';
+import { attachSmoothScroll } from './smoothScroll';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
@@ -24,6 +24,13 @@ export default function App() {
   const scrollWrapperRef = useRef(null);
   const scrollContentRef = useRef(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  // 탭은 처음 열 때 띄우고, 한 번 연 탭은 상태를 지키려고 숨겨 둔다. 예전에는 열지 않은 탭까지
+  // 앱을 켜자마자 전부 띄워 각자 백엔드를 불렀다(프로그램 목록·시작 프로그램·드라이브 조회 등).
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(['dashboard']));
+  useEffect(() => {
+    setVisitedTabs(prev => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
+  const isMounted = (tab) => tab === activeTab || visitedTabs.has(tab);
   const [currentMode, setCurrentMode] = useState('standard');
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
@@ -128,26 +135,7 @@ export default function App() {
 
   useEffect(() => {
     if (!scrollWrapperRef.current || !scrollContentRef.current) return;
-
-    const lenis = new Lenis({
-      wrapper: scrollWrapperRef.current,
-      content: scrollContentRef.current,
-      lerp: 0.05,
-      smoothWheel: true,
-      wheelMultiplier: 1.0,
-    });
-
-    let animationFrameId;
-    function raf(time) {
-      lenis.raf(time);
-      animationFrameId = requestAnimationFrame(raf);
-    }
-    animationFrameId = requestAnimationFrame(raf);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      lenis.destroy();
-    };
+    return attachSmoothScroll(scrollWrapperRef.current, scrollContentRef.current);
   }, []);
   return (
     <ErrorBoundary>
@@ -208,35 +196,35 @@ export default function App() {
           <main ref={scrollWrapperRef} className="flex-1 overflow-y-auto px-6 pb-6 flex flex-col">
             <div ref={scrollContentRef} className="flex flex-col flex-1">
               <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
-                <Dashboard onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />
+                {isMounted('dashboard') && <Dashboard active={activeTab === 'dashboard'} onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'restore' ? 'block' : 'none', height: '100%' }}>
-                <RestoreCenter addToast={addToast} />
+                {isMounted('restore') && <RestoreCenter active={activeTab === 'restore'} addToast={addToast} />}
               </div>
 
               <div style={{ display: activeTab === 'storage' ? 'block' : 'none', height: '100%' }}>
-                <StorageCenter addToast={addToast} />
+                {isMounted('storage') && <StorageCenter addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'ram' ? 'block' : 'none', height: '100%' }}>
-                <RamBooster addToast={addToast} />
+                {isMounted('ram') && <RamBooster active={activeTab === 'ram'} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'startup' ? 'block' : 'none', height: '100%' }}>
-                <StartupManager addToast={addToast} />
+                {isMounted('startup') && <StartupManager addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
-                <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />
+                {isMounted('modes') && <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'drivers' ? 'block' : 'none', height: '100%' }}>
-                <DriverUpdater addToast={addToast} />
+                {isMounted('drivers') && <DriverUpdater addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'uninstaller' ? 'block' : 'none', height: '100%' }}>
-                <Uninstaller addToast={addToast} />
+                {isMounted('uninstaller') && <Uninstaller addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'debloater' ? 'block' : 'none', height: '100%' }}>
-                <Debloater addToast={addToast} />
+                {isMounted('debloater') && <Debloater addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'gamebooster' ? 'block' : 'none', height: '100%' }}>
-                <GameBooster addToast={addToast} />
+                {isMounted('gamebooster') && <GameBooster active={activeTab === 'gamebooster'} addToast={addToast} />}
               </div>
             </div>
           </main>

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import Lenis from 'lenis';
+import { attachSmoothScroll } from '../smoothScroll';
 import { 
   LayoutDashboard, 
   Trash2, 
@@ -21,26 +21,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
   useEffect(() => {
     if (!sidebarWrapperRef.current) return;
-
-    const lenis = new Lenis({
-      wrapper: sidebarWrapperRef.current,
-      content: sidebarWrapperRef.current.firstElementChild,
-      lerp: 0.05,
-      smoothWheel: true,
-      wheelMultiplier: 1.0,
-    });
-
-    let animationFrameId;
-    function raf(time) {
-      lenis.raf(time);
-      animationFrameId = requestAnimationFrame(raf);
-    }
-    animationFrameId = requestAnimationFrame(raf);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      lenis.destroy();
-    };
+    return attachSmoothScroll(sidebarWrapperRef.current, sidebarWrapperRef.current.firstElementChild);
   }, []);
 
   const menuItems = [

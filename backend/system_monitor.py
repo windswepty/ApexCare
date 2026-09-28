@@ -11,7 +11,6 @@ import time
 import threading
 import subprocess
 import logging
-import gc
 from backend import process_guard
 log = logging.getLogger('SystemMonitor')
 
@@ -23,16 +22,39 @@ _cpu_usage = 0
 _gpu_usage = 0
 _standby_gb = 0
 
-def _cpu_poller():
+# 화면이 최근에 값을 요청했을 때만 잰다. 창이 최소화됐거나 값을 보여 주는 화면이 없으면
+# 백엔드도 쉰다. 예전에는 CPU·GPU 수집 스레드가 창 상태와 상관없이 1초마다 돌았고,
+# 매번 강제 가비지 컬렉션(gc.collect)까지 해서 CPU 를 계속 썼다.
+_DEMAND_WINDOW_SEC = 15
+_last_demand = 0.0
+
+
+def note_demand():
+    global _last_demand
+    _last_demand = time.time()
+
+
+def _wanted():
+    return time.time() - _last_demand < _DEMAND_WINDOW_SEC
+
+
+def _cpu_tick():
+    """한 번 잰다. 잴 필요가 없으면 1초 쉬고 False."""
     global _cpu_usage
+    if not _wanted():
+        time.sleep(1)
+        return False
+    try:
+        _cpu_usage = psutil.cpu_percent(interval=1)
+    except Exception as e:
+        log.debug(f"CPU poller error: {e}")
+        _cpu_usage = 0
+    return True
+
+
+def _cpu_poller():
     while True:
-        try:
-            _cpu_usage = psutil.cpu_percent(interval=1)
-        except Exception as e:
-            log.debug(f"CPU poller error: {e}")
-            _cpu_usage = 0
-            
-        gc.collect()
+        _cpu_tick()
 
 # Start CPU poller
 _cpu_thread = threading.Thread(target=_cpu_poller, daemon=True)
@@ -54,6 +76,9 @@ def _gpu_poller():
     while True:
         try:
             time.sleep(1)
+            # GPU Engine(*) 은 프로세스×엔진마다 값이 하나라 수백~수천 개다. 화면이 안 볼 때는 읽지 않는다.
+            if not _wanted():
+                continue
             win32pdh.CollectQueryData(hq)
             arr = win32pdh.GetFormattedCounterArray(hc, win32pdh.PDH_FMT_DOUBLE)
             usage = 0.0
@@ -66,8 +91,6 @@ def _gpu_poller():
             log.debug(f"GPU poller error: {e}")
             _gpu_usage = 0
             time.sleep(1)
-            
-        gc.collect()
 
 # Start GPU poller automatically
 _gpu_thread = threading.Thread(target=_gpu_poller, daemon=True)
@@ -178,6 +201,7 @@ def memory_lists():
 
 def get_system_stats():
     """Get system stats using only psutil and WMI for GPU."""
+    note_demand()
     try:
         cpu_usage = _cpu_usage
         mem = psutil.virtual_memory()

@@ -15,7 +15,6 @@ import psutil
 import threading
 import ctypes
 import ctypes.wintypes
-import gc
 import logging
 
 # Configure logging
@@ -548,13 +547,11 @@ def _booster_loop():
                         targets = _pick_tame_targets(set(current_game_pids) | _tamed_pids)
                         _tamed_pids |= set(_tame_processes(targets))
 
-                gc.collect()
                 _stop_event.wait(5)
             else:
                 if _booster_state["active"]:
                     log.info("🎮 Game exited - restoring all processes")
                     _teardown()
-                gc.collect()
                 _stop_event.wait(3)
         except Exception as e:
             log.error(f"Booster loop crash: {e}")
@@ -696,7 +693,6 @@ def _eco_suppression_thread_func():
                 _restore_processes(list(gone), owner=ECO_OWNER)
                 _eco_tamed_pids -= gone
 
-            gc.collect()
         except Exception as e:
             log.warning(f"에코 억제 루프 오류: {e}")
 
