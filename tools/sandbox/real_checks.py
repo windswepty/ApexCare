@@ -180,6 +180,23 @@ def _expect_gaming():
         out.append(f'게이밍: 활성 플랜이 {want} 가 아닙니다 ({ss.active_plan_guid()})')
     if ss._read_power_value(want, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, True) != 100:
         out.append('게이밍: CPU 최소 속도(AC)가 100 이 아닙니다')
+    out += _expect_power(want, '게이밍', [(ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 2, 'CPU 부스트 모드'),
+                                        (ss.SUB_PROCESSOR, ss.PERFEPP, 0, 'EPP'),
+                                        (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, 0, 'PCIe 절전')])
+    return out
+
+
+def _expect_power(plan, mode, items):
+    """새 전원 항목이 AC·DC 모두 기대값인지. 이 PC(샌드박스)에 없는 항목은 건너뛴다(모드도 건너뛴다)."""
+    from backend import system_state as ss
+    out = []
+    for sub, setting, want, name in items:
+        for ac in (True, False):
+            code, v = ss._read_power_raw(plan, sub, setting, ac)
+            if code == ss._ERROR_FILE_NOT_FOUND:
+                continue
+            if v != want:
+                out.append(f"{mode}: {name}({'AC' if ac else 'DC'})가 {want} 가 아닙니다 ({v})")
     return out
 
 
@@ -192,6 +209,9 @@ def _expect_eco():
         out.append(f'에코: 활성 플랜이 {want} 가 아닙니다')
     if ss._read_power_value(want, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, False) != 70:
         out.append('에코: CPU 최대 속도(DC)가 70 이 아닙니다')
+    out += _expect_power(want, '에코', [(ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 0, 'CPU 부스트 모드'),
+                                      (ss.SUB_PROCESSOR, ss.PERFEPP, 80, 'EPP'),
+                                      (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, 2, 'PCIe 절전')])
     if reg_get('HKLM', MM, 'NetworkThrottlingIndex') != _ORIGINAL_THROTTLE[0]:
         out.append('에코: NetworkThrottlingIndex 가 원래 값이 아닙니다(게이밍 값이 남음)')
     return out

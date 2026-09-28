@@ -265,6 +265,13 @@ PROCTHROTTLEMAX = 'bc5038f7-23e0-4960-96da-33abaf5935ec'
 CPMINCORES = '0cc5b647-c1df-4637-891a-dec35c318583'
 SUB_USB = '2a737441-1930-4402-8d77-b2bebba308a3'
 USB_SELECTIVE_SUSPEND = '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'
+# 프로세서 성능 부스트 모드: 0 사용 안 함(기본 클럭까지만), 1 사용, 2 공격적, 3 효율적 사용, 4 효율적 공격적
+PERFBOOSTMODE = 'be337238-0d82-4146-a960-4f3749d470c7'
+# 에너지 성능 기본 설정(EPP, 0~100): 0 이면 성능 우선, 클수록 효율 우선. CPPC 를 쓰는 CPU 에서 클럭 결정에 쓰인다
+PERFEPP = '36687f9e-e3a5-4dbf-b1dc-15eb381c6863'
+SUB_PCIEXPRESS = '501a4d13-42af-4429-9fd1-a8218c268e20'
+# PCIe 링크 상태 전원 관리(ASPM): 0 끔, 1 보통 절전, 2 최대 절전
+PCIE_ASPM = 'ee12f906-d277-404b-b6da-e5fa1a576df5'
 
 PLAN_BALANCED = '381b4222-f694-41f0-9685-ff5bb260df2e'
 PLAN_HIGH_PERF = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
@@ -395,13 +402,27 @@ def set_active_plan(guid_str, group, why=''):
     return {'ok': True, 'verified': True, 'before': before, 'after': after}
 
 
-def _read_power_value(plan, sub, setting, ac):
+_ERROR_FILE_NOT_FOUND = 2
+
+
+def _read_power_raw(plan, sub, setting, ac):
+    """(Win32 반환 코드, 값). 코드 2(ERROR_FILE_NOT_FOUND)는 이 PC 의 전원 설정에 그 항목이 없다는 뜻이다."""
     p = _powrprof()
     val = ctypes.c_ulong()
     pg, sg, stg = _guid(plan), _guid(sub), _guid(setting)
     fn = p.PowerReadACValueIndex if ac else p.PowerReadDCValueIndex
     r = fn(None, ctypes.byref(pg), ctypes.byref(sg), ctypes.byref(stg), ctypes.byref(val))
-    return (val.value if r == 0 else None)
+    return r, (val.value if r == 0 else None)
+
+
+def _read_power_value(plan, sub, setting, ac):
+    return _read_power_raw(plan, sub, setting, ac)[1]
+
+
+def power_value(sub, setting, ac=True, plan=None):
+    """활성(또는 지정) 플랜의 세부값을 읽는다. 없거나 읽지 못하면 None. 읽기만 한다."""
+    plan = plan or active_plan_guid()
+    return _read_power_value(plan, sub, setting, ac) if plan else None
 
 
 def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=True):
@@ -418,11 +439,13 @@ def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=
 
     results = []
     for ac in ([True, False] if both_ac_dc else [True]):
-        before = _read_power_value(plan, sub, setting, ac)
+        code, before = _read_power_raw(plan, sub, setting, ac)
         if before is None:
             # 원래 값을 모르면 되돌릴 수 없다. 모르는 채로 바꾸지 않는다.
-            results.append({'ac': ac, 'ok': False,
-                            'reason': '원래 값을 읽지 못해 바꾸지 않았습니다'})
+            # 항목 자체가 없는 PC(예: PCIe 절전이 없는 가상 머신)는 실패가 아니라 '지원하지 않음' 이다.
+            results.append({'ac': ac, 'ok': False, 'unsupported': code == _ERROR_FILE_NOT_FOUND,
+                            'reason': ('이 PC 의 전원 설정에 없는 항목입니다' if code == _ERROR_FILE_NOT_FOUND
+                                       else '원래 값을 읽지 못해 바꾸지 않았습니다')})
             continue
         key = f"power:{plan}:{sub}:{setting}:{'ac' if ac else 'dc'}"
         if not _record(key, {
@@ -453,7 +476,9 @@ def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=
     _reapply_if_active({plan})
 
     ok = all(r['ok'] for r in results)
-    return {'ok': ok, 'verified': ok, 'detail': results,
+    unsupported = bool(results) and all(r.get('unsupported') for r in results)
+    return {'ok': ok, 'verified': ok, 'detail': results, 'unsupported': unsupported,
+            'before': next((r.get('before') for r in results if r.get('ac')), None),
             'reason': '' if ok else '; '.join(r['reason'] for r in results if not r['ok'])}
 
 

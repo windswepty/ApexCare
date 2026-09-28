@@ -82,6 +82,9 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
       기대 차이만 있어야 한다:
       - 활성 플랜 `8c5e7fda-…`(고성능)
       - 고성능 플랜의 CPU 최소·최대·코어 파킹 `AC=0x00000064 DC=0x00000064`, USB 선택적 절전 `AC=0x00000000 DC=0x00000000`
+      - 고성능 플랜의 CPU 부스트 모드 `0x00000002`(공격적), EPP `0x00000000`, PCIe 절전 `0x00000000`(끔)
+        (원래 그 값이었으면 차이가 없다. 이 PC 에 없는 항목은 결과 화면에 '건너뜀' 으로 나온다)
+      - 헤더의 **CPU 실제 속도** 가 기본 클럭보다 높게(부스트) 나온다
       - `SystemResponsiveness = 10`, `NetworkThrottlingIndex = 4294967295`
       - 저널 항목(group=perf_mode), 설정 `optimization_mode = gaming`
       - **HwSchMode 는 바뀌지 않는다**
@@ -89,6 +92,7 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
       기대: `[APEX CARE]` 의 `optimization_mode`·`user_set` 줄만 다르다. 전원 플랜·레지스트리는 `base` 와 같다
 - [ ] 3-3. **게이밍 → 에코**(표준을 거치지 않고) → 에코 기대값만 있어야 하고 게이밍이 남긴 값이 없어야 한다:
       활성 플랜 `a1841308-…`(절전), 절전 플랜의 최소 `0x00000005`·최대 `0x00000046`(70)·코어 `0x00000032`(50),
+      부스트 모드 `0x00000000`(끔)·EPP `0x00000050`(80)·PCIe 절전 `0x00000002`, 헤더의 **CPU 실제 속도** 가 기본 클럭보다 낮다,
       `SystemResponsiveness`·`NetworkThrottlingIndex` 는 `base` 값. 그다음 **표준** → 3-2 와 같은 결과
 - [ ] 3-4. **게이밍** 적용 → 가상 머신 **재부팅** → 앱 실행 → 여전히 게이밍(값 유지), 복구 센터에 항목이 보인다 →
       **표준** → `base` 와 같다(3-2 기준)

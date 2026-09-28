@@ -106,3 +106,45 @@ def test_smooth_scroll_runs_frames_only_while_scrolling():
     assert 'lenis.animate.isRunning ? requestAnimationFrame(loop) : null' in src
     assert "lenis.on('virtual-scroll', start)" in src
     assert 'autoRaf' not in src
+
+
+# ── CPU 실제 속도 ───────────────────────────────
+
+def test_clock_is_base_times_processor_performance():
+    assert system_monitor.clock_from(3800, 120.0) == 4560          # 부스트 중
+    assert system_monitor.clock_from(3800, 70.0) == 2660           # 에코(상한 70%)
+    for base, pct in ((None, 100), (0, 100), (3800, None), (3800, 0)):
+        assert system_monitor.clock_from(base, pct) is None         # 모르면 지어내지 않는다
+
+
+def test_clock_is_measured_only_when_the_screen_asks(monkeypatch):
+    me = threading.get_ident()
+    sampled = []
+
+    class Clock:
+        time = staticmethod(real_time.time)
+
+        @staticmethod
+        def sleep(s):
+            if threading.get_ident() != me:
+                real_time.sleep(s)
+
+    monkeypatch.setattr(system_monitor, 'time', Clock)
+    monkeypatch.setattr(system_monitor.psutil, 'cpu_percent', lambda interval=None: 3.0)
+    monkeypatch.setattr(system_monitor, '_sample_clock',
+                        lambda: sampled.append(threading.get_ident()) or 4321)
+    monkeypatch.setattr(system_monitor, '_last_demand', 0.0)
+
+    system_monitor._cpu_tick()
+    assert me not in sampled
+    system_monitor.note_demand()
+    system_monitor._cpu_tick()
+    assert me in sampled and system_monitor._cpu_clock_mhz == 4321
+    assert system_monitor.get_system_stats() is None or 'cpuClockMHz' in system_monitor.get_system_stats()
+
+
+def test_stats_report_clock_fields():
+    src = _read('backend/system_monitor.py')
+    assert "'cpuClockMHz': _cpu_clock_mhz" in src and "'cpuBaseMHz': cpu_base_mhz()" in src
+    assert 'cpuClockMHz' in _read('src/components/Header.jsx')
+    assert 'cpuClockMHz' in _read('src/components/PerformanceModes.jsx')

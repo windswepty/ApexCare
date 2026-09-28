@@ -35,6 +35,13 @@ log = logging.getLogger('PerfModes')
 
 MODE_GROUP = 'perf_mode'      # 이 그룹의 변경만 모드 전환 시 되돌린다
 
+# 숫자 값을 사람이 읽을 수 있게. 적용 결과에 '이전 → 지금' 으로 보여 준다.
+BOOST_NAMES = {0: '끔(기본 클럭까지만)', 1: '켬', 2: '공격적', 3: '효율적', 4: '효율적 공격적',
+               5: '공격적(보장 클럭)', 6: '효율적 공격적(보장 클럭)'}
+ASPM_NAMES = {0: '끔', 1: '보통 절전', 2: '최대 절전'}
+ONOFF_NAMES = {0: '끔', 1: '켬'}
+PERCENT = '%'
+
 MODES = {
     'standard': {
         'label': '표준',
@@ -48,13 +55,17 @@ MODES = {
     },
     'gaming': {
         'label': '게이밍',
-        'summary': 'CPU 를 항상 최대 속도로 유지하고, 코어 절전과 USB 지연을 끕니다.',
+        'summary': 'CPU 부스트를 가장 공격적으로 쓰고 클럭을 높게 유지합니다. 코어·PCIe·USB 절전을 꺼서 '
+                   '깨어나는 지연을 없앱니다. 발열과 소비 전력은 늘어납니다.',
         'plan': ss.PLAN_HIGH_PERF,
         'power': [
-            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 100, 'CPU 최소 속도 100%'),
-            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, 100, 'CPU 최대 속도 100%'),
-            (ss.SUB_PROCESSOR, ss.CPMINCORES, 100, '코어 파킹 해제'),
-            (ss.SUB_USB, ss.USB_SELECTIVE_SUSPEND, 0, 'USB 선택적 절전 끄기'),
+            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 100, 'CPU 최소 속도 100%', PERCENT),
+            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, 100, 'CPU 최대 속도 100%', PERCENT),
+            (ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 2, 'CPU 부스트 공격적으로', BOOST_NAMES),
+            (ss.SUB_PROCESSOR, ss.PERFEPP, 0, 'CPU 성능 우선 (EPP 0)', PERCENT),
+            (ss.SUB_PROCESSOR, ss.CPMINCORES, 100, '코어 파킹 해제', PERCENT),
+            (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, 0, 'PCIe 절전 끄기 (그래픽카드 지연 감소)', ASPM_NAMES),
+            (ss.SUB_USB, ss.USB_SELECTIVE_SUSPEND, 0, 'USB 선택적 절전 끄기', ONOFF_NAMES),
         ],
         'registry': [
             # MMCSS 가 배경 작업에 예약하는 CPU 비율. 낮출수록 게임에 더 간다.
@@ -67,16 +78,31 @@ MODES = {
     },
     'eco': {
         'label': '에코',
-        'summary': 'CPU 속도 상한을 낮추고 코어 절전을 켜서 발열과 소비 전력을 줄입니다.',
+        'summary': 'CPU 부스트를 끄고 속도 상한을 낮춰 발열·소음·소비 전력을 확실히 줄입니다. '
+                   '무거운 작업과 게임은 느려집니다.',
         'plan': ss.PLAN_POWER_SAVER,
         'power': [
-            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 5, 'CPU 최소 속도 5%'),
-            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, 70, 'CPU 최대 속도 70%'),
-            (ss.SUB_PROCESSOR, ss.CPMINCORES, 50, '코어 파킹 허용'),
+            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 5, 'CPU 최소 속도 5%', PERCENT),
+            (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, 70, 'CPU 최대 속도 70%', PERCENT),
+            (ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 0, 'CPU 부스트 끄기 (기본 클럭까지만)', BOOST_NAMES),
+            (ss.SUB_PROCESSOR, ss.PERFEPP, 80, 'CPU 효율 우선 (EPP 80)', PERCENT),
+            (ss.SUB_PROCESSOR, ss.CPMINCORES, 50, '코어 파킹 허용', PERCENT),
+            (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, 2, 'PCIe 최대 절전', ASPM_NAMES),
+            (ss.SUB_USB, ss.USB_SELECTIVE_SUSPEND, 1, 'USB 선택적 절전 켜기', ONOFF_NAMES),
         ],
         'registry': [],
     },
 }
+
+
+def _fmt(v, names):
+    if v is None:
+        return '알 수 없음'
+    if names == PERCENT:
+        return f'{v}%'
+    if isinstance(names, dict):
+        return names.get(v, str(v))
+    return str(v)
 
 
 def is_admin():
@@ -154,11 +180,17 @@ def apply_mode(mode, user_set=True, persist=True):
                           'detail': '사용 가능한 플랜 없음'})
 
     # ── 3단계: 전원 세부값 (AC/DC 모두) ──────────────────────────
-    for sub, setting, value, label in spec['power']:
+    for sub, setting, value, label, names in spec['power']:
         r = ss.set_power_value(sub, setting, value, group=MODE_GROUP,
                                plan=target_plan, label=label)
+        if r.get('unsupported'):
+            # 이 PC 에 없는 설정이다. 바꾼 것이 없으니 실패도 성공도 아니다. 사실대로 '건너뜀' 으로 알린다.
+            steps.append({'name': label, 'ok': True, 'skipped': True,
+                          'detail': '이 PC 에는 없는 설정이라 건너뛰었습니다'})
+            continue
         steps.append({'name': label, 'ok': r['ok'],
-                      'detail': '' if r['ok'] else r.get('reason', '')})
+                      'detail': (f"{_fmt(r.get('before'), names)} → {_fmt(value, names)}" if r['ok']
+                                 else r.get('reason', ''))})
 
     # ── 4단계: 레지스트리 ────────────────────────────────────────
     for hive, path, name, value, label in spec['registry']:
@@ -167,7 +199,8 @@ def apply_mode(mode, user_set=True, persist=True):
                       'detail': '' if r['ok'] else r.get('reason', '')})
 
     # ── 결과 집계 ────────────────────────────────────────────────
-    applied = [s for s in steps if s['ok']]
+    applied = [s for s in steps if s['ok'] and not s.get('skipped')]
+    skipped = [s for s in steps if s.get('skipped')]
     failed = [s for s in steps if not s['ok']]
 
     # 전원 플랜조차 못 바꿨으면 모드가 적용됐다고 말할 수 없다.
@@ -190,7 +223,8 @@ def apply_mode(mode, user_set=True, persist=True):
         msg = (f"{spec['label']} 모드를 적용했지만 {len(failed)}개 항목이 실패했습니다."
                if plan_ok else f"{spec['label']} 모드 적용에 실패했습니다.")
     else:
-        msg = f"{spec['label']} 모드를 적용했습니다. ({len(applied)}개 항목)"
+        msg = f"{spec['label']} 모드를 적용했습니다. ({len(applied)}개 항목"
+        msg += f", 이 PC 에 없는 {len(skipped)}개 건너뜀)" if skipped else ")"
 
     log.info(f"[모드] {mode}: 성공 {len(applied)} 실패 {len(failed)}")
 
@@ -202,6 +236,7 @@ def apply_mode(mode, user_set=True, persist=True):
         'message': msg,
         'steps': steps,
         'appliedCount': len(applied),
+        'skippedCount': len(skipped),
         'failedCount': len(failed),
         'notes': notes,
         'activePlan': ss.active_plan_guid(),
@@ -327,7 +362,7 @@ def list_modes():
     plans = ss.available_plans()
     out = []
     for key, spec in MODES.items():
-        changes = [label for *_, label in spec['power']]
+        changes = [p[3] for p in spec['power']]
         changes += [label for *_, label in spec['registry']]
         if spec['plan']:
             target, note = _plan_fallback(spec['plan'])

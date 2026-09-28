@@ -40,7 +40,7 @@ def _wanted():
 
 def _cpu_tick():
     """한 번 잰다. 잴 필요가 없으면 1초 쉬고 False."""
-    global _cpu_usage
+    global _cpu_usage, _cpu_clock_mhz
     if not _wanted():
         time.sleep(1)
         return False
@@ -49,7 +49,75 @@ def _cpu_tick():
     except Exception as e:
         log.debug(f"CPU poller error: {e}")
         _cpu_usage = 0
+    _cpu_clock_mhz = _sample_clock()
     return True
+
+
+# ── 실제 CPU 클럭 ──────────────────────────────────────────────
+# 작업 관리자의 '속도' 와 같은 값: 기본 클럭 × \Processor Information(_Total)\% Processor Performance.
+# 부스트 중이면 100% 를 넘는다. 성능 모드가 실제로 무엇을 바꿨는지 사용자가 숫자로 볼 수 있게 한다.
+_PDH_FMT_DOUBLE = 0x00000200
+_CLOCK_COUNTER = r'\Processor Information(_Total)\% Processor Performance'
+_cpu_clock_mhz = None
+_clock = {'pdh': None, 'query': None, 'counter': None, 'failed': False}
+
+
+class _PdhDoubleValue(ctypes.Structure):
+    _fields_ = [('CStatus', ctypes.wintypes.DWORD), ('doubleValue', ctypes.c_double)]
+
+
+_base_mhz_cache = []
+
+
+def cpu_base_mhz():
+    """레지스트리의 CPU 기본 클럭(MHz). 읽지 못하면 None."""
+    if _base_mhz_cache:
+        return _base_mhz_cache[0]
+    value = None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+            value = int(winreg.QueryValueEx(k, "~MHz")[0]) or None
+    except Exception as e:
+        log.debug(f"기본 클럭을 읽지 못했습니다: {e}")
+    _base_mhz_cache.append(value)
+    return value
+
+
+def clock_from(base_mhz, perf_pct):
+    if not base_mhz or perf_pct is None or perf_pct <= 0:
+        return None
+    return int(round(base_mhz * perf_pct / 100.0))
+
+
+def _sample_clock():
+    """지금 CPU 가 도는 클럭(MHz). 처음 한 번은 기준점만 잡고 None. 한 번 실패하면 다시 시도하지 않는다."""
+    c = _clock
+    if c['failed']:
+        return None
+    try:
+        if c['query'] is None:
+            pdh = ctypes.WinDLL('pdh')
+            q, h = ctypes.c_void_p(), ctypes.c_void_p()
+            if pdh.PdhOpenQueryW(None, None, ctypes.byref(q)) != 0:
+                raise OSError('PdhOpenQueryW')
+            if pdh.PdhAddEnglishCounterW(q, ctypes.c_wchar_p(_CLOCK_COUNTER), None, ctypes.byref(h)) != 0:
+                pdh.PdhCloseQuery(q)
+                raise OSError('PdhAddEnglishCounterW')
+            pdh.PdhCollectQueryData(q)
+            c.update(pdh=pdh, query=q, counter=h)
+            return None
+        pdh = c['pdh']
+        if pdh.PdhCollectQueryData(c['query']) != 0:
+            return None
+        v = _PdhDoubleValue()
+        if pdh.PdhGetFormattedCounterValue(c['counter'], _PDH_FMT_DOUBLE, None, ctypes.byref(v)) != 0 or v.CStatus != 0:
+            return None
+        return clock_from(cpu_base_mhz(), v.doubleValue)
+    except Exception as e:
+        log.debug(f"CPU 클럭 카운터를 쓸 수 없습니다: {e}")
+        c['failed'] = True
+        return None
 
 
 def _cpu_poller():
@@ -228,6 +296,8 @@ def get_system_stats():
             'cpuCores': cpu_cores,
             'cpuThreads': cpu_threads,
             'cpuUsage': round(cpu_usage),
+            'cpuClockMHz': _cpu_clock_mhz,        # 아직 재지 못했으면 None (화면은 '측정 중')
+            'cpuBaseMHz': cpu_base_mhz(),
             'ramUsedGB': round(mem.used / (1024**3), 1),
             'ramTotalGB': round(mem.total / (1024**3), 1),
             'ramPct': round(mem.percent),

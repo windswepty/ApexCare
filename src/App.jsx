@@ -212,7 +212,7 @@ export default function App() {
                 {isMounted('startup') && <StartupManager addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('modes') && <PerformanceModes currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />}
+                {isMounted('modes') && <PerformanceModes active={activeTab === 'modes'} currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'drivers' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('drivers') && <DriverUpdater addToast={addToast} />}

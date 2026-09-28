@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Gamepad2, Leaf, Gauge, CheckCircle2, AlertTriangle,
-  RotateCcw, Loader2, ChevronDown, ChevronRight, Info, ShieldCheck
+  RotateCcw, Loader2, ChevronDown, ChevronRight, Info, ShieldCheck, Cpu, MinusCircle
 } from 'lucide-react';
+import { usePolling } from '../usePolling';
+import { clockLabel } from '../cpuClock';
 
 const MODE_ICON = { standard: Gauge, gaming: Gamepad2, eco: Leaf };
 const MODE_ACCENT = {
@@ -13,7 +15,21 @@ const MODE_ACCENT = {
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 
-export default function PerformanceModes({ currentMode, setCurrentMode, addToast }) {
+export default function PerformanceModes({ currentMode, setCurrentMode, addToast, active = true }) {
+  // 지금 CPU 실제 속도. 모드를 바꾸면 이 숫자가 달라지는 것을 바로 볼 수 있게 한다(측정값만 쓴다).
+  const [live, setLive] = useState({ mhz: null, base: null, usage: null });
+  const readLive = useCallback(async () => {
+    const a = api();
+    if (!a?.getSystemStats) return;
+    try {
+      const st = await a.getSystemStats();
+      if (st) setLive({ mhz: st.cpuClockMHz ?? null, base: st.cpuBaseMHz ?? null, usage: st.cpuUsage ?? null });
+    } catch (e) {
+      // 이전 값을 그대로 둔다
+    }
+  }, []);
+  usePolling(readLive, 2000, active);
+
   const [modes, setModes] = useState([]);
   const [applying, setApplying] = useState(null);      // 적용 중인 모드 id
   const [result, setResult] = useState(null);          // 마지막 적용 결과 (steps 포함)
@@ -143,6 +159,38 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
         )}
       </div>
 
+      {/* CPU 실제 속도 — 모드의 효과를 숫자로 보여 준다 */}
+      {(() => {
+        const c = clockLabel(live.mhz, live.base);
+        const pct = live.mhz && live.base ? Math.round((live.mhz / live.base) * 100) : null;
+        return (
+          <div className="glass-panel p-5 flex flex-col md:flex-row md:items-center gap-5">
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="w-12 h-12 rounded-xl grid place-items-center bg-cyan-500/10">
+                <Cpu className="w-6 h-6 text-cyan-400" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">지금 CPU 실제 속도</p>
+                <p className="text-2xl font-black font-mono text-black dark:text-white">
+                  {c.text}
+                  {c.state && <span className={`ml-2 text-sm font-sans ${c.stateClass}`}>{c.state}</span>}
+                </p>
+                <p className="text-[11px] text-gray-500 font-mono">
+                  {live.base ? `기본 ${(live.base / 1000).toFixed(2)} GHz` : '기본 클럭 알 수 없음'}
+                  {pct !== null && ` · 기본의 ${pct}%`}
+                  {typeof live.usage === 'number' && ` · 사용률 ${live.usage}%`}
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed md:border-l md:pl-5 border-black/5 dark:border-slate-800">
+              <p><strong className="text-rose-400">게이밍</strong>: 부스트를 공격적으로 써서 기본 클럭보다 높게 돌고, 가만히 있어도 속도를 낮추지 않습니다.</p>
+              <p><strong className="text-emerald-400">에코</strong>: 부스트를 끄고 상한을 낮춰 기본 클럭보다 낮게 돕니다. 발열·소음·전력이 줄어듭니다.</p>
+              <p className="mt-1">모드를 바꾸고 몇 초 뒤 이 숫자가 달라집니다. 그래픽카드가 한계인 게임은 FPS 차이가 작을 수 있습니다.</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 게임 부스트가 게임 동안만 게이밍 모드를 쓰는 중 */}
       {status?.boostOverride && (
         <div className="glass-panel p-4 flex gap-3 border border-sky-500/30">
@@ -246,6 +294,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                 {typeof result.appliedCount === 'number' && (
                   <p className="text-xs text-gray-500 mt-0.5">
                     적용 {result.appliedCount}건
+                    {result.skippedCount > 0 && <span> · 이 PC 에 없어 건너뜀 {result.skippedCount}건</span>}
                     {result.failedCount > 0 && <span className="text-amber-500"> · 실패 {result.failedCount}건</span>}
                   </p>
                 )}
@@ -258,9 +307,11 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             <div className="mt-4 pt-4 border-t border-black/5 dark:border-slate-800 space-y-2">
               {result.steps.map((s, i) => (
                 <div key={i} className="flex items-start gap-2.5 text-sm">
-                  {s.ok
-                    ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    : <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
+                  {s.skipped
+                    ? <MinusCircle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
+                    : s.ok
+                      ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      : <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
                   <div className="min-w-0">
                     <span className={s.ok ? 'text-black/80 dark:text-white/80' : 'text-black dark:text-white font-semibold'}>
                       {s.name}

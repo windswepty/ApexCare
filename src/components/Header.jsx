@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun, Thermometer } from 'lucide-react';
+import { Monitor, Clock, ShieldCheck, Flame, Moon, Sun, Thermometer, Cpu } from 'lucide-react';
+import { clockLabel } from '../cpuClock';
 
 export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsDarkMode }) {
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [osLabel, setOsLabel] = useState('Windows');
   const [cpuLabel, setCpuLabel] = useState('Loading...');
+  // 지금 CPU 가 실제로 도는 속도. 성능 모드를 바꾸면 몇 초 안에 이 숫자가 달라진다.
+  const [clock, setClock] = useState({ mhz: null, base: null });
 
   useEffect(() => {
     // Fetch real system info
@@ -17,6 +20,7 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             if (stats.osInfo) setOsLabel(stats.osInfo);
             // CPU Info
             if (stats.cpuModel) setCpuLabel(stats.cpuModel);
+            setClock({ mhz: stats.cpuClockMHz ?? null, base: stats.cpuBaseMHz ?? null });
             // OS Info
             // Uptime from OS
             if (stats.uptimeSec) {
@@ -95,6 +99,26 @@ export default function Header({ currentMode, setCurrentMode, isDarkMode, setIsD
             <div className="font-bold">{uptime.hours}h {uptime.minutes}m {uptime.seconds}s</div>
           </div>
         </div>
+
+        {/* CPU 실제 속도 */}
+        {(() => {
+          const c = clockLabel(clock.mhz, clock.base);
+          return (
+            <div
+              className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300"
+              title="작업 관리자의 '속도' 와 같은 값입니다. 성능 모드를 바꾸면 몇 초 뒤 달라집니다."
+            >
+              <Cpu className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <div>
+                <div className="text-[10px] text-gray-500 dark:text-gray-400 font-sans">CPU 실제 속도</div>
+                <div className="font-bold">
+                  {c.text}
+                  {c.state && <span className={`ml-1.5 text-[10px] font-sans ${c.stateClass}`}>{c.state}</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Mode 3-Way Toggle Switch */}
         <div className="bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 p-1 rounded-full flex items-center relative shadow-inner overflow-hidden w-[260px] h-9 transition-colors duration-300">

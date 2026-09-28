@@ -50,7 +50,10 @@ $POWER_SETTINGS = @(
     @($SUB_PROCESSOR, '893dee8e-2bef-41e0-89c6-b55d0929964c', 'CPU 최소 속도(PROCTHROTTLEMIN)'),
     @($SUB_PROCESSOR, 'bc5038f7-23e0-4960-96da-33abaf5935ec', 'CPU 최대 속도(PROCTHROTTLEMAX)'),
     @($SUB_PROCESSOR, '0cc5b647-c1df-4637-891a-dec35c318583', '코어 파킹(CPMINCORES)'),
-    @($SUB_USB, '48e6b7a6-50f5-4782-a5d4-53bb8f07e226', 'USB 선택적 절전')
+    @($SUB_USB, '48e6b7a6-50f5-4782-a5d4-53bb8f07e226', 'USB 선택적 절전'),
+    @($SUB_PROCESSOR, 'be337238-0d82-4146-a960-4f3749d470c7', 'CPU 부스트 모드(PERFBOOSTMODE)'),
+    @($SUB_PROCESSOR, '36687f9e-e3a5-4dbf-b1dc-15eb381c6863', 'CPU 성능/효율 선호(PERFEPP)'),
+    @('501a4d13-42af-4429-9fd1-a8218c268e20', 'ee12f906-d277-404b-b6da-e5fa1a576df5', 'PCIe 절전(ASPM)')
 )
 $guidRe = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 

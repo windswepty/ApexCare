@@ -11,7 +11,9 @@ pytestmark = pytest.mark.usefixtures('as_admin')
 
 MM = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
 POWER_SETTINGS = [(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN), (ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX),
-                  (ss.SUB_PROCESSOR, ss.CPMINCORES), (ss.SUB_USB, ss.USB_SELECTIVE_SUSPEND)]
+                  (ss.SUB_PROCESSOR, ss.CPMINCORES), (ss.SUB_USB, ss.USB_SELECTIVE_SUSPEND),
+                  (ss.SUB_PROCESSOR, ss.PERFBOOSTMODE), (ss.SUB_PROCESSOR, ss.PERFEPP),
+                  (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM)]
 
 
 def _seed_plans():
@@ -126,3 +128,69 @@ def test_revert_everything_restores_journal_then_legacy_backup():
     assert ss.service_start_type('SysMain') == 'delayed-auto'
     assert 'service_start_backup' not in config_manager.load_config()
     assert ss.pending_changes() == {}
+
+
+def test_gaming_and_eco_change_boost_epp_and_pcie_then_standard_restores():
+    # 모드 차이가 실제로 나는 설정들: 부스트 모드, EPP, PCIe 절전
+    _seed_plans()
+    before = _snapshot()
+    hp, ps = fakewin.PLAN_HIGH_PERF, fakewin.PLAN_POWER_SAVER
+
+    g = perf_modes.apply_mode('gaming')
+    assert g['success'], g
+    for side in ('ac', 'dc'):
+        assert POWER.get(hp, ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, side) == 2
+        assert POWER.get(hp, ss.SUB_PROCESSOR, ss.PERFEPP, side) == 0
+        assert POWER.get(hp, ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, side) == 0
+
+    e = perf_modes.apply_mode('eco')
+    assert e['success'], e
+    assert POWER.get(hp, ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 'ac') == 15     # 게이밍이 바꾼 것은 되돌렸다
+    for side in ('ac', 'dc'):
+        assert POWER.get(ps, ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, side) == 0  # 부스트 끔
+        assert POWER.get(ps, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMAX, side) == 70
+        assert POWER.get(ps, ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, side) == 2
+
+    assert perf_modes.apply_mode('standard')['success']
+    assert _snapshot() == before
+    assert ss.pending_changes() == {}
+
+
+def test_step_shows_before_and_after_in_words():
+    _seed_plans()
+    POWER.seed_value(fakewin.PLAN_HIGH_PERF, ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 1)
+    r = perf_modes.apply_mode('gaming')
+    step = next(s for s in r['steps'] if s['name'].startswith('CPU 부스트'))
+    assert step['detail'] == '켬 → 공격적'
+    step = next(s for s in r['steps'] if s['name'].startswith('CPU 최소 속도'))
+    assert step['detail'] == '11% → 100%'
+
+
+def test_setting_missing_on_this_pc_is_skipped_not_failed():
+    # 가상 머신 등에는 PCIe 절전 항목이 없다. 바꾼 게 없으니 실패로 세지도, 기록하지도 않는다.
+    _seed_plans()
+    for plan in (fakewin.PLAN_BALANCED, fakewin.PLAN_HIGH_PERF, fakewin.PLAN_POWER_SAVER):
+        for side in ('ac', 'dc'):
+            POWER.values.pop((plan, ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, side))
+    before = _snapshot()
+
+    r = perf_modes.apply_mode('gaming')
+
+    assert r['success'] and r['failedCount'] == 0 and r['skippedCount'] == 1, r
+    step = next(s for s in r['steps'] if 'PCIe' in s['name'])
+    assert step['skipped'] and step['ok']
+    assert '건너뜀' in r['message']
+    assert not any(ss.PCIE_ASPM in k for k in ss.pending_changes())
+    assert perf_modes.apply_mode('standard')['success']
+    assert _snapshot() == before
+
+
+def test_unreadable_setting_is_a_failure_not_a_skip():
+    # 항목은 있는데 읽기가 막힌 것(권한 등)은 '없는 설정' 과 다르다. 실패로 알린다.
+    _seed_plans()
+    POWER.fail_read.add((fakewin.PLAN_HIGH_PERF, ss.PERFBOOSTMODE, 'ac'))
+    POWER.fail_read.add((fakewin.PLAN_HIGH_PERF, ss.PERFBOOSTMODE, 'dc'))
+    r = perf_modes.apply_mode('gaming')
+    step = next(s for s in r['steps'] if s['name'].startswith('CPU 부스트'))
+    assert step['ok'] is False and not step.get('skipped')
+    assert r['partial'] is True and r['failedCount'] == 1
