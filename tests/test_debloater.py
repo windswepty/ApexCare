@@ -142,6 +142,19 @@ def test_only_exact_packages_in_this_account_are_removed_and_recorded(appx):
     assert rec[0]['account'] == 'kim' and rec[0]['manifestFound'] is True
 
 
+def test_removed_apps_of_one_item_are_told_apart(appx):
+    # 실제 PC 에서 'MSN 뉴스·날씨' 하나를 지우자 같은 이름이 두 줄 보였다. 패키지마다 앱 이름을 붙인다.
+    appx.add('Microsoft.BingNews')
+    appx.add('Microsoft.BingWeather')
+    status, detail = debloater._apply_appx_item(ITEM['bing'], 'kim')
+    assert status == 'removed', detail
+    names = {r['name']: r['appName'] for r in debloater.get_removed_apps()}
+    assert names == {'Microsoft.BingNews': '뉴스', 'Microsoft.BingWeather': '날씨'}
+    for item in debloater.DEBLOAT_SAFE_LIST:
+        if len(item.get('packages', [])) > 1:
+            assert all(debloater.PACKAGE_APP_NAMES.get(p) for p in item['packages']), item['id']
+
+
 def test_wildcards_are_never_sent_to_powershell(appx):
     debloater._query_packages(['*zune*', 'Microsoft.BingNews', "x'; Remove-Item C:\\ -Recurse"])
     assert appx.ran('query') == [('query', ['Microsoft.BingNews'])]

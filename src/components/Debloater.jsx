@@ -191,7 +191,8 @@ export default function Debloater({ addToast }) {
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">윈도우 하드코어 적출</h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xl">
-            지워지지 않는 기본 앱, 백그라운드 텔레메트리(데이터 수집) 등을 파워쉘 단에서 강제로 적출하여 윈도우를 가장 가벼운 상태로 만듭니다.
+            잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(아래 '제거한 앱' 에서 되살릴 수 있습니다),
+            원격 분석·Cortana 정책을 바꿉니다(복구 센터에서 되돌릴 수 있습니다).
           </p>
         </div>
         <div className="z-10 shrink-0">
@@ -277,7 +278,7 @@ export default function Debloater({ addToast }) {
               ) : (
                 <>
                   <Trash2 className="w-5 h-5" />
-                  <span>선택 항목 강제 적출</span>
+                  <span>선택 항목 적출</span>
                 </>
               )}
             </button>
@@ -329,7 +330,9 @@ export default function Debloater({ addToast }) {
             {removedApps.map((app) => (
               <div key={app.fullName} className="p-3.5 rounded-xl border border-black/10 dark:border-slate-700 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-bold text-sm text-black dark:text-white">{app.label || app.name}</p>
+                  <p className="font-bold text-sm text-black dark:text-white">
+                    {app.appName ? `${app.appName} · ` : ''}{app.label || app.name}
+                  </p>
                   <p className="text-[11px] text-gray-500 font-mono truncate">{app.name}</p>
                   <p className="text-[11px] text-gray-500">
                     {app.removedAt} 제거{app.account ? ` · 계정 ${app.account}` : ''}

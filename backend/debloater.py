@@ -79,6 +79,12 @@ for _it in DEBLOAT_SAFE_LIST:
     _it["pattern"] = ", ".join(_it.get("packages", [])) or "policy"      # 예전 키
 _ITEMS_BY_ID = {x["id"]: x for x in DEBLOAT_SAFE_LIST}
 
+# 한 항목에 패키지가 여럿이면 '제거한 앱' 목록에 같은 이름이 여러 줄 보인다. 패키지마다 앱 이름을 붙여 구분한다.
+PACKAGE_APP_NAMES = {
+    "Microsoft.BingNews": "뉴스", "Microsoft.BingWeather": "날씨",
+    "Microsoft.BingFinance": "금융", "Microsoft.BingSports": "스포츠",
+}
+
 
 def _idle_state():
     return {"running": False, "progress_pct": 0, "current_task": "", "error": None,
@@ -388,6 +394,7 @@ def get_removed_apps():
     for a in (data or {}).get('apps', []):
         e = dict(a)
         e['manifestFound'] = _manifest_path(a.get('installLocation')) is not None
+        e['appName'] = PACKAGE_APP_NAMES.get(str(a.get('name') or ''), '')
         out.append(e)
     return out
 
