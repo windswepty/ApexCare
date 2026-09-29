@@ -288,11 +288,6 @@ def _get_dir_size_mb(dir_path, state_obj=None, max_files=10000):
                         continue
                     total += os.path.getsize(fp)
                     file_count += 1
-                    if state_obj and file_count % 50 == 0:
-                        elapsed = time.time() - start_time
-                        rate = file_count / elapsed if elapsed > 0 else 1
-                        state_obj["progress"] = min(99, int((file_count / max_files) * 100))
-                        state_obj["eta_seconds"] = max(0, int((max_files - file_count) / rate) if rate > 0 else 0)
                 except OSError:
                     pass
     except OSError:
@@ -404,7 +399,8 @@ def clean_junk_background(category_ids, cancel_event):
     _junk_clean_state["freed_mb"] = 0.0
     _junk_clean_state["error"] = None
     _junk_clean_state["progress"] = 0
-    _junk_clean_state["eta_seconds"] = 10
+    _junk_clean_state["files_done"] = 0
+    _junk_clean_state["eta_seconds"] = 0      # 남은 시간은 알 수 없다. 지어내지 않는다
     
     import stat
     try:
@@ -462,13 +458,9 @@ def clean_junk_background(category_ids, cancel_event):
                         total_freed_bytes += sz
                         file_count += 1
                         total_success_count += 1
-                        if file_count % 50 == 0:
-                            elapsed = time.time() - start_time
-                            rate = file_count / elapsed if elapsed > 0 else 1
-                            prog = min(99, int((file_count / max_files) * 100))
-                            eta = int((max_files - file_count) / rate) if rate > 0 else 0
-                            _junk_clean_state["progress"] = min(99, _junk_clean_state.get("progress", 0) + int(prog/4))
-                            _junk_clean_state["eta_seconds"] = max(0, eta)
+                        # 실제로 지운 파일 수. 예전에는 임의의 '최대 파일 수'(2000)로 나눈 값을 진행률에 계속 더해
+                        # 파일이 많으면 99% 에 멈추고 적으면 거의 안 움직이는, 의미 없는 % 를 보였다.
+                        _junk_clean_state["files_done"] = _junk_clean_state.get("files_done", 0) + 1
                     except Exception as e:
                         log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
                         skipped_files_log.append({"path": file_path, "size_bytes": 0})
@@ -518,10 +510,13 @@ def clean_junk_background(category_ids, cancel_event):
             except Exception as e:
                 log.debug(f"Failed to get start free space for {drv}: {e}")
 
-        for d in target_dirs:
+        # 진행률 = 끝낸 정리 대상 수 / 전체 대상 수 (휴지통 비우기 포함). 실제로 끝낸 만큼만 오른다.
+        steps_total = len(target_dirs) + (1 if 5 in category_ids else 0)
+        for i, d in enumerate(target_dirs):
             if cancel_event and cancel_event.is_set():
                 break
-            _clean_dir(d, max_files=2000)
+            _clean_dir(d)
+            _junk_clean_state["progress"] = min(99, int((i + 1) * 100 / max(steps_total, 1)))
 
         if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
             try:

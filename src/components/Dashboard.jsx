@@ -65,6 +65,17 @@ const renderLineGraph = (history) => {
 // backend/optimizer.get_deep_optimization_plan 의 단계 이름과 같다(백엔드가 없을 때 보여 줄 목록)
 const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
 
+// 설치 용량과 Windows 가 쓸 수 있는 용량이 다르면(내장 그래픽 예약 등) 둘 다 보여 준다.
+// 예전에는 쓸 수 있는 용량만 'Total' 로 보여 16GB PC 가 15.4GB 로 보였다.
+function ramTotalLabel(info) {
+  const usable = Number(info.ramTotalGB);
+  const installed = Number(info.ramInstalledGB);
+  if (installed > 0 && usable > 0 && installed - usable >= 0.1) {
+    return `설치 ${installed.toFixed(1)} GB · 사용 가능 ${usable.toFixed(1)} GB`;
+  }
+  return `${info.ramTotalGB} GB`;
+}
+
 export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast, active = true }) {
   // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
   // '최상 / 최적화 필요' 를 판정했다. 측정한 건강 상태가 아니므로 없앴다.
@@ -134,6 +145,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               cpuThreads: stats.cpuThreads || 0,
               gpuModel: stats.gpuModel || '알 수 없음',
               ramTotalGB: stats.ramTotalGB || '0',
+              ramInstalledGB: stats.ramInstalledGB ?? null,
               ramUsedGB: stats.ramUsedGB || '0',
               ramAvailableGB: stats.ramAvailableGB ?? '0',
               diskTotalGB: stats.diskTotalGB || '0',
@@ -397,7 +409,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
         
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">임시 파일 정리로 확보한 공간 (누적)</h4>
+            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">원클릭 최적화로 확보한 공간 (누적)</h4>
             <div className="text-2xl font-black text-black dark:text-white">{totalFreed.toFixed(1)} <span className="text-lg">MB</span></div>
           </div>
           <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
@@ -422,7 +434,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400 font-mono">RAM</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.ramTotalGB} GB</span>
+            <span className="text-black dark:text-white font-medium text-right">{ramTotalLabel(sysInfo)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400 font-mono">Storage</span>
@@ -505,7 +517,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white">시스템 메모리 (RAM)</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.ramTotalGB} GB</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{ramTotalLabel(sysInfo)}</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{ramUsage}%</span>

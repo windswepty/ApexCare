@@ -33,7 +33,7 @@ def test_cpu_collector_rests_until_the_screen_asks(monkeypatch):
                 real_time.sleep(s)
 
     def cpu_percent(interval=None):
-        if threading.get_ident() == me:
+        if threading.get_ident() == me and interval is not None:   # 1초 측정만 센다(오래된 값 대체용 즉시 호출은 제외)
             calls.append(interval)
         return 7.0
 
@@ -148,3 +148,24 @@ def test_stats_report_clock_fields():
     assert "'cpuClockMHz': _cpu_clock_mhz" in src and "'cpuBaseMHz': cpu_base_mhz()" in src
     assert 'cpuClockMHz' in _read('src/components/Header.jsx')
     assert 'cpuClockMHz' in _read('src/components/PerformanceModes.jsx')
+
+
+def test_stale_cpu_usage_is_replaced_by_a_real_average(monkeypatch):
+    # 수집기가 쉬는 동안 남은 옛 값을 대시보드가 막 열렸을 때 보여 주지 않는다
+    monkeypatch.setattr(system_monitor, '_cpu_usage', 88)
+    monkeypatch.setattr(system_monitor, '_cpu_sample', [real_time.time() - 60])
+    monkeypatch.setattr(system_monitor.psutil, 'cpu_percent', lambda interval=None: 12.0 if interval is None else 99.0)
+    assert system_monitor._fresh_cpu_usage() == 12.0
+    monkeypatch.setattr(system_monitor, '_cpu_sample', [real_time.time()])
+    assert system_monitor._fresh_cpu_usage() == 88
+
+
+def test_numbers_shown_match_their_meaning():
+    # GPU 사용률은 엔진·프로세스별 값의 합이라 100 을 넘을 수 있다
+    assert '_gpu_usage = min(100, round(usage))' in _read('backend/system_monitor.py')
+    # 정크 정리 진행률은 끝낸 대상 수로만 오른다(임의의 최대 파일 수로 나누지 않는다)
+    opt = _read('backend/optimizer.py')
+    assert '/ max_files' not in opt and "int((i + 1) * 100 / max(steps_total, 1))" in opt
+    # 설치 메모리(16GB)와 Windows 가 쓸 수 있는 메모리(15.4GB)를 구분해 보여 준다
+    assert "'ramInstalledGB': installed_ram_gb()" in _read('backend/system_monitor.py')
+    assert 'ramInstalledGB' in _read('src/components/Dashboard.jsx')

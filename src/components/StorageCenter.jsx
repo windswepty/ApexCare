@@ -243,7 +243,10 @@ function JunkSection({ addToast, onDone }) {
         {cleaning && progress && (
           <div className="mt-4 pt-4 border-t border-black/5 dark:border-slate-800">
             <div className="flex justify-between text-xs mb-1.5">
-              <span className="text-gray-500">정리 중... {progress.progress ?? 0}%</span>
+              <span className="text-gray-500">
+                정리 중... {progress.progress ?? 0}%
+                {typeof progress.files_done === 'number' && ` · 파일 ${progress.files_done.toLocaleString()}개 처리`}
+              </span>
               <button onClick={cancel} className="text-rose-400 font-bold flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" /> 중단
               </button>

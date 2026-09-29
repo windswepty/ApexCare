@@ -46,11 +46,25 @@ def _cpu_tick():
         return False
     try:
         _cpu_usage = psutil.cpu_percent(interval=1)
+        _cpu_sample[0] = time.time()
     except Exception as e:
         log.debug(f"CPU poller error: {e}")
         _cpu_usage = 0
     _cpu_clock_mhz = _sample_clock()
     return True
+
+
+_cpu_sample = [0.0]      # 마지막으로 CPU 사용률을 잰 시각
+
+
+def _fresh_cpu_usage():
+    """수집기가 쉬다가 막 깨어났으면 그 값은 오래된 것이다. 그때는 지난 호출 이후 평균(실측)을 쓴다."""
+    if time.time() - _cpu_sample[0] <= 3:
+        return _cpu_usage
+    try:
+        return psutil.cpu_percent(interval=None)
+    except Exception:
+        return _cpu_usage
 
 
 # ── 실제 CPU 클럭 ──────────────────────────────────────────────
@@ -64,6 +78,25 @@ _clock = {'pdh': None, 'query': None, 'counter': None, 'failed': False}
 
 class _PdhDoubleValue(ctypes.Structure):
     _fields_ = [('CStatus', ctypes.wintypes.DWORD), ('doubleValue', ctypes.c_double)]
+
+
+_installed_ram_cache = []
+
+
+def installed_ram_gb():
+    """꽂혀 있는 메모리 용량(GB). psutil 의 total 은 내장 그래픽 등이 예약한 만큼 빠진 값이라
+    16GB PC 에서 15.4GB 처럼 보인다. 작업 관리자처럼 설치 용량을 따로 보여 주려고 읽는다. 못 읽으면 None."""
+    if _installed_ram_cache:
+        return _installed_ram_cache[0]
+    value = None
+    try:
+        kb = ctypes.c_ulonglong()
+        if ctypes.windll.kernel32.GetPhysicallyInstalledSystemMemory(ctypes.byref(kb)):
+            value = round(kb.value / (1024 * 1024), 1)
+    except Exception as e:
+        log.debug(f"설치 메모리를 읽지 못했습니다: {e}")
+    _installed_ram_cache.append(value)
+    return value
 
 
 _base_mhz_cache = []
@@ -154,7 +187,7 @@ def _gpu_poller():
                 for k, v in arr.items():
                     if 'engtype_3D' in k:
                         usage += v
-            _gpu_usage = round(usage)
+            _gpu_usage = min(100, round(usage))      # 엔진·프로세스별 값의 합이라 100 을 넘을 수 있다
         except Exception as e:
             log.debug(f"GPU poller error: {e}")
             _gpu_usage = 0
@@ -271,7 +304,7 @@ def get_system_stats():
     """Get system stats using only psutil and WMI for GPU."""
     note_demand()
     try:
-        cpu_usage = _cpu_usage
+        cpu_usage = _fresh_cpu_usage()
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage('C:\\')
         
@@ -299,7 +332,8 @@ def get_system_stats():
             'cpuClockMHz': _cpu_clock_mhz,        # 아직 재지 못했으면 None (화면은 '측정 중')
             'cpuBaseMHz': cpu_base_mhz(),
             'ramUsedGB': round(mem.used / (1024**3), 1),
-            'ramTotalGB': round(mem.total / (1024**3), 1),
+            'ramTotalGB': round(mem.total / (1024**3), 1),          # Windows 가 쓸 수 있는 용량
+            'ramInstalledGB': installed_ram_gb(),                    # 꽂혀 있는 용량 (예약분 포함)
             'ramPct': round(mem.percent),
             'ramStandbyGB': standby_gb,
             'ramFreeGB': free_gb,
