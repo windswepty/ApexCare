@@ -219,7 +219,7 @@ NEW = r'SOFTWARE\ApexCareNew\Deeper'
 def test_keys_created_for_a_value_are_removed_on_restore():
     REGISTRY.seed_key('HKLM', 'SOFTWARE')
     assert ss.set_registry('HKLM', NEW, 'V', 1, group='t')['ok']
-    assert ss.pending_changes()[f'reg:HKLM\{NEW}\V']['created_keys'] == [NEW, r'SOFTWARE\ApexCareNew']
+    assert ss.pending_changes()[rf'reg:HKLM\{NEW}\V']['created_keys'] == [NEW, r'SOFTWARE\ApexCareNew']
 
     assert ss.restore_group('t')['ok']
 
