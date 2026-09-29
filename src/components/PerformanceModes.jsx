@@ -220,14 +220,14 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               <p><strong className="text-emerald-400">에코</strong>: 부스트를 끄고 상한을 낮춰 기본 클럭보다 낮게 돕니다. 발열·소음·전력이 줄어듭니다.</p>
               <p className="mt-1">모드를 바꾸고 몇 초 뒤 이 숫자가 달라집니다. 그래픽카드가 한계인 게임은 FPS 차이가 작을 수 있습니다.</p>
             </div>
-            <div className="md:ml-auto md:border-l md:pl-5 border-black/5 dark:border-slate-800 min-w-[220px]">
+            <div className="md:ml-auto md:border-l md:pl-5 border-black/5 dark:border-slate-800 md:w-[300px] shrink-0">
               <button
                 onClick={runBench}
                 disabled={benching || !!applying}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-black/10 dark:border-slate-700 text-sm font-bold hover:border-cyan-500 transition-colors disabled:opacity-50"
               >
                 {benching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gauge className="w-4 h-4" />}
-                {benching ? '측정 중 (3초)…' : '지금 모드 성능 측정 (3초)'}
+                <span className="whitespace-nowrap">{benching ? '측정 중…' : '성능 측정 (3초)'}</span>
               </button>
               {(() => {
                 const rows = ['gaming', 'standard', 'eco'].filter((m) => bench[m]);
@@ -238,11 +238,12 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                 return (
                   <div className="mt-2 space-y-1">
                     {rows.map((m) => (
-                      <div key={m} className="flex justify-between text-xs font-mono">
-                        <span className="text-gray-500 font-sans">{MODE_LABEL[m]}</span>
-                        <span className="text-black dark:text-white">
-                          {bench[m].score} MB/s · {Math.round((bench[m].score / best) * 100)}%
-                          {bench[m].clockMHz ? ` · ${(bench[m].clockMHz / 1000).toFixed(2)} GHz` : ''}
+                      <div key={m} className="flex items-baseline gap-3 text-xs font-mono">
+                        <span className="w-10 shrink-0 whitespace-nowrap text-gray-500 font-sans">{MODE_LABEL[m]}</span>
+                        <span className="flex-1 whitespace-nowrap text-right text-black dark:text-white">
+                          <strong>{Math.round((bench[m].score / best) * 100)}%</strong>
+                          <span className="text-gray-500"> · {bench[m].score} MB/s</span>
+                          {bench[m].clockMHz ? <span className="text-gray-500"> · {(bench[m].clockMHz / 1000).toFixed(2)} GHz</span> : null}
                         </span>
                       </div>
                     ))}
