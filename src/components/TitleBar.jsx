@@ -1,4 +1,3 @@
-import React from 'react';
 import { Minus, Square, X, Settings } from 'lucide-react';
 
 export default function TitleBar({ onOpenSettings }) {
@@ -41,9 +40,6 @@ export default function TitleBar({ onOpenSettings }) {
       <div className="flex items-center gap-2 text-xs font-bold text-black dark:text-white transition-colors duration-300">
         <img src="/icon.png" alt="logo" className="w-4 h-4 rounded-sm dark:invert" />
         <span className="tracking-wide">APEX CARE - Desktop PC Optimizer</span>
-        <span className="text-[10px] font-mono text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 px-1.5 py-0.2 rounded transition-colors duration-300">
-          NATIVE GUI
-        </span>
       </div>
 
       {/* Window Controls */}

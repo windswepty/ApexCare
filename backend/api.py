@@ -126,8 +126,9 @@ class Api:
     def toggleStartupApp(self, name, enabled):
         return optimizer.toggle_startup_app(name, enabled)
 
-    def getProcesses(self):
-        return system_monitor.get_processes()
+    def getProcesses(self, limit=8):
+        """메모리 순 프로세스 목록. limit=0 이면 전부(게이밍 탭의 우선순위 조정이 이름으로 찾는다)."""
+        return system_monitor.get_processes(limit)
 
     def killProcess(self, pid):
         return system_monitor.kill_process(pid)
@@ -182,7 +183,12 @@ class Api:
         changes = system_state.pending_changes()
         by_group = {}
         for key, e in changes.items():
-            by_group.setdefault(e.get('group', '기타'), []).append({
+            group = e.get('group') or '기타'
+            # 시작 프로그램은 항목마다 그룹(startup:위치:이름)을 따로 쓴다. 화면에는 한 묶음으로 보여 준다.
+            # 예전에는 'startup:HKCU:Discord' 같은 내부 키가 그대로 제목으로 보였다.
+            if group.startswith('startup:'):
+                group = 'startup'
+            by_group.setdefault(group, []).append({
                 'what': e.get('why') or key,
                 'kind': e.get('kind'),
             })
@@ -213,8 +219,9 @@ class Api:
             log.warning(f"Error getting uninstaller apps: {e}")
             return []
 
-    def uninstallApp(self, uninstall_string):
-        return uninstaller.run_uninstall(uninstall_string)
+    def uninstallApp(self, app_name):
+        """프로그램 이름으로 제거 프로그램을 실행한다. 명령줄은 백엔드가 레지스트리에서 읽는다."""
+        return uninstaller.uninstall_by_name(app_name)
         
     def getSfcStatus(self):
         return system_repair.get_sfc_status()
@@ -223,7 +230,8 @@ class Api:
         return system_repair.get_dism_status()
 
     def findAppLeftovers(self, app_name):
-        return uninstaller.find_leftovers(app_name)
+        """아직 설치돼 있으면 찾지 않는다. {success, stillInstalled, items, message}"""
+        return uninstaller.scan_leftovers(app_name)
 
     def cleanAppLeftovers(self, paths):
         return uninstaller.clean_leftovers(paths)
@@ -380,5 +388,18 @@ class Api:
             self._window.minimize()
 
     def maximizeWindow(self):
-        if self._window:
-            self._window.toggle_fullscreen()
+        """최대화 ↔ 이전 크기. 예전에는 전체 화면(작업 표시줄까지 덮음)으로 바꿔 버튼 설명과 달랐다."""
+        if not self._window:
+            return
+        if getattr(self, '_maximized', False):
+            self._window.restore()
+            self._maximized = False
+        else:
+            self._window.maximize()
+            self._maximized = True
+
+    def _on_window_maximized(self, *args):
+        self._maximized = True
+
+    def _on_window_restored(self, *args):
+        self._maximized = False

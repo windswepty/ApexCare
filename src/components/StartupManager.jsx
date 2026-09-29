@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Rocket,
   Power
@@ -14,6 +14,8 @@ const LOCATION_LABEL = {
 
 export default function StartupManager({ addToast }) {
   const [startupApps, setStartupApps] = useState([]);
+  // 'loading' → 'ok' | 'error'. 읽기 전에는 '0개' 라고 말하지 않는다(예전에는 읽기 전에도 0개로 보였다).
+  const [loadState, setLoadState] = useState('loading');
   // 요청 중인 항목. 결과를 받기 전에는 스위치를 바꾸지 않는다.
   const [pendingId, setPendingId] = useState(null);
 
@@ -33,13 +35,16 @@ export default function StartupManager({ addToast }) {
           const apps = await window.pywebview.api.getStartupApps();
           if (apps && Array.isArray(apps)) {
             setStartupApps(apps);
+            setLoadState('ok');
           } else {
             setStartupApps([]);
+            setLoadState('error');
           }
         }
       } catch (e) {
         console.error('Error fetching startup apps:', e);
         setStartupApps([]);
+        setLoadState('error');
       }
     };
 
@@ -82,6 +87,7 @@ export default function StartupManager({ addToast }) {
 
   const enabledCount = startupApps.filter(a => a.enabled).length;
   const disabledCount = startupApps.length - enabledCount;
+  const countText = (n) => (loadState === 'loading' ? '…' : loadState === 'error' ? '-' : `${n}개`);
 
   return (
     <div className="space-y-6">
@@ -103,12 +109,12 @@ export default function StartupManager({ addToast }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel p-4 text-center">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">켜진 시작 프로그램</span>
-          <div className="text-3xl font-black font-mono text-cyan-400 my-1">{enabledCount}개</div>
+          <div className="text-3xl font-black font-mono text-cyan-400 my-1">{countText(enabledCount)}</div>
         </div>
 
         <div className="glass-panel p-4 text-center">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">꺼진 시작 프로그램</span>
-          <div className="text-3xl font-black font-mono text-slate-400 my-1">{disabledCount}개</div>
+          <div className="text-3xl font-black font-mono text-slate-400 my-1">{countText(disabledCount)}</div>
         </div>
       </div>
 
@@ -116,7 +122,7 @@ export default function StartupManager({ addToast }) {
       <div className="glass-panel p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm">
-            등록된 시작 프로그램 목록 ({startupApps.length})
+            등록된 시작 프로그램 목록{loadState === 'ok' ? ` (${startupApps.length})` : ''}
           </h3>
           <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">이름 순</span>
         </div>
@@ -126,6 +132,15 @@ export default function StartupManager({ addToast }) {
         </p>
 
         <div className="space-y-2">
+          {loadState === 'loading' && (
+            <p className="text-sm text-gray-500 py-6 text-center">시작 프로그램 목록을 읽는 중…</p>
+          )}
+          {loadState === 'error' && (
+            <p className="text-sm text-rose-400 py-6 text-center">시작 프로그램 목록을 읽지 못했습니다.</p>
+          )}
+          {loadState === 'ok' && startupApps.length === 0 && (
+            <p className="text-sm text-gray-500 py-6 text-center">Run 키에 등록된 시작 프로그램이 없습니다.</p>
+          )}
           {startupApps.map((app) => (
             <div
               key={app.id}

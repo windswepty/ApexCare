@@ -2,6 +2,7 @@
 APEX CARE - System Repair and Advanced Disk Ops
 Runs long-running commands like SFC, DISM, Defrag, and Network optimization in hidden subprocesses with full logging and error handling.
 """
+import re
 import subprocess
 import threading
 import logging
@@ -21,16 +22,16 @@ def _run_hidden_cmd(args, timeout=120):
         result = subprocess.run(
             [str(a) for a in args],
             shell=False,
-            capture_output=True,
-            text=True,
-            errors="replace",           # 콘솔 도구는 OEM 코드 페이지로 출력한다. 못 읽는 바이트로 읽기 스레드가 죽지 않게
+            capture_output=True,        # 바이트로 받는다. 콘솔 도구는 OEM 코드 페이지로 출력한다
             creationflags=CREATE_NO_WINDOW,
             timeout=timeout
         )
+        out = decode_console_output(result.stdout)
         if result.returncode == 0:
-            return {"success": True, "message": "성공적으로 완료되었습니다.", "output": result.stdout}
+            return {"success": True, "message": "성공적으로 완료되었습니다.", "output": out}
+        err = decode_console_output(result.stderr)
         return {"success": False, "message": f"작업 실패 (코드: {result.returncode})",
-                "error": result.stderr or result.stdout}
+                "error": summarize_output(err) or summarize_output(out) or f"종료 코드 {result.returncode}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -38,9 +39,50 @@ def _run_hidden_cmd(args, timeout=120):
 # Background task state dictionaries
 # ─────────────────────────────────────────────
 
-_sfc_state = {"status": "idle", "output": "", "error": None}
-_dism_state = {"status": "idle", "output": "", "error": None}
-_trim_state = {"status": "idle", "output": "", "error": None}
+_sfc_state = {"status": "idle", "output": "", "error": None, "summary": ""}
+_dism_state = {"status": "idle", "output": "", "error": None, "summary": ""}
+_trim_state = {"status": "idle", "output": "", "error": None, "summary": ""}
+
+# 디스크 최적화 시간 제한. 시간이 지나면 subprocess 가 defrag 를 강제로 끝낸다.
+# 예전에는 300초였는데, HDD 조각 모음은 수십 분 걸려 늘 도중에 끊기고 '실패' 로 보였다.
+TRIM_TIMEOUT_SEC = 3 * 3600
+
+# 진행 표시 줄(검증 45% 완료, [=====  20.0%  ])은 결과가 아니다. 요약에서 뺀다.
+_PROGRESS_LINE = re.compile(r'\d+(?:[.,]\d+)?\s*%')
+
+
+def decode_console_output(data):
+    """콘솔 도구의 출력 바이트를 글자로 바꾼다.
+
+    sfc.exe 는 출력을 파일·파이프로 보내면 UTF-16 으로 쓴다. 예전에는 이것을 코드 페이지로 읽어
+    글자 사이마다 NUL 이 끼어 알아볼 수 없었다. dism·defrag 는 OEM 코드 페이지로 쓴다.
+    """
+    if not data:
+        return ''
+    if isinstance(data, str):
+        return data
+    # 코드 페이지 출력에는 NUL 바이트가 나오지 않는다. UTF-16 은 줄바꿈·공백·숫자 같은 ASCII 마다 NUL 이 붙는다.
+    # (한글만 보면 NUL 이 없어 비율로는 못 가린다.)
+    if data[:2] in (b'\xff\xfe', b'\xfe\xff') or b'\x00' in data[:4096]:
+        text = data.decode('utf-16-le', errors='replace')
+        return text.lstrip('﻿').replace('\x00', '')
+    for enc in ('oem', 'mbcs', 'utf-8'):
+        try:
+            return data.decode(enc)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return data.decode('utf-8', errors='replace')
+
+
+def summarize_output(text, max_lines=3, max_chars=400):
+    """명령 출력의 마지막 의미 있는 몇 줄. 진행률 줄과 빈 줄은 뺀다. 없으면 ''."""
+    if not text:
+        return ''
+    lines = [ln.strip() for ln in re.split(r'[\r\n]+', str(text))]
+    lines = [ln for ln in lines if ln and not _PROGRESS_LINE.search(ln) and not set(ln) <= set('=-_*. ')]
+    out = ' '.join(lines[-max_lines:])
+    return out if len(out) <= max_chars else '…' + out[-max_chars:]
+
 
 def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
     cmd_str = " ".join(str(a) for a in args)        # 로그 표시용. 실행에는 쓰지 않는다.
@@ -49,20 +91,28 @@ def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
         result = subprocess.run(
             [str(a) for a in args],
             shell=False,
-            capture_output=True,
-            text=True,
-            errors="replace",           # 콘솔 도구는 OEM 코드 페이지로 출력한다. 못 읽는 바이트로 읽기 스레드가 죽지 않게
+            capture_output=True,        # 바이트로 받아 도구마다 맞는 인코딩으로 푼다(decode_console_output)
             creationflags=CREATE_NO_WINDOW,
             timeout=timeout_sec
         )
-        state_dict["output"] = result.stdout
+        out = decode_console_output(result.stdout)
+        err = decode_console_output(result.stderr)
+        state_dict["output"] = out
+        # 도구가 마지막에 쓴 결과 문장(예: '무결성 위반을 찾지 못했습니다')을 화면에 그대로 보여 준다.
+        # 종료 코드 0 은 '검사를 마쳤다' 는 뜻이지 '손상이 없다·다 고쳤다' 는 뜻이 아니다.
+        state_dict["summary"] = summarize_output(out)
         if result.returncode == 0:
             state_dict["status"] = "success"
             log.info(f"✓ Command succeeded: {cmd_str}")
         else:
             state_dict["status"] = "error"
-            state_dict["error"] = result.stderr or result.stdout
-            log.warning(f"✗ Command failed (code {result.returncode}): {cmd_str} -> {state_dict['error']}")
+            state_dict["error"] = (summarize_output(err) or summarize_output(out)
+                                   or f"종료 코드 {result.returncode}")
+            log.warning(f"✗ Command failed (code {result.returncode}): {cmd_str} -> {err or out}")
+    except subprocess.TimeoutExpired:
+        state_dict["status"] = "error"
+        state_dict["error"] = f"{timeout_sec // 60}분 안에 끝나지 않아 중단했습니다."
+        log.warning(f"⚠ Command timed out: {cmd_str}")
     except Exception as e:
         state_dict["status"] = "error"
         state_dict["error"] = str(e)
@@ -80,7 +130,9 @@ def run_trim():
     _trim_state["status"] = "running"
     _trim_state["error"] = None
     _trim_state["output"] = ""
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["defrag.exe", "/C", "/O"], _trim_state, 300), daemon=True)
+    _trim_state["summary"] = ""
+    t = threading.Thread(target=_run_hidden_cmd_bg,
+                         args=(["defrag.exe", "/C", "/O"], _trim_state, TRIM_TIMEOUT_SEC), daemon=True)
     t.start()
     return {"success": True}
 
@@ -99,6 +151,7 @@ def run_sfc():
     _sfc_state["status"] = "running"
     _sfc_state["error"] = None
     _sfc_state["output"] = ""
+    _sfc_state["summary"] = ""
     # 타임아웃은 subprocess 를 '강제 종료'시킨다. sfc /scannow 를 중간에 죽이면
     # 복구가 반쯤 적용된 상태로 남을 수 있으므로 넉넉하게 잡는다(느린 HDD 기준).
     t = threading.Thread(target=_run_hidden_cmd_bg, args=(["sfc.exe", "/scannow"], _sfc_state, 3600), daemon=True)
@@ -120,6 +173,7 @@ def run_dism():
     _dism_state["status"] = "running"
     _dism_state["error"] = None
     _dism_state["output"] = ""
+    _dism_state["summary"] = ""
     # DISM /RestoreHealth 를 중간에 죽이면 구성 요소 저장소(WinSxS)가 손상될 수 있다.
     # 느린 회선에서 Windows Update 로 원본을 받아오면 1시간을 넘기도 하므로 2시간으로 잡는다.
     t = threading.Thread(target=_run_hidden_cmd_bg, args=(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, 7200), daemon=True)

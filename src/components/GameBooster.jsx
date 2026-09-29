@@ -1,18 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePolling } from '../usePolling';
+import { restoreMessage } from '../processRestore';
 import {
-  Crosshair, Gamepad2, Activity, Zap, ShieldCheck, AlertTriangle,
+  Crosshair, Gamepad2, Activity, Zap, ShieldCheck,
   RotateCcw, Loader2, Cpu, ChevronUp, ChevronDown, Minus, Search
 } from 'lucide-react';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
+
+// 우선순위 이름(백엔드 키) → 화면 표시. 예전에는 '우선순위를 high 로 바꿨습니다' 처럼 내부 값이 보였다.
+const PRIORITY_LABEL = { high: '높음', above_normal: '보통 초과', normal: '보통', below_normal: '보통 미만', idle: '낮음' };
 
 /** 각 설정이 무엇을 바꾸고 되돌릴 수 있는지 사용자에게 그대로 보여준다. */
 const BOOST_OPTIONS = [
   {
     key: 'boost_timer_resolution',
     title: '타이머 해상도 높이기',
-    desc: '시스템 타이머를 0.5ms 로 올려 입력 지연을 줄입니다.',
+    desc: '시스템 타이머 간격을 0.5ms 로 줄여 입력 지연을 줄입니다. Windows 10 2004 이전 버전에서만 효과가 있습니다.',
+    // 이후 버전은 타이머 요청이 요청한 프로그램에만 적용돼 게임에는 영향이 없다(백엔드가 적용을 건너뛴다).
+    unsupportedNote: '이 Windows 에서는 타이머 요청이 요청한 프로그램에만 적용되어 게임에 효과가 없으므로, 켜 두어도 적용하지 않습니다.',
     scope: '세션 한정 · 프로그램을 끄면 자동 복구',
     risk: 'safe',
   },
@@ -65,7 +71,8 @@ export default function GameBooster({ addToast, active = true }) {
         setAdjusted(c?.count || 0);
       }
       if (a.getProcesses) {
-        const list = await a.getProcesses();
+        // 0 = 전부. 예전에는 메모리 상위 8개만 받아 검색으로 게임이나 원하는 앱을 찾을 수 없었다.
+        const list = await a.getProcesses(0);
         if (Array.isArray(list)) setProcs(list);
       }
     } catch (e) {
@@ -88,9 +95,10 @@ export default function GameBooster({ addToast, active = true }) {
     const next = !status?.enabled;
     try {
       const res = await a.toggleGameBooster(next);
+      // 백엔드가 실제로 한 일(되돌렸는지, 저장했는지)을 그대로 알린다.
       addToast?.(
-        next ? '게임 자동 감지를 켰습니다.' : '게임 자동 감지를 껐습니다. 적용했던 설정은 되돌렸습니다.',
-        res?.success === false ? 'error' : 'success'
+        res?.message || (next ? '게임 자동 감지를 켰습니다.' : '게임 자동 감지를 껐습니다.'),
+        res?.success === false ? 'error' : res?.saved === false ? 'info' : 'success'
       );
     } catch (e) {
       addToast?.(`전환 실패: ${e}`, 'error');
@@ -131,7 +139,7 @@ export default function GameBooster({ addToast, active = true }) {
     try {
       const res = await a.boostProcess(pid, priority);
       if (res?.ok) {
-        addToast?.(`${res.name}: 우선순위를 ${priority} 로 바꿨습니다.`, 'success');
+        addToast?.(`${res.name}: 우선순위를 '${PRIORITY_LABEL[priority] || priority}' 로 바꿨습니다.`, 'success');
       } else {
         // 백엔드가 왜 막았는지 한국어로 돌려주므로 그대로 보여준다
         addToast?.(res?.reason || `${name} 의 우선순위를 바꾸지 못했습니다.`, 'error');
@@ -146,18 +154,17 @@ export default function GameBooster({ addToast, active = true }) {
   const restoreAll = async () => {
     const a = api();
     if (!a?.restoreAllProcesses) return;
-    const res = await a.restoreAllProcesses();
-    addToast?.(
-      res?.ok ? `${res.restored}개 프로세스를 원래 우선순위로 되돌렸습니다.`
-              : `${res?.restored || 0}개 복구, ${res?.failed?.length || 0}개 실패`,
-      res?.ok ? 'success' : 'error'
-    );
+    try {
+      const res = await a.restoreAllProcesses();
+      addToast?.(restoreMessage(res), res?.ok ? 'success' : 'error');
+    } catch (e) {
+      addToast?.(`복구 실패: ${e}`, 'error');
+    }
     refresh();
   };
 
-  const visible = procs
-    .filter((p) => !filter || (p.name || '').toLowerCase().includes(filter.toLowerCase()))
-    .slice(0, 60);
+  const matched = procs.filter((p) => !filter || (p.name || '').toLowerCase().includes(filter.toLowerCase()));
+  const visible = matched.slice(0, 60);
 
   return (
     <div className="space-y-6">
@@ -170,7 +177,8 @@ export default function GameBooster({ addToast, active = true }) {
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">스마트 게임 부스터</h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm max-w-2xl">
-            게임 실행을 감지하면 아래에서 켜둔 항목만 적용하고, 게임이 끝나면 되돌립니다.
+            게임 실행을 감지하면 게임의 우선순위를 '높음' 으로 올리고 아래에서 켜 둔 항목을 적용합니다.
+            게임이 끝나면 모두 원래대로 되돌립니다.
           </p>
         </div>
         <button
@@ -193,9 +201,12 @@ export default function GameBooster({ addToast, active = true }) {
           <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
             <Gamepad2 className="w-3.5 h-3.5" /> 감지된 게임
           </div>
-          <p className="font-bold text-black dark:text-white truncate">
-            {status?.detected_game || '없음'}
+          <p className="font-bold text-black dark:text-white truncate" title={status?.detected_game_label || ''}>
+            {status?.detected_game_label || status?.detected_game || '없음'}
           </p>
+          {!status?.enabled && (
+            <p className="text-[11px] text-gray-500 mt-1">자동 감지가 꺼져 있어 게임을 찾지 않습니다.</p>
+          )}
         </div>
         <div className="glass-panel p-5">
           <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
@@ -252,6 +263,9 @@ export default function GameBooster({ addToast, active = true }) {
                   <div className="min-w-0">
                     <p className="font-bold text-sm text-black dark:text-white">{opt.title}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{opt.desc}</p>
+                    {opt.unsupportedNote && status && status.timer_effective === false && (
+                      <p className="text-[11px] text-amber-500 mt-1 leading-relaxed">{opt.unsupportedNote}</p>
+                    )}
                     <p className={`text-[11px] mt-1.5 font-mono ${RISK_STYLE[opt.risk]}`}>{opt.scope}</p>
                   </div>
                 </div>
@@ -284,7 +298,9 @@ export default function GameBooster({ addToast, active = true }) {
 
         <div className="max-h-[360px] overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
           {visible.length === 0 && (
-            <p className="text-sm text-gray-500 py-6 text-center">표시할 프로세스가 없습니다.</p>
+            <p className="text-sm text-gray-500 py-6 text-center">
+              {filter ? `'${filter}' 이(가) 들어간 프로세스가 없습니다.` : '표시할 프로세스가 없습니다.'}
+            </p>
           )}
           {visible.map((p) => (
             <div key={p.pid}
@@ -292,7 +308,7 @@ export default function GameBooster({ addToast, active = true }) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-black dark:text-white truncate">{p.name}</p>
                 <p className="text-[11px] text-gray-500 font-mono">
-                  PID {p.pid} · {p.cpuPct ?? p.cpu_percent ?? '0%'} · {p.memoryMB ?? 0}MB
+                  PID {p.pid} · CPU {p.cpuPct ?? '측정 중'} · {p.memoryMB ?? 0}MB · 우선순위 {p.priority || '알 수 없음'}
                 </p>
               </div>
               <div className="flex gap-1 shrink-0">
@@ -315,15 +331,20 @@ export default function GameBooster({ addToast, active = true }) {
             </div>
           ))}
         </div>
+        {matched.length > visible.length && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            {matched.length}개 중 메모리를 많이 쓰는 {visible.length}개만 보입니다. 이름으로 찾아 좁혀 주세요.
+          </p>
+        )}
       </div>
 
-      {/* 안전 안내 */}
+      {/* 안전 안내 — 실제 동작과 같게: 직접 조정에서 막는 것과 '양보시키기' 가 건너뛰는 것은 다르다 */}
       <div className="glass-panel p-4 flex gap-3">
         <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
         <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-          Windows 필수 프로세스, 실행 중인 게임, 백신·통화·백업 프로그램은 우선순위 조정 대상에서
-          자동으로 제외됩니다. <strong className="text-black dark:text-white">realtime</strong> 우선순위는
-          입력까지 멈출 수 있어 아예 제공하지 않습니다.
+          Windows 필수 프로세스와 APEX CARE 자신은 목록에 나오지 않고 우선순위도 바꿀 수 없습니다.
+          '바쁜 백그라운드 앱 양보시키기' 는 실행 중인 게임, 지금 쓰고 있는 창, 백신·통화·백업·입력기 프로그램을 건드리지 않습니다.
+          <strong className="text-black dark:text-white"> 실시간</strong> 우선순위는 입력까지 멈출 수 있어 아예 제공하지 않습니다.
         </div>
       </div>
     </div>

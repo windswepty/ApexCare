@@ -125,6 +125,9 @@ _optimization_state = {
 # Windows Update 다운로드 캐시(3)와 Prefetch(4)는 뺐다. 업데이트가 받는 중에 캐시를 지우면 설치가 실패할 수
 # 있고, Prefetch 는 저장공간 화면에서도 기본으로 꺼 둔 항목이다. 둘 다 저장공간 화면에서 직접 고를 때만 지운다.
 DEEP_OPT_JUNK_CATEGORIES = (1, 2)
+# 원클릭이 디스크 최적화 결과를 기다리는 시간. SSD TRIM 은 수 초면 끝난다. HDD 조각 모음은
+# 이보다 오래 걸릴 수 있고, 그때는 '실패' 가 아니라 '진행 중' 으로 알리고 기다리기만 멈춘다.
+TRIM_WAIT_SEC = 300
 
 
 def get_deep_optimization_plan():
@@ -218,20 +221,27 @@ def _run_deep_optimization():
         _optimization_state["current_task"] = "디스크 최적화(TRIM) 중..."
         trim_res = system_repair.run_trim()
         trim_ok = False
-        if trim_res.get("success"):
-            trim_deadline = time.time() + 300
-            while time.time() < trim_deadline:
-                st = system_repair.get_trim_status().get("status")
-                if st != "running":
-                    trim_ok = (st == "success")
+        if not trim_res.get("success"):
+            trim_detail = trim_res.get("message") or "시작하지 못했습니다"
+        else:
+            trim_detail = ""
+            trim_deadline = time.time() + TRIM_WAIT_SEC
+            while True:
+                st = system_repair.get_trim_status()
+                if st.get("status") != "running":
+                    trim_ok = (st.get("status") == "success")
+                    if not trim_ok:
+                        trim_detail = system_repair.summarize_output(st.get("error")) or "실패"
                     break
-                if _cancel_event.is_set():
-                    # TRIM 자체는 중간에 끊지 않는다(디스크 작업). 대기만 그만둔다.
+                if _cancel_event.is_set() or time.time() >= trim_deadline:
+                    # TRIM·조각 모음은 중간에 끊지 않는다(디스크 작업). 기다리기만 그만둔다.
+                    # 실패가 아니라 '아직 진행 중' 이다. 그대로 알린다.
+                    trim_detail = ("아직 진행 중입니다. 백그라운드에서 끝까지 진행되며, "
+                                   "저장공간 → 디스크 최적화에서 결과를 확인할 수 있습니다")
                     break
                 time.sleep(1)
-        steps.append({"name": "디스크 최적화(TRIM)", "ok": trim_ok,
-                      "detail": "" if trim_ok
-                                else system_repair.get_trim_status().get("error", "완료 확인 실패")})
+        steps.append({"name": "디스크 최적화(TRIM)", "ok": trim_ok, "detail": trim_detail})
+        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
 
         failed = [s for s in steps if not s["ok"]]
         _optimization_state["progress_pct"] = 100
@@ -251,7 +261,14 @@ def _run_deep_optimization():
 def start_deep_optimization():
     if _optimization_state["running"]:
         return {"success": False, "message": "이미 최적화가 실행 중입니다."}
-    
+    # 저장공간 화면의 정리와 같은 상태·같은 폴더를 쓴다. 겹쳐 돌면 서로의 결과를 덮어쓴다.
+    if _junk_clean_state.get("status") == "running":
+        return {"success": False,
+                "message": "저장공간 화면에서 정크 정리가 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
+    if system_repair.get_trim_status().get("status") == "running":
+        return {"success": False,
+                "message": "디스크 최적화가 이미 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
+
     t = threading.Thread(target=_run_deep_optimization, daemon=True)
     t.start()
     return {"success": True}
@@ -307,6 +324,44 @@ _clean_lock = threading.Lock()
 _junk_scan_state = {"status": "idle", "data": [], "progress": 0, "eta_seconds": 0}
 _junk_scan_thread = None
 
+
+def _recycle_bin_bytes():
+    """모든 드라이브 휴지통의 크기(바이트). 읽지 못하면 None."""
+    try:
+        from ctypes import wintypes
+
+        class SHQUERYRBINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD),
+                        ("i64Size", ctypes.c_int64),
+                        ("i64NumItems", ctypes.c_int64)]
+        info = SHQUERYRBINFO()
+        info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
+        if ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.byref(info)) == 0:
+            return max(0, int(info.i64Size))
+    except Exception as e:
+        log.debug(f"휴지통 크기를 읽지 못했습니다: {e}")
+    return None
+
+
+def _empty_recycle_bin():
+    """휴지통을 비운다. (비운 바이트, 실패 사유|None).
+
+    예전에는 SHEmptyRecycleBinW 의 결과를 보지 않아, 실패해도 정리 결과에 드러나지 않았다.
+    휴지통이 이미 비어 있으면 Windows 가 오류 코드를 돌려주므로, 비운 뒤 크기로 판단한다.
+    """
+    before = _recycle_bin_bytes()
+    hr = None
+    try:
+        # 1 = SHERB_NOCONFIRMATION, 2 = SHERB_NOPROGRESSUI, 4 = SHERB_NOSOUND
+        hr = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7) & 0xFFFFFFFF
+    except Exception as e:
+        return 0, f"휴지통을 비우지 못했습니다: {e}"
+    after = _recycle_bin_bytes()
+    freed = max(0, before - after) if (before is not None and after is not None) else 0
+    if hr != 0 and not (after == 0):
+        return freed, f"휴지통을 비우지 못했습니다 (코드 0x{hr:08X})"
+    return freed, None
+
 def get_junk_scan_status():
     return _junk_scan_state
 
@@ -331,29 +386,16 @@ def scan_junk_background():
         soft_dist_size = _get_dir_size_mb(soft_dist, _junk_scan_state, max_files=1000)
         prefetch_size = _get_dir_size_mb(prefetch, _junk_scan_state, max_files=500)
         
-        # 휴지통 크기 계산 (ctypes)
-        recycle_size = 0.0
-        try:
-            import ctypes
-            from ctypes import wintypes
-            class SHQUERYRBINFO(ctypes.Structure):
-                _fields_ = [("cbSize", wintypes.DWORD),
-                            ("i64Size", ctypes.c_int64),
-                            ("i64NumItems", ctypes.c_int64)]
-            shell32 = ctypes.windll.shell32
-            info = SHQUERYRBINFO()
-            info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
-            res = shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
-            if res == 0:
-                recycle_size = round(info.i64Size / (1024 * 1024), 2)
-        except Exception:
-            pass
+        rb = _recycle_bin_bytes()
+        recycle_size = round(rb / (1024 * 1024), 2) if rb else 0.0
 
         _junk_scan_state["data"] = [
-            {"id": 1, "name": "윈도우 시스템 임시 파일 (%TEMP%)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치, 업데이트, 실행 중 생성된 임시 데이터 파일"},
+            {"id": 1, "name": "Windows 임시 파일 (%TEMP%, Windows\\Temp)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치·업데이트·실행 중에 만들어진 임시 파일. 사용 중인 파일은 건너뜁니다"},
             {"id": 2, "name": "웹 브라우저 캐시 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지·스크립트 캐시. 쿠키와 로그인 정보는 지우지 않습니다"},
-            {"id": 3, "name": "Windows Update 패키지 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": True, "description": "이미 설치 완료된 윈도우 업데이트 설치 패키지 잔여물"},
-            {"id": 4, "name": "시스템 렌더링 Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱 실행 가속화를 위한 사전 로드 데이터 (삭제 시 자동 재생성)"},
+            # 기본 해제. 원클릭 최적화도 이 항목은 뺀다. 업데이트를 받는 중에 지우면 설치가 실패하거나
+            # 처음부터 다시 받는다. 예전 설명('이미 설치 완료된 … 잔여물')은 사실이 아니었다.
+            {"id": 3, "name": "Windows Update 다운로드 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": False, "description": "Windows Update 가 내려받은 설치 파일. 설치가 끝난 파일은 필요 없지만, 받는 중이거나 설치 대기 중인 업데이트는 다시 내려받게 됩니다"},
+            {"id": 4, "name": "Prefetch 데이터", "sizeMB": prefetch_size, "category": "System", "selected": False, "description": "앱을 빨리 띄우려고 Windows 가 기록해 둔 데이터. 지우면 다시 만들어지며, 그때까지 앱이 처음 한 번 느리게 켜질 수 있습니다"},
             # 기본 체크 해제. 이 목록에서 유일하게 복구가 불가능한 항목이다.
             # 다른 항목은 임시·캐시 파일이라 OS 가 다시 만들지만, 휴지통을 비우면
             # 사용자가 '나중에 확인하려고' 넣어둔 파일이 영영 사라진다.
@@ -364,12 +406,13 @@ def scan_junk_background():
         ]
         _junk_scan_state["progress"] = 100
         _junk_scan_state["eta_seconds"] = 0
+        _junk_scan_state["error"] = None
         _junk_scan_state["status"] = "success"
     except Exception as e:
-        import traceback
-        _junk_scan_state["data"] = [
-            {"id": 999, "name": f"에러 발생: {str(e)}", "sizeMB": 0, "category": "Error", "selected": False, "description": traceback.format_exc()}
-        ]
+        # 오류를 정리 항목처럼 목록에 끼워 넣지 않는다(예전에는 '에러 발생' 이 고를 수 있는 항목으로 보였다).
+        log.warning(f"정크 검사 실패: {e}")
+        _junk_scan_state["data"] = []
+        _junk_scan_state["error"] = str(e) or type(e).__name__
         _junk_scan_state["status"] = "error"
 
 def scan_junk():
@@ -400,12 +443,14 @@ def clean_junk_background(category_ids, cancel_event):
     _junk_clean_state["error"] = None
     _junk_clean_state["progress"] = 0
     _junk_clean_state["files_done"] = 0
+    _junk_clean_state["skipped_mb"] = 0.0
+    _junk_clean_state["skipped_count"] = 0
+    _junk_clean_state["warnings"] = []
+    _junk_clean_state["skipped_log"] = None
     _junk_clean_state["eta_seconds"] = 0      # 남은 시간은 알 수 없다. 지어내지 않는다
     
     import stat
     try:
-        target_scan_mb = sum(item.get("sizeMB", 0) for item in _junk_scan_state.get("data", []) if item.get("id") in category_ids)
-
         total_freed_bytes = 0
         total_attempt_count = 0
         total_success_count = 0
@@ -493,23 +538,6 @@ def clean_junk_background(category_ids, cancel_event):
         if 4 in category_ids:
             target_dirs.append(prefetch)
 
-        import shutil
-        import psutil
-        
-        drives = []
-        for p in psutil.disk_partitions(all=False):
-            if p.fstype and 'cdrom' not in p.opts:
-                drives.append(p.mountpoint)
-        if not drives:
-            drives = ['C:\\']
-            
-        start_free = {}
-        for drv in drives:
-            try:
-                start_free[drv] = shutil.disk_usage(drv).free
-            except Exception as e:
-                log.debug(f"Failed to get start free space for {drv}: {e}")
-
         # 진행률 = 끝낸 정리 대상 수 / 전체 대상 수 (휴지통 비우기 포함). 실제로 끝낸 만큼만 오른다.
         steps_total = len(target_dirs) + (1 if 5 in category_ids else 0)
         for i, d in enumerate(target_dirs):
@@ -518,39 +546,25 @@ def clean_junk_background(category_ids, cancel_event):
             _clean_dir(d)
             _junk_clean_state["progress"] = min(99, int((i + 1) * 100 / max(steps_total, 1)))
 
+        warnings = []
+        recycle_freed = 0
         if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
-            try:
-                import ctypes
-                # 1 = SHERB_NOCONFIRMATION, 2 = SHERB_NOPROGRESSUI, 4 = SHERB_NOSOUND
-                empty_res = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
-                if empty_res == 0:
-                    print("[DELETED] Recycle Bin emptied via ctypes.")
-                sys.stdout.flush()
-            except Exception as e:
-                log.warning(f"Failed to empty recycle bin: {e}")
-                sys.stdout.flush()
+            recycle_freed, why = _empty_recycle_bin()
+            if why:
+                log.warning(why)
+                warnings.append(why)
 
-        details = {}
-        total_actual_freed = 0
-        for drv in drives:
-            if drv in start_free:
-                try:
-                    end_val = shutil.disk_usage(drv).free
-                    freed = max(0, end_val - start_free[drv])
-                    freed_mb = round(freed / (1024 * 1024), 2)
-                    if freed_mb > 0:
-                        drv_letter = drv.replace('\\', '')
-                        details[drv_letter] = freed_mb
-                    total_actual_freed += freed
-                except Exception as e:
-                    log.debug(f"Failed to get end free space for {drv}: {e}")
-
-        freed_total_mb = round(total_actual_freed / (1024 * 1024), 2)
-        skipped_mb = max(0.0, round(target_scan_mb - freed_total_mb, 2))
+        # 확보한 용량 = 실제로 지운 파일 크기 + 비운 휴지통 크기.
+        # 예전에는 정리 전후 드라이브 여유 공간 차이를 썼다. 그 사이 다른 프로그램이 쓰거나 지운 것까지
+        # 섞여서, 정리 중에 게임이 업데이트되면 0MB 로, 다운로드가 끝나 파일이 지워지면 부풀려 보였다.
+        freed_total_mb = round((total_freed_bytes + recycle_freed) / (1024 * 1024), 2)
+        # 건너뛴 용량 = 사용 중이라 지우지 못한 파일 크기의 합(추정이 아니라 파일마다 잰 값)
+        skipped_mb = round(sum(x["size_bytes"] for x in skipped_files_log) / (1024 * 1024), 2)
 
         _junk_clean_state["freed_mb"] = freed_total_mb
         _junk_clean_state["skipped_mb"] = skipped_mb
-        _junk_clean_state["details"] = details
+        _junk_clean_state["skipped_count"] = len(skipped_files_log)
+        _junk_clean_state["warnings"] = warnings
         _junk_clean_state["skipped_log"] = None
         
         if skipped_files_log:

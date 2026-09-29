@@ -373,8 +373,8 @@ def junk_junction():
         with open(p, 'w') as f:
             f.write('user data')
     junk = os.path.join(temp, 'apex_check_junk.tmp')
-    with open(junk, 'w') as f:
-        f.write('junk')
+    with open(junk, 'wb') as f:
+        f.write(b'j' * (2 * 1024 * 1024))           # 확보 용량이 '지운 파일 크기' 로 잡히는지 보려고 2MB
     locked_path = os.path.join(temp, 'apex_check_locked.tmp')
     with open(locked_path, 'w') as f:
         f.write('in use')
@@ -397,11 +397,16 @@ def junk_junction():
             problems.append(f'정션 너머 사용자 파일이 지워졌습니다: {missing}')
         if os.path.exists(junk):
             problems.append('정크 파일이 남았습니다')
+        # 확보 용량은 지운 파일 크기의 합이다(드라이브 여유 공간 차이가 아니다). 2MB 파일을 지웠으면 2MB 이상.
+        if not isinstance(st.get('freed_mb'), (int, float)) or st['freed_mb'] < 2.0:
+            problems.append(f"확보 용량이 지운 크기보다 작게 보고됐습니다: {st.get('freed_mb')}MB")
         log = os.path.join(config_manager.APPDATA_DIR, 'skipped_files.log')
         if h is None:
             problems.append('잠금 파일을 만들지 못해 건너뛴 로그는 확인하지 못했습니다')
         elif not (os.path.exists(log) and 'apex_check_locked.tmp' in open(log, encoding='utf-8').read()):
             problems.append('잠긴 파일이 건너뛴 로그에 없습니다')
+        elif not st.get('skipped_count'):
+            problems.append(f"잠긴 파일이 건너뛴 개수에 없습니다: {st.get('skipped_count')}")
         desktop_log = os.path.join(os.path.expanduser('~'), 'Desktop', 'APEX_Skipped_Files.log')
         if os.path.exists(desktop_log):
             problems.append('바탕화면에 로그가 생겼습니다')
@@ -410,6 +415,61 @@ def junk_junction():
             kernel32.CloseHandle(ctypes.c_void_p(h))
         if os.path.isdir(link):
             os.rmdir(link)                        # 정션 자체만 지운다(대상 폴더는 그대로)
+    return verdict(problems, [])
+
+
+@check('SFC 출력: UTF-16 으로 나오는 결과 문장을 깨지지 않게 읽음')
+def sfc_output_encoding():
+    # sfc /? 는 도움말만 출력하고 아무것도 검사·복구하지 않는다. 파이프로 받으면 UTF-16 으로 나오는지와
+    # 앱이 그것을 글자로 푸는지만 본다(진짜 /scannow 는 몇 분 걸리고 시스템 파일을 고칠 수 있어 돌리지 않는다).
+    from backend import system_repair
+    r = subprocess.run([os.path.join(os.environ['SystemRoot'], 'System32', 'sfc.exe'), '/?'],
+                       shell=False, capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+    text = system_repair.decode_console_output(r.stdout)
+    problems = []
+    if not text.strip():
+        problems.append('sfc 출력이 비었습니다')
+    if '\x00' in text:
+        problems.append('해독한 글자에 NUL 이 남았습니다(UTF-16 을 코드 페이지로 읽음)')
+    if 'SCANNOW' not in text.upper():
+        problems.append(f'도움말에 SCANNOW 가 보이지 않습니다: {text[:200]!r}')
+    return verdict(problems, [])
+
+
+@check('프로그램 삭제: 아직 설치된 프로그램의 폴더는 잔여물로 찾지 않음')
+def leftover_guard():
+    from backend import uninstaller
+    key = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\ApexSbxLeftoverCheck'
+    name = 'Apex Sandbox Leftover Check'
+    folder = os.path.join(os.environ['LOCALAPPDATA'], 'ApexSbxLeftoverCheck')
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, 'app.dat'), 'w') as f:
+        f.write('program file')
+    reg_set('HKCU', key, 'DisplayName', name)
+    reg_set('HKCU', key, 'UninstallString', r'C:\Windows\System32\notepad.exe')
+    reg_set('HKCU', key, 'InstallLocation', folder)
+    problems = []
+    try:
+        uninstaller.get_installed_apps()                      # 화면이 목록을 띄울 때처럼 설치 경로를 기억시킨다
+        r = uninstaller.scan_leftovers(name)
+        if not r.get('stillInstalled') or r.get('items'):
+            problems.append(f'설치된 채로 잔여물을 찾았습니다: {r}')
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key)       # 제거가 끝난 것처럼 등록 정보를 지운다
+        r = uninstaller.scan_leftovers(name)
+        paths = [os.path.normcase(i['path']) for i in r.get('items', [])]
+        if os.path.normcase(folder) not in paths:
+            problems.append(f'제거 뒤 설치 폴더를 찾지 못했습니다: {r}')
+        c = uninstaller.clean_leftovers([folder])
+        if not c.get('success') or os.path.exists(folder):
+            problems.append(f'남은 폴더를 휴지통으로 보내지 못했습니다: {c}')
+    finally:
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key)
+        except OSError:
+            pass
+        if os.path.isdir(folder):
+            import shutil
+            shutil.rmtree(folder, ignore_errors=True)         # 이 점검이 만든 폴더만 지운다
     return verdict(problems, [])
 
 

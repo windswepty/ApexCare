@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePolling } from '../usePolling';
+import { restoreMessage } from '../processRestore';
 import {
   History, RotateCcw, ShieldCheck, Loader2, CheckCircle2,
-  AlertTriangle, Cpu, Zap, Network, Server, HardDrive, Gamepad2, ShieldOff
+  AlertTriangle, Cpu, Zap, Network, Server, HardDrive, Gamepad2, ShieldOff, Rocket
 } from 'lucide-react';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
@@ -12,7 +13,9 @@ const GROUP_META = {
   perf_mode: { label: '성능 모드', icon: Zap, desc: '전원 플랜과 CPU 동작 설정' },
   hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정' },
   boost: { label: '게임 부스트', icon: Gamepad2, desc: 'Nagle 끄기 (네트워크 어댑터 레지스트리)' },
-  debloat: { label: '원격 분석·Cortana 정책', icon: ShieldOff, desc: '디블로터가 바꾼 정책 레지스트리와 서비스' },
+  debloat: { label: '원격 분석·Cortana 정책', icon: ShieldOff, desc: "'Windows 기본 앱 정리' 가 바꾼 정책 레지스트리와 서비스" },
+  // 백엔드가 startup:위치:이름 그룹을 하나로 모아 보낸다. 예전에는 내부 키가 제목으로 그대로 보였다.
+  startup: { label: '시작 프로그램 켜기·끄기', icon: Rocket, desc: '작업 관리자와 같은 켜짐/꺼짐 표시(StartupApproved). 되돌리면 바꾸기 전 상태로 돌아갑니다' },
   legacy_network: { label: '이전 버전의 네트워크 튜닝', icon: Network, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
   legacy_service: { label: '이전 버전의 서비스 설정', icon: Server, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
   기타: { label: '기타 변경', icon: HardDrive, desc: '' },
@@ -21,6 +24,7 @@ const GROUP_META = {
 export default function RestoreCenter({ addToast, active = true }) {
   const [pending, setPending] = useState({ count: 0, groups: {} });
   const [procCount, setProcCount] = useState(0);
+  const [removedApps, setRemovedApps] = useState(0);   // 'Windows 기본 앱 정리' 에서 제거한 앱 수(되살리기는 그 화면에서)
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -32,6 +36,10 @@ export default function RestoreCenter({ addToast, active = true }) {
       if (a.getAdjustedProcessCount) {
         const c = await a.getAdjustedProcessCount();
         setProcCount(c?.count || 0);
+      }
+      if (a.getRemovedDebloatApps) {
+        const list = await a.getRemovedDebloatApps();
+        setRemovedApps(Array.isArray(list) ? list.length : 0);
       }
     } catch (e) {
       console.error('변경 내역 조회 실패:', e);
@@ -51,8 +59,9 @@ export default function RestoreCenter({ addToast, active = true }) {
     if (!a?.revertAllSystemChanges) return;
     if (!window.confirm(
       '이 프로그램이 바꾼 모든 시스템 설정을 원래대로 되돌립니다.\n\n' +
-      '위 목록에 있는 전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정이\n' +
-      '바꾸기 전에 기록해 둔 값으로 복구됩니다. 기록이 없는 설정은 건드리지 않습니다.\n\n계속할까요?'
+      '위 목록에 있는 전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정, 시작 프로그램 켜기·끄기가\n' +
+      '바꾸기 전에 기록해 둔 값으로 복구됩니다. 기록이 없는 설정은 건드리지 않습니다.\n\n' +
+      '성능 모드는 \'표준\' 으로 돌아갑니다. 제거한 기본 앱은 되살리지 않습니다(\'Windows 기본 앱 정리\' 화면에서 되살립니다).\n\n계속할까요?'
     )) return;
 
     setBusy(true);
@@ -74,11 +83,7 @@ export default function RestoreCenter({ addToast, active = true }) {
     setBusy(true);
     try {
       const res = await a.restoreAllProcesses();
-      addToast?.(
-        res?.ok ? `${res.restored}개 프로세스를 원래 우선순위로 되돌렸습니다.`
-                : `${res?.restored || 0}개 복구, ${res?.failed?.length || 0}개 실패`,
-        res?.ok ? 'success' : 'error'
-      );
+      addToast?.(restoreMessage(res), res?.ok ? 'success' : 'error');
     } catch (e) {
       addToast?.(`복구 실패: ${e}`, 'error');
     }
@@ -105,9 +110,10 @@ export default function RestoreCenter({ addToast, active = true }) {
       {nothingToRevert ? (
         <div className="glass-panel p-8 text-center">
           <ShieldCheck className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-          <p className="font-bold text-black dark:text-white">되돌릴 변경이 없습니다.</p>
+          <p className="font-bold text-black dark:text-white">되돌릴 설정 변경이 없습니다.</p>
+          {/* 예전 문구 '이 프로그램을 쓰기 전과 같은 상태' 는 사실이 아닐 수 있었다. 지운 파일과 제거한 앱은 여기서 다루지 않는다. */}
           <p className="text-sm text-gray-500 mt-1">
-            현재 시스템은 이 프로그램을 쓰기 전과 같은 상태입니다.
+            이 프로그램이 기록해 둔 시스템 설정은 모두 원래 값으로 돌아가 있습니다.
           </p>
         </div>
       ) : (
@@ -212,13 +218,24 @@ export default function RestoreCenter({ addToast, active = true }) {
         </div>
       )}
 
+      {removedApps > 0 && (
+        <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+            'Windows 기본 앱 정리' 에서 제거한 앱 <strong className="text-black dark:text-white">{removedApps}개</strong>는
+            '전부 원래대로' 로 되살아나지 않습니다. 그 화면의 '제거한 앱' 에서 되살릴 수 있습니다.
+          </div>
+        </div>
+      )}
+
       <div className="glass-panel p-4 flex gap-3">
         <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
         <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
           파일 삭제는 여기에 기록되지 않습니다. 대신 사용자 파일은 모두
           <strong className="text-black dark:text-white"> 휴지통을 거쳐</strong> 삭제되므로
           Windows 휴지통에서 직접 복구하시면 됩니다.
-          임시 파일과 캐시는 OS 가 다시 만들어 냅니다.
+          임시 파일과 캐시는 휴지통을 거치지 않고 지워지며, 필요하면 Windows 와 각 프로그램이 다시 만듭니다.
+          휴지통 비우기로 지운 파일은 되돌릴 수 없습니다.
         </div>
       </div>
     </div>

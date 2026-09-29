@@ -1,18 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { usePolling } from '../usePolling';
-import { 
-  Zap, 
-  RotateCw, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Cpu, 
-  HardDrive, 
-  MemoryStick, 
-  XCircle, 
-  TrendingUp, 
-  Gauge,
-  Sun,
-  Moon,
+import {
+  Zap,
+  CheckCircle2,
+  AlertTriangle,
+  Cpu,
+  HardDrive,
+  MemoryStick,
+  XCircle,
   Monitor
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -76,7 +71,7 @@ function ramTotalLabel(info) {
   return `${info.ramTotalGB} GB`;
 }
 
-export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addToast, active = true }) {
+export default function Dashboard({ addToast, active = true }) {
   // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
   // '최상 / 최적화 필요' 를 판정했다. 측정한 건강 상태가 아니므로 없앴다.
   const [lastRun, setLastRun] = useState(null);   // 이번 실행의 단계별 결과
@@ -102,7 +97,8 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
   const [diskUsage, setDiskUsage] = useState(0);
 
   const [sysInfo, setSysInfo] = useState({
-    cpuModel: 'Scanning CPU...',
+    cpuModel: '확인 중…',
+    gpuModel: '확인 중…',
     cpuCores: 0,
     cpuThreads: 0,
     ramTotalGB: '0',
@@ -140,7 +136,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
             });
             
             setSysInfo({
-              cpuModel: stats.cpuModel || 'Unknown CPU',
+              cpuModel: stats.cpuModel || '알 수 없음',
               cpuCores: stats.cpuCores || 0,
               cpuThreads: stats.cpuThreads || 0,
               gpuModel: stats.gpuModel || '알 수 없음',
@@ -150,11 +146,12 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               ramAvailableGB: stats.ramAvailableGB ?? '0',
               diskTotalGB: stats.diskTotalGB || '0',
               diskUsedGB: stats.diskUsedGB || '0',
-              diskFreeGB: stats.diskTotalGB ? (parseFloat(stats.diskTotalGB) - parseFloat(stats.diskUsedGB)).toFixed(0) : '0'
+              // 백엔드가 직접 잰 남은 용량. 반올림한 전체 − 반올림한 사용량으로 계산하면 1GB 씩 어긋났다.
+              diskFreeGB: stats.diskFreeGB ?? '0'
             });
           }
-        } catch (e) {
-          // Keep previous data if failed
+        } catch {
+          // 받지 못하면 이전 값을 그대로 둔다
         }
       }
   }, []);
@@ -171,7 +168,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     let plan = null;
     try {
       if (window.pywebview?.api?.getDeepOptimizationPlan) plan = await window.pywebview.api.getDeepOptimizationPlan();
-    } catch (e) {
+    } catch {
       plan = null;
     }
     const planLines = (plan?.steps || []).map((s, i) => `${i + 1}. ${s.name}\n    ${s.detail}`);
@@ -250,7 +247,9 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
     if (failedCount === 0 && steps.length > 0) {
       try {
         confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
-      } catch (e) {}
+      } catch {
+        // 장식일 뿐이다. 실패해도 결과 표시는 이어 간다
+      }
       if (addToast) addToast(`원클릭 최적화를 마쳤습니다 (${steps.length}단계 모두 성공).`, 'success');
     } else if (addToast) {
       addToast(steps.length
@@ -425,24 +424,25 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400 font-mono">Processor</span>
-            <span className="text-black dark:text-white font-medium text-right truncate max-w-[200px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</span>
+            <span className="text-gray-500 dark:text-gray-400">프로세서</span>
+            <span className="text-black dark:text-white font-medium text-right truncate max-w-[300px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400 font-mono">Graphics (GPU)</span>
-            <span className="text-black dark:text-white font-medium text-right truncate max-w-[200px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</span>
+            <span className="text-gray-500 dark:text-gray-400">그래픽 (GPU)</span>
+            <span className="text-black dark:text-white font-medium text-right truncate max-w-[300px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400 font-mono">RAM</span>
+            <span className="text-gray-500 dark:text-gray-400">메모리 (RAM)</span>
             <span className="text-black dark:text-white font-medium text-right">{ramTotalLabel(sysInfo)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400 font-mono">Storage</span>
+            {/* C: 드라이브만 잰 값이다. 예전에는 'Storage' 라고 써서 전체 저장 장치 용량처럼 보였다. */}
+            <span className="text-gray-500 dark:text-gray-400">C: 드라이브</span>
             <span className="text-black dark:text-white font-medium text-right">{sysInfo.diskTotalGB} GB</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400 font-mono">Cores/Threads</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</span>
+            <span className="text-gray-500 dark:text-gray-400">코어 / 스레드</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores}코어 / {sysInfo.cpuThreads}스레드</span>
           </div>
         </div>
       </div>
@@ -457,8 +457,8 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <Cpu className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[200px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores} Cores / {sysInfo.cpuThreads} Threads</p>
+              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores}코어 / {sysInfo.cpuThreads}스레드 · CPU 사용률</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{cpuUsage}%</span>
@@ -485,14 +485,11 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
               <Monitor className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[200px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</h3>
+              <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">3D 엔진 사용률</p>
             </div>
           </div>
-          <div className="flex items-baseline gap-1.5 shrink-0">
-            <span className="text-3xl font-black font-mono text-black dark:text-white">{gpuUsage}%</span>
-            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">Utilization</span>
-          </div>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{gpuUsage}%</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
@@ -545,7 +542,7 @@ export default function Dashboard({ onNavigate, isDarkMode, setIsDarkMode, addTo
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브 (C:\)</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">Total {sysInfo.diskTotalGB} GB</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {sysInfo.diskTotalGB} GB</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{diskUsage}%</span>

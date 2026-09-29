@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   HardDrive, Trash2, SearchCode, Gauge, Loader2, AlertTriangle,
-  CheckCircle2, ChevronDown, RotateCcw, Play, XCircle, Info
+  CheckCircle2, RotateCcw, Play, XCircle, Info, Copy
 } from 'lucide-react';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 const fmtMB = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Number(mb || 0).toFixed(1)} MB`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 디스크 최적화 상태를 사람이 읽는 말로. 예전에는 'running'·'error' 같은 내부 값이 그대로 보였다.
+const TRIM_STATUS_LABEL = { idle: '대기 중', running: '진행 중', success: '완료', error: '실패' };
 
 const SECTIONS = [
   { id: 'junk', label: '정크 파일', icon: Trash2 },
@@ -42,7 +46,8 @@ export default function StorageCenter({ addToast }) {
         </div>
         <h2 className="text-2xl font-black text-black dark:text-white tracking-tight mt-1">저장공간 정리</h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          정리 대상을 먼저 보여주고, 확인한 뒤에만 지웁니다. 사용자 파일은 휴지통을 거칩니다.
+          정리 대상을 먼저 보여주고, 확인한 뒤에만 지웁니다. 대용량·중복 파일은 휴지통을 거칩니다.
+          임시 파일·캐시는 휴지통을 거치지 않고 바로 지워집니다.
         </p>
 
         {overview && (
@@ -71,7 +76,7 @@ export default function StorageCenter({ addToast }) {
             {overview.lowDrives.length > 0 && (
               <p className="text-xs text-rose-400 flex items-center gap-1.5 pt-1">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                {overview.lowDrives.join(', ')} 의 여유 공간이 10% 미만입니다. Windows 자체가 느려질 수 있습니다.
+                {overview.lowDrives.join(', ')} 드라이브의 여유 공간이 10% 미만입니다. Windows 자체가 느려질 수 있습니다.
               </p>
             )}
           </div>
@@ -106,6 +111,7 @@ function JunkSection({ addToast, onDone }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState(null);
   const [cleaning, setCleaning] = useState(false);
   const [progress, setProgress] = useState(null);
   const [result, setResult] = useState(null);
@@ -114,32 +120,42 @@ function JunkSection({ addToast, onDone }) {
     const a = api();
     if (!a?.scanJunk) return;
     setScanning(true);
-    setResult(null);
+    setScanError(null);
     try {
-      await a.scanJunk();
-      // 스캔은 백그라운드 스레드라 상태를 폴링해야 한다
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 400));
-        const st = await a.getJunkScanStatus();
-        if (st?.data) {
-          setItems(st.data);
-          // 백엔드가 정한 기본 선택을 그대로 따른다.
-          // 휴지통 비우기는 되돌릴 수 없어 기본 해제로 내려온다.
-          setSelected(new Set(st.data.filter((d) => d.selected).map((d) => d.id)));
+      const started = await a.scanJunk();
+      if (started && started.success === false && !/이미/.test(started.message || '')) {
+        setScanError(started.message || '검사를 시작하지 못했습니다.');
+      } else {
+        // 스캔은 백그라운드 스레드라 끝날 때까지 상태를 읽는다. 예전에는 48초에서 멈춰,
+        // 폴더가 큰 PC 에서는 검사가 끝나지 않았는데 '검사 중' 표시가 사라졌다.
+        for (;;) {
+          await sleep(400);
+          const st = await a.getJunkScanStatus();
+          if (st?.status === 'running') continue;
+          if (st?.status === 'error') {
+            setItems([]);
+            setSelected(new Set());
+            setScanError(st.error || '검사 중 오류가 났습니다.');
+          } else if (Array.isArray(st?.data)) {
+            setItems(st.data);
+            // 백엔드가 정한 기본 선택을 그대로 따른다.
+            // 휴지통 비우기·Windows Update 캐시는 기본 해제로 내려온다.
+            setSelected(new Set(st.data.filter((d) => d.selected).map((d) => d.id)));
+          }
+          break;
         }
-        if (st?.status !== 'running') break;
       }
     } catch (e) {
-      addToast?.(`스캔 실패: ${e}`, 'error');
+      setScanError(`검사하지 못했습니다: ${e}`);
     }
     setScanning(false);
-  }, [addToast]);
+  }, []);
 
   useEffect(() => { scan(); }, [scan]);
 
   const toggle = (id) => setSelected((s) => {
     const n = new Set(s);
-    n.has(id) ? n.delete(id) : n.add(id);
+    if (n.has(id)) n.delete(id); else n.add(id);
     return n;
   });
 
@@ -156,19 +172,27 @@ function JunkSection({ addToast, onDone }) {
     const warn = hasIrreversible
       ? '\n\n★ 휴지통 비우기가 포함되어 있습니다. 이 항목은 되돌릴 수 없습니다.'
       : '';
-    if (!window.confirm(`다음 항목을 정리합니다 (약 ${fmtMB(totalMB)}):\n\n${lines}${warn}\n\n계속할까요?`)) return;
+    if (!window.confirm(
+      `다음 항목을 정리합니다 (약 ${fmtMB(totalMB)}):\n\n${lines}\n\n`
+      + `임시 파일·캐시는 휴지통을 거치지 않고 바로 지워집니다. 사용 중인 파일은 건너뜁니다.${warn}\n\n계속할까요?`
+    )) return;
 
     setCleaning(true);
     setResult(null);
     try {
-      await a.cleanJunk([...selected]);
-      for (let i = 0; i < 600; i++) {
-        await new Promise((r) => setTimeout(r, 400));
-        const st = await a.getJunkCleanStatus();
-        setProgress(st);
-        if (st?.status !== 'running') {
-          setResult(st);
-          break;
+      const started = await a.cleanJunk([...selected]);
+      if (started && started.success === false) {
+        addToast?.(started.message || '정리를 시작하지 못했습니다.', 'error');
+      } else {
+        for (;;) {
+          await sleep(400);
+          const st = await a.getJunkCleanStatus();
+          setProgress(st);
+          if (st?.status !== 'running') {
+            setResult(st);
+            if (st?.status === 'error') addToast?.(`정리 중 오류가 났습니다: ${st.error || '알 수 없는 오류'}`, 'error');
+            break;
+          }
         }
       }
     } catch (e) {
@@ -182,10 +206,9 @@ function JunkSection({ addToast, onDone }) {
 
   const cancel = async () => {
     const a = api();
-    if (a?.cancelJunkClean) {
-      await a.cancelJunkClean();
-      addToast?.('정리를 중단했습니다. 이미 삭제된 파일은 되돌아오지 않습니다.', 'error');
-    }
+    if (!a?.cancelJunkClean) return;
+    const res = await a.cancelJunkClean();
+    if (res?.success) addToast?.('정리를 중단하는 중입니다. 이미 삭제된 파일은 되돌아오지 않습니다.', 'info');
   };
 
   return (
@@ -202,6 +225,11 @@ function JunkSection({ addToast, onDone }) {
 
         {scanning && !items.length && (
           <p className="text-sm text-gray-500 py-6 text-center">검사 중...</p>
+        )}
+        {scanError && !scanning && (
+          <p className="text-sm text-rose-400 py-4 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {scanError}
+          </p>
         )}
 
         <div className="space-y-2">
@@ -245,7 +273,7 @@ function JunkSection({ addToast, onDone }) {
             <div className="flex justify-between text-xs mb-1.5">
               <span className="text-gray-500">
                 정리 중... {progress.progress ?? 0}%
-                {typeof progress.files_done === 'number' && ` · 파일 ${progress.files_done.toLocaleString()}개 처리`}
+                {typeof progress.files_done === 'number' && ` · 파일 ${progress.files_done.toLocaleString()}개 삭제`}
               </span>
               <button onClick={cancel} className="text-rose-400 font-bold flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" /> 중단
@@ -267,22 +295,37 @@ function JunkSection({ addToast, onDone }) {
         </button>
       </div>
 
-      {result && (
-        <div className="glass-panel p-5 flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold text-black dark:text-white">
-              {fmtMB(result.freed_mb)} 를 확보했습니다.
-            </p>
-            {result.skipped_mb > 0 && (
-              <p className="text-xs text-gray-500 mt-1">
-                {fmtMB(result.skipped_mb)} 는 다른 프로그램이 사용 중이라 건너뛰었습니다.
-                {result.skipped_log && <> 목록: <span className="font-mono break-all">{result.skipped_log}</span></>}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      {result && result.status !== 'running' && <JunkResult result={result} />}
+    </div>
+  );
+}
+
+// 정리 결과. 끝난 상태(완료·중단·오류)를 그대로 보여 준다. 예전에는 오류가 나도 '0 MB 를 확보했습니다' 가 떴다.
+function JunkResult({ result }) {
+  const ok = result.status === 'success';
+  const cancelled = result.status === 'cancelled';
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const Icon = result.status === 'error' || warnings.length ? AlertTriangle : CheckCircle2;
+  const iconClass = result.status === 'error' ? 'text-rose-400' : warnings.length || cancelled ? 'text-amber-400' : 'text-emerald-400';
+  let title;
+  if (ok) title = `${fmtMB(result.freed_mb)} 를 확보했습니다.`;
+  else if (cancelled) title = `정리를 중단했습니다. 중단 전까지 ${fmtMB(result.freed_mb)} 를 확보했습니다.`;
+  else title = `정리하지 못했습니다${result.error ? `: ${result.error}` : '.'}`;
+  return (
+    <div className="glass-panel p-5 flex items-start gap-3">
+      <Icon className={`w-5 h-5 shrink-0 mt-0.5 ${iconClass}`} />
+      <div className="min-w-0">
+        <p className="font-bold text-black dark:text-white">{title}</p>
+        {warnings.map((w, i) => (
+          <p key={i} className="text-xs text-amber-500 mt-1">{w}</p>
+        ))}
+        {result.skipped_count > 0 && (
+          <p className="text-xs text-gray-500 mt-1">
+            사용 중인 파일 {result.skipped_count.toLocaleString()}개({fmtMB(result.skipped_mb)})는 건너뛰었습니다.
+            {result.skipped_log && <> 목록: <span className="font-mono break-all">{result.skipped_log}</span></>}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -293,7 +336,9 @@ function FileSection({ addToast, onDone }) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [busy, setBusy] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [minMB, setMinMB] = useState(500);
+  const [failures, setFailures] = useState([]);
 
   const run = async () => {
     const a = api();
@@ -305,7 +350,8 @@ function FileSection({ addToast, onDone }) {
       const res = mode === 'large'
         ? await a.findLargeFiles(minMB)
         : await a.findDuplicateFiles();
-      setRows(Array.isArray(res) ? res : (res?.files || res?.groups || []));
+      setRows(Array.isArray(res) ? res : []);
+      setSearched(true);
     } catch (e) {
       addToast?.(`검색 실패: ${e}`, 'error');
     }
@@ -314,25 +360,41 @@ function FileSection({ addToast, onDone }) {
 
   const toggle = (p) => setSelected((s) => {
     const n = new Set(s);
-    n.has(p) ? n.delete(p) : n.add(p);
+    if (n.has(p)) n.delete(p); else n.add(p);
     return n;
   });
+
+  // 중복 파일은 같은 내용끼리 묶어 보여 준다. 예전에는 묶음 없이 한 줄로 늘어놓아
+  // 어느 파일이 어느 파일의 사본인지 알 수 없었고, 한 묶음을 전부 골라 원본까지 지울 수 있었다.
+  const groups = mode === 'dup'
+    ? rows.reduce((acc, f) => {
+        const key = f.groupId || f.path;
+        const g = acc.find((x) => x.key === key);
+        if (g) g.files.push(f); else acc.push({ key, files: [f] });
+        return acc;
+      }, [])
+    : [];
+  const allCopiesChosen = groups.filter((g) => g.files.length > 1 && g.files.every((f) => selected.has(f.path)));
 
   const remove = async () => {
     const a = api();
     if (!a?.deleteFiles || !selected.size) return;
+    const warnAll = allCopiesChosen.length
+      ? `\n\n★ 중복 묶음 ${allCopiesChosen.length}개는 모든 사본을 골랐습니다. 이 PC 에 한 부도 남지 않습니다.`
+      : '';
     if (!window.confirm(
-      `${selected.size}개 파일을 휴지통으로 보냅니다.\n\n휴지통에서 복구할 수 있습니다.\n계속할까요?`
+      `${selected.size}개 파일을 휴지통으로 보냅니다.\n\n휴지통에서 복구할 수 있습니다.${warnAll}\n계속할까요?`
     )) return;
     setBusy(true);
+    setFailures([]);
     try {
       const res = await a.deleteFiles([...selected]);
-      addToast?.(res?.message || '삭제했습니다.', res?.success ? 'success' : 'error');
-      if (res?.failed?.length) {
-        console.warn('삭제 실패 목록:', res.failed);
-      }
+      const failed = Array.isArray(res?.failed) ? res.failed : [];
+      setFailures(failed);
+      const type = !res?.success ? 'error' : failed.length ? 'info' : 'success';
+      addToast?.(res?.message || '삭제했습니다.', type);
       setSelected(new Set());
-      run();
+      await run();
       onDone?.();
     } catch (e) {
       addToast?.(`삭제 실패: ${e}`, 'error');
@@ -340,20 +402,34 @@ function FileSection({ addToast, onDone }) {
     setBusy(false);
   };
 
+  const fileRow = (f) => (
+    <button key={f.path} onClick={() => toggle(f.path)}
+      className={`w-full text-left flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${
+        selected.has(f.path) ? 'border-cyan-500/50 bg-cyan-500/5' : 'border-black/5 dark:border-slate-800'}`}>
+      <div className={`w-4 h-4 rounded shrink-0 border ${
+        selected.has(f.path) ? 'bg-cyan-500 border-cyan-500' : 'border-gray-300 dark:border-slate-600'}`} />
+      <span className="text-xs font-mono text-black/80 dark:text-white/80 truncate flex-1" title={f.path}>{f.path}</span>
+      {f.sizeMB != null && (
+        <span className="text-xs font-mono font-bold shrink-0">{fmtMB(f.sizeMB)}</span>
+      )}
+    </button>
+  );
+
   return (
     <div className="glass-panel p-5 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {[['large', '대용량 파일'], ['dup', '중복 파일']].map(([k, label]) => (
-          <button key={k} onClick={() => { setMode(k); setRows([]); setSelected(new Set()); }}
-            className={`px-3.5 py-2 rounded-lg text-sm font-bold transition-colors ${
+          <button key={k} onClick={() => { setMode(k); setRows([]); setSelected(new Set()); setSearched(false); setFailures([]); }}
+            disabled={busy}
+            className={`px-3.5 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 ${
               mode === k ? 'bg-cyan-500 text-black' : 'border border-black/10 dark:border-slate-700 text-gray-500'}`}>
             {label}
           </button>
         ))}
         {mode === 'large' && (
-          <select value={minMB} onChange={(e) => setMinMB(Number(e.target.value))}
+          <select value={minMB} onChange={(e) => setMinMB(Number(e.target.value))} disabled={busy}
             className="px-3 py-2 rounded-lg text-sm bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-700">
-            {[100, 300, 500, 1000, 2000].map((v) => <option key={v} value={v}>{v}MB 이상</option>)}
+            {[100, 300, 500, 1000, 2000].map((v) => <option key={v} value={v}>{v >= 1000 ? `${v / 1000}GB` : `${v}MB`} 이상</option>)}
           </select>
         )}
         <button onClick={run} disabled={busy}
@@ -368,29 +444,43 @@ function FileSection({ addToast, onDone }) {
           시스템 폴더와 게임 설치 폴더는 검색에서 제외됩니다. 삭제는 휴지통을 거치므로
           잘못 골라도 복구할 수 있습니다. <strong className="text-black dark:text-white">선택은 직접 하세요</strong> —
           자동으로 체크되는 항목은 없습니다.
+          {mode === 'dup' && ' 중복 파일은 10MB 가 넘는 파일만 내용을 비교해 같은 것끼리 묶습니다.'}
         </p>
       </div>
 
       <div className="max-h-[420px] overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
-        {!rows.length && !busy && (
-          <p className="text-sm text-gray-500 py-8 text-center">검색 버튼을 눌러 시작하세요.</p>
+        {busy && !rows.length && (
+          <p className="text-sm text-gray-500 py-8 text-center">모든 드라이브를 검색하는 중입니다. 파일이 많으면 몇 분 걸릴 수 있습니다…</p>
         )}
-        {rows.map((f, i) => {
-          const path = f.path || f;
-          return (
-            <button key={path + i} onClick={() => toggle(path)}
-              className={`w-full text-left flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${
-                selected.has(path) ? 'border-cyan-500/50 bg-cyan-500/5' : 'border-black/5 dark:border-slate-800'}`}>
-              <div className={`w-4 h-4 rounded shrink-0 border ${
-                selected.has(path) ? 'bg-cyan-500 border-cyan-500' : 'border-gray-300 dark:border-slate-600'}`} />
-              <span className="text-xs font-mono text-black/80 dark:text-white/80 truncate flex-1">{path}</span>
-              {f.sizeMB != null && (
-                <span className="text-xs font-mono font-bold shrink-0">{fmtMB(f.sizeMB)}</span>
-              )}
-            </button>
-          );
-        })}
+        {!rows.length && !busy && (
+          <p className="text-sm text-gray-500 py-8 text-center">
+            {searched
+              ? (mode === 'large' ? '조건에 맞는 대용량 파일이 없습니다.' : '중복 파일이 없습니다.')
+              : '검색 버튼을 눌러 시작하세요.'}
+          </p>
+        )}
+        {mode === 'large' && rows.map(fileRow)}
+        {mode === 'dup' && groups.map((g, gi) => (
+          <div key={g.key} className="rounded-xl border border-black/10 dark:border-slate-700 p-2 space-y-1.5">
+            <div className="flex items-center gap-2 px-1 text-[11px] text-gray-500">
+              <Copy className="w-3.5 h-3.5" />
+              <span>묶음 {gi + 1} · 같은 파일 {g.files.length}개 · 각 {fmtMB(g.files[0]?.sizeMB)}</span>
+              {allCopiesChosen.includes(g) && <span className="text-amber-500 font-bold">모든 사본 선택됨</span>}
+            </div>
+            {g.files.map(fileRow)}
+          </div>
+        ))}
       </div>
+
+      {failures.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-1">
+          <p className="text-xs font-bold text-amber-500">건너뛴 파일 {failures.length}개</p>
+          {failures.slice(0, 20).map((f, i) => (
+            <p key={i} className="text-[11px] text-gray-500 break-all">· {String(f.path)} — {f.reason}</p>
+          ))}
+          {failures.length > 20 && <p className="text-[11px] text-gray-500">· 외 {failures.length - 20}개</p>}
+        </div>
+      )}
 
       {selected.size > 0 && (
         <button onClick={remove} disabled={busy}
@@ -407,6 +497,13 @@ function DiskSection({ addToast, overview }) {
   const [status, setStatus] = useState(null);
   const [running, setRunning] = useState(false);
 
+  // 탭을 열 때 진행 중인 최적화가 있으면(원클릭 최적화가 시작한 것 포함) 그 상태를 보여 준다
+  useEffect(() => {
+    const a = api();
+    if (!a?.getTrimStatus) return;
+    a.getTrimStatus().then((st) => { if (st && st.status !== 'idle') setStatus(st); }).catch(() => {});
+  }, []);
+
   const start = async () => {
     const a = api();
     if (!a?.runTrim) return;
@@ -414,13 +511,13 @@ function DiskSection({ addToast, overview }) {
     try {
       const res = await a.runTrim();
       if (!res?.success) {
-        addToast?.(res?.message || '이미 실행 중입니다.', 'error');
+        addToast?.(res?.message || '디스크 최적화를 시작하지 못했습니다.', 'error');
         setRunning(false);
         return;
       }
       let st = null;
       for (let i = 0; i < 900; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
+        await sleep(1000);
         st = await a.getTrimStatus();
         setStatus(st);
         if (st?.status !== 'running') break;
@@ -435,20 +532,29 @@ function DiskSection({ addToast, overview }) {
     setRunning(false);
   };
 
-  const hasHdd = overview?.drives?.some((d) => d.mediaType === 'hdd');
+  const refresh = async () => {
+    const a = api();
+    if (!a?.getTrimStatus) return;
+    try { setStatus(await a.getTrimStatus()); } catch { /* 이전 표시를 둔다 */ }
+  };
+
+  const drives = overview?.drives || [];
+  // '전부 SSD' 는 모든 드라이브가 SSD 로 확인됐을 때만 말한다. 종류를 모르는 드라이브가 있으면 말하지 않는다.
+  const allSsd = drives.length > 0 && drives.every((d) => d.mediaType === 'ssd');
+  const busyElsewhere = !running && status?.status === 'running';
 
   return (
     <div className="glass-panel p-6 space-y-4">
-      <h3 className="font-bold text-black dark:text-white">디스크 최적화 (TRIM / 조각모음)</h3>
+      <h3 className="font-bold text-black dark:text-white">디스크 최적화 (TRIM / 조각 모음)</h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
         Windows 기본 도구로 모든 볼륨을 최적화합니다. 매체에 맞는 작업이 자동으로 선택됩니다 —
-        <strong className="text-black dark:text-white"> SSD 는 TRIM</strong>(빈 블록 정리, 수 초),
-        <strong className="text-black dark:text-white"> HDD 는 조각모음</strong>(수십 분 걸릴 수 있음).
+        <strong className="text-black dark:text-white"> SSD 는 TRIM</strong>(빈 블록 정리, 보통 수 초),
+        <strong className="text-black dark:text-white"> HDD 는 조각 모음</strong>(수십 분 걸릴 수 있음).
       </p>
 
-      {overview?.drives && (
+      {drives.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {overview.drives.map((d) => (
+          {drives.map((d) => (
             <span key={d.mount} className="text-xs font-mono px-2.5 py-1 rounded-lg border border-black/10 dark:border-slate-700">
               {d.label} {d.mediaType === 'unknown' ? '종류 확인 불가' : d.mediaType.toUpperCase()}
             </span>
@@ -456,29 +562,35 @@ function DiskSection({ addToast, overview }) {
         </div>
       )}
 
-      {!hasHdd && overview?.drives?.length > 0 && (
+      {allSsd && (
         <div className="flex gap-2 text-xs">
           <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
           <p className="text-gray-500 dark:text-gray-400">
-            전부 SSD 입니다. TRIM 만 수행되며 보통 몇 초 안에 끝납니다.
-            SSD 에 조각모음을 하면 수명만 깎이므로 Windows 가 알아서 하지 않습니다.
+            모든 드라이브가 SSD 입니다. TRIM 만 수행되며 보통 몇 초 안에 끝납니다.
+            SSD 에는 조각 모음이 필요 없어 Windows 가 하지 않습니다.
           </p>
         </div>
       )}
 
       {status && (
-        <div className="text-sm">
-          <p className="text-gray-500">
-            상태: <span className="font-mono font-bold text-black dark:text-white">{status.status}</span>
+        <div className="text-sm space-y-1">
+          <p className="text-gray-500 flex items-center gap-2">
+            상태: <span className="font-bold text-black dark:text-white">{TRIM_STATUS_LABEL[status.status] || status.status}</span>
+            {busyElsewhere && (
+              <button onClick={refresh} className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-1">
+                <RotateCcw className="w-3 h-3" /> 새로 고침
+              </button>
+            )}
           </p>
-          {status.error && <p className="text-rose-400 text-xs mt-1">{status.error}</p>}
+          {status.status === 'success' && status.summary && <p className="text-gray-500 text-xs">{status.summary}</p>}
+          {status.error && <p className="text-rose-400 text-xs">{status.error}</p>}
         </div>
       )}
 
-      <button onClick={start} disabled={running}
+      <button onClick={start} disabled={running || busyElsewhere}
         className="w-full py-3.5 rounded-xl font-bold bg-cyan-500 text-black disabled:opacity-40 flex items-center justify-center gap-2">
-        {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gauge className="w-4 h-4" />}
-        {running ? '최적화 중... (중단하지 마세요)' : '디스크 최적화 시작'}
+        {running || busyElsewhere ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gauge className="w-4 h-4" />}
+        {running || busyElsewhere ? '최적화 중... (중단하지 마세요)' : '디스크 최적화 시작'}
       </button>
     </div>
   );

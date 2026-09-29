@@ -1,20 +1,20 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { attachSmoothScroll } from '../smoothScroll';
-import { 
-  LayoutDashboard, 
-  Trash2, 
-  Cpu, 
-  Rocket, 
-  HardDrive, 
-  Zap, 
-  ShieldCheck, 
-  Sparkles,
+import {
+  LayoutDashboard,
+  Cpu,
+  Rocket,
+  HardDrive,
+  Zap,
+  ShieldCheck,
   PackageMinus,
-  SearchCode,
   ServerCrash,
   Crosshair,
   History
 } from 'lucide-react';
+// 버전은 package.json 한 곳에서 온다(설치 마법사 APP_VERSION 과 테스트가 맞춰 본다).
+// 예전에는 여기에 버전 번호를 직접 적어, 버전을 올려도 화면에는 옛 번호가 남을 수 있었다.
+import { version as APP_VERSION } from '../../package.json';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
   const sidebarWrapperRef = useRef(null);
@@ -25,17 +25,19 @@ export default function Sidebar({ activeTab, setActiveTab }) {
   }, []);
 
   const menuItems = [
-    { id: 'dashboard', label: '대시보드 (Dashboard)', icon: LayoutDashboard },
+    { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     // 정크·대용량 탐색·조각모음을 하나의 '저장공간' 탭으로 합쳤다.
     // 세 곳에 흩어져 있어 사용자가 '지금 디스크 상태가 어떤지' 볼 방법이 없었다.
     { id: 'storage', label: '저장공간 정리', icon: HardDrive },
     { id: 'ram', label: 'RAM 메모리 최적화', icon: Cpu },
     { id: 'startup', label: '시작 프로그램 관리', icon: Rocket },
-    { id: 'uninstaller', label: '프로그램 완전 삭제', icon: PackageMinus },
+    // '완전 삭제' 는 사실이 아니었다. 제거 프로그램을 실행하고 남은 폴더를 휴지통으로 보낼 뿐이다.
+    { id: 'uninstaller', label: '프로그램 삭제', icon: PackageMinus },
     { id: 'modes', label: '성능 부스트 모드', icon: Zap },
     { id: 'gamebooster', label: '스마트 게임 부스터', icon: Crosshair },
-    { id: 'drivers', label: 'OS 코어 복구 (SFC/DISM)', icon: ShieldCheck },
-    { id: 'debloater', label: '윈도우 하드코어 적출', icon: ServerCrash },
+    { id: 'drivers', label: '시스템 파일 복구', icon: ShieldCheck },
+    // 예전 이름 '윈도우 하드코어 적출' 은 과장이었다. 기본 앱을 이 계정에서 제거하고 정책 두 개를 바꾼다.
+    { id: 'debloater', label: 'Windows 기본 앱 정리', icon: ServerCrash },
     // 이 프로그램이 바꾼 모든 것을 확인하고 되돌리는 곳.
     // 복구 기능이 백엔드에만 있고 UI 가 없으면 사실상 되돌릴 수 없는 것과 같다.
     { id: 'restore', label: '변경 내역 · 되돌리기', icon: History },
@@ -54,7 +56,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
             <h1 className="font-extrabold text-lg tracking-tight text-black dark:text-white flex items-center gap-1.5 transition-colors duration-300">
               APEX <span className="text-gray-500 dark:text-gray-400">CARE</span>
             </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono transition-colors duration-300">v1.0.1</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono transition-colors duration-300">v{APP_VERSION}</p>
           </div>
         </div>
 

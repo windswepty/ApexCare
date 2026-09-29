@@ -5,6 +5,7 @@ APEX CARE - 게임 부스트.
 적용한 것만 정확히 되돌린다.
 
   타이머 해상도 0.5ms      세션 한정. 우리 요청을 거두면 원래대로 돌아간다.
+                           Windows 10 2004 이전에만 게임에 효과가 있어 그 버전에서만 적용한다.
   바쁜 백그라운드 앱 양보   CPU 를 많이 쓰는 백그라운드 앱만 우선순위를 낮춘다(원래 값 기록).
   게이밍 전원 모드 자동 전환 게임 동안만. 끝나면 사용자가 쓰던 모드로 돌아간다.
   Nagle 끄기               레지스트리. system_state 저널에 원래 값을 기록한다.
@@ -76,6 +77,65 @@ GAMES_LIST = [
     "bns.exe",                 # Blade & Soul
     "throneandliberty.exe"     # Throne & Liberty
 ]
+
+# 화면에 보여 줄 게임 이름. 실행 파일 이름(tslgame.exe)만으로는 무슨 게임인지 알기 어렵다.
+GAME_NAMES = {
+    "tslgame.exe": "PUBG: BATTLEGROUNDS", "valorant-win64-shipping.exe": "VALORANT",
+    "league of legends.exe": "리그 오브 레전드", "overwatch.exe": "오버워치",
+    "csgo.exe": "CS:GO", "cs2.exe": "Counter-Strike 2", "apex.exe": "Apex Legends",
+    "r5apex.exe": "Apex Legends", "gta5.exe": "GTA V", "dota2.exe": "Dota 2",
+    "rainbowsix.exe": "레인보우 식스 시즈", "cyberpunk2077.exe": "사이버펑크 2077",
+    "javaw.exe": "Minecraft (Java)", "minecraft.windows.exe": "Minecraft",
+    "robloxplayerbeta.exe": "Roblox", "cod.exe": "Call of Duty",
+    "blackopscoldwar.exe": "Call of Duty: Black Ops Cold War", "modernwarfare.exe": "Call of Duty: Modern Warfare",
+    "fortniteclient-win64-shipping.exe": "Fortnite", "genshinimpact.exe": "원신",
+    "starrail.exe": "붕괴: 스타레일", "rustclient.exe": "Rust", "escapefromtarkov.exe": "Escape from Tarkov",
+    "discovery.exe": "THE FINALS", "palworld-win64-shipping.exe": "Palworld", "destiny2.exe": "Destiny 2",
+    "wow.exe": "World of Warcraft", "wow_classic.exe": "World of Warcraft Classic",
+    "diablo iv.exe": "디아블로 IV", "lostark.exe": "로스트아크", "maplestory.exe": "메이플스토리",
+    "fc24.exe": "EA SPORTS FC 24", "eldenring.exe": "ELDEN RING", "helldivers2.exe": "HELLDIVERS 2",
+    "wuthering waves.exe": "명조: 워더링 웨이브", "client-win64-shipping.exe": "명조: 워더링 웨이브",
+    "zenlesszonezero.exe": "젠레스 존 제로", "bns.exe": "블레이드 & 소울",
+    "throneandliberty.exe": "THRONE AND LIBERTY",
+}
+
+
+def game_label(exe_name):
+    """'PUBG: BATTLEGROUNDS (tslgame.exe)' 처럼 사람이 알아볼 이름. 모르면 실행 파일 이름."""
+    if not exe_name:
+        return None
+    name = GAME_NAMES.get(exe_name.lower())
+    return f"{name} ({exe_name})" if name else exe_name
+
+
+def _is_game_process(proc, name):
+    """이 프로세스가 게임인가.
+
+    javaw.exe 는 Minecraft 만 쓰는 이름이 아니다(개발 도구·사내 프로그램 등 자바 앱 전부).
+    예전에는 이름만 봐서 자바 앱을 켜 두면 '게임 감지' 로 우선순위를 올리고 다른 앱을 낮췄다.
+    javaw.exe 는 명령줄에 minecraft 가 있을 때만 게임으로 본다. 명령줄을 못 읽으면 게임이 아니다.
+    """
+    if name not in GAMES_LIST:
+        return False
+    if name != 'javaw.exe':
+        return True
+    try:
+        return any('minecraft' in (part or '').lower() for part in proc.cmdline())
+    except Exception:
+        return False
+
+
+def timer_request_effective():
+    """이 Windows 에서 타이머 해상도 요청이 게임에 영향을 주는가.
+
+    Windows 10 2004(빌드 19041)부터 타이머 해상도 요청은 요청한 프로세스에만 적용된다.
+    APEX CARE 가 요청해도 게임의 타이머는 바뀌지 않으므로, 그 버전부터는 적용하지 않고 그 사실을 알린다.
+    """
+    try:
+        import sys
+        return sys.getwindowsversion().build < 19041
+    except Exception:
+        return False
 
 _booster_state = {
     "enabled": False,
@@ -305,7 +365,10 @@ def _restore_nagle():
 # ─────────────────────────────────────────────
 
 def get_booster_status():
-    return _booster_state
+    st = dict(_booster_state)
+    st['detected_game_label'] = game_label(_booster_state.get('detected_game'))
+    st['timer_effective'] = timer_request_effective()
+    return st
 
 
 def _boost_game_processes(pids):
@@ -377,7 +440,8 @@ def _enter_boost_mode():
     labels = []
 
     # 타이머 해상도: 세션 한정. 우리 요청을 거두면 원래대로 돌아간다.
-    if cfg.get('boost_timer_resolution', True):
+    # Windows 10 2004 부터는 요청한 프로세스에만 적용돼 게임에는 효과가 없다. 그때는 요청하지 않는다.
+    if cfg.get('boost_timer_resolution', True) and timer_request_effective():
         if _set_timer_resolution(True):
             _applied['timer'] = True
             labels.append('타이머 해상도 0.5ms')
@@ -511,7 +575,7 @@ def _booster_loop():
             for proc in psutil.process_iter(['name']):
                 try:
                     name = (proc.info.get('name') or '').lower()
-                    if name in GAMES_LIST:
+                    if _is_game_process(proc, name):
                         found_games.append(name)
                         current_game_pids.append(proc.pid)
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -522,6 +586,9 @@ def _booster_loop():
                 game_found = found_games[0]
 
                 with _teardown_lock:
+                    if not _booster_state["enabled"]:
+                        # 검사하는 사이에 사용자가 부스터를 껐다. 다시 적용하지 않는다.
+                        continue
                     if not _booster_state["active"]:
                         _booster_state["active"] = True
                         _booster_state["detected_game"] = game_found
@@ -581,9 +648,24 @@ def toggle_booster(enabled):
         _monitor_thread.start()
         log.info("✓ Game Booster ENABLED - monitoring for games...")
 
+    reverted = False
     if not enabled:
-        log.info("✓ Game Booster DISABLED - 루프가 적용했던 설정을 되돌립니다")
-    return {"success": True, "enabled": enabled, "saved": saved}
+        # 루프에 맡기지 않고 지금 되돌린다. 그래야 '되돌렸습니다' 가 사실이 된다.
+        with _teardown_lock:
+            if _booster_state["active"] or _applied or _tamed_pids:
+                _teardown()
+                reverted = True
+        log.info("✓ Game Booster DISABLED")
+
+    if enabled:
+        msg = "게임 자동 감지를 켰습니다."
+    elif reverted:
+        msg = "게임 자동 감지를 껐습니다. 게임 동안 적용했던 설정을 되돌렸습니다."
+    else:
+        msg = "게임 자동 감지를 껐습니다."
+    if not saved:
+        msg += " 설정 파일에 저장하지 못해 다음 실행 때는 이전 상태로 시작합니다."
+    return {"success": True, "enabled": enabled, "saved": saved, "reverted": reverted, "message": msg}
 
 
 def _recover_after_crash():

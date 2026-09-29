@@ -278,8 +278,10 @@ def delete_files(paths):
     res = safe_delete.to_recycle_bin(targets)
     failed = rejected + res['failed']
 
+    # 하나도 보내지 못하고 건너뛴 것만 있으면 실패다. 예전에는 대상이 모두 거부되면(targets 가 비면)
+    # '0개 파일을 휴지통으로 보냈습니다' 가 성공으로 떴다.
     return {
-        "success": bool(res['ok']) or not targets,
+        "success": bool(res['ok']) or not failed,
         "freedMB": round(res['bytes'] / (1024 ** 2), 2),
         "deleted": len(res['ok']),
         "failed": failed,

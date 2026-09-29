@@ -174,14 +174,26 @@ def restore(pid):
 
 
 def restore_all():
-    """조정했던 모든 프로세스를 원래 우선순위로 되돌린다."""
+    """조정했던 모든 프로세스를 원래 우선순위로 되돌린다.
+
+    이미 끝난 프로세스는 되돌린 수(restored)에 넣지 않고 gone 으로 따로 센다.
+    예전에는 둘을 합쳐 'N개를 원래 우선순위로 되돌렸습니다' 라고 해 숫자가 부풀었다.
+    """
     results = [restore(pid) for pid in list(_original.keys())]
-    ok = [r for r in results if r['ok']]
+    gone = [r for r in results if r['ok'] and r.get('reason')]
+    ok = [r for r in results if r['ok'] and not r.get('reason')]
     failed = [r for r in results if not r['ok']]
-    return {'ok': not failed, 'restored': len(ok), 'failed': failed}
+    return {'ok': not failed, 'restored': len(ok), 'gone': len(gone), 'failed': failed}
 
 
 def adjusted_count():
+    """지금 실행 중이면서 우선순위를 바꿔 둔 프로세스 수. 끝난 프로세스의 기록은 정리한다.
+
+    끝난 프로세스는 되돌릴 대상이 없다. 세면 복구 센터에 '조정된 프로세스 N개' 가 계속 남는다.
+    """
+    for pid, entry in list(_original.items()):
+        if not _same_process(pid, entry):
+            _original.pop(pid, None)
     return len(_original)
 
 

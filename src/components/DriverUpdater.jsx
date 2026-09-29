@@ -1,110 +1,113 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldCheck, 
-  RotateCw, 
-  CheckCircle2, 
-  AlertCircle, 
+import { useState, useEffect } from 'react';
+import {
+  ShieldCheck,
+  RotateCw,
+  CheckCircle2,
+  AlertCircle,
   Terminal,
   Activity,
-  Layers,
-  Sparkles
+  Layers
 } from 'lucide-react';
 
+const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
+
+const elapsedLabel = (sec) => `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+
+/**
+ * SFC·DISM 한 가지를 실행하고 끝날 때까지 상태를 읽는다.
+ *
+ * 예전 문제:
+ *   - 끝나면 '무결성 복구 완료' 를 띄웠다. SFC 는 손상을 못 고쳐도 검사를 마치면 성공 코드로 끝난다.
+ *     이제 도구가 마지막에 쓴 결과 문장(summary)을 그대로 보여 준다.
+ *   - 실패하면 이유와 상관없이 '(관리자 권한 필요)' 라고 했다. 이제 실제 오류 내용을 보여 준다.
+ *   - 한 번 끝나면 버튼이 사라져 앱을 다시 켜야 다시 실행할 수 있었다.
+ */
+// 부를 백엔드 함수. 이름을 문자열로 넘기지 않고 직접 적어 두어야 API 이름 검사 테스트가 확인할 수 있다.
+const SFC = { label: 'SFC 검사', start: () => api()?.runSfc?.(), status: () => api()?.getSfcStatus?.() };
+const DISM = { label: 'DISM 복구', start: () => api()?.runDism?.(), status: () => api()?.getDismStatus?.() };
+
+function useRepairTask(task, addToast) {
+  const { label } = task;
+  const [status, setStatus] = useState('idle');
+  const [elapsed, setElapsed] = useState(0);
+  const [detail, setDetail] = useState({ summary: '', error: '' });
+
+  useEffect(() => {
+    if (status !== 'running') return undefined;
+    const interval = setInterval(async () => {
+      setElapsed((t) => t + 1);
+      try {
+        const state = await task.status();
+        if (state && state.status !== 'running' && state.status !== 'idle') {
+          setDetail({ summary: state.summary || '', error: state.error || '' });
+          setStatus(state.status);
+          if (state.status === 'success') {
+            addToast?.(`${label}를 마쳤습니다. 화면의 결과 문장을 확인하세요.`, 'success');
+          } else {
+            addToast?.(`${label}에 실패했습니다${state.error ? `: ${state.error}` : '.'}`, 'error');
+          }
+        }
+      } catch (e) {
+        console.error(`${label} 상태 확인 실패:`, e);
+        setDetail({ summary: '', error: '상태를 확인하지 못했습니다. 작업은 계속 진행 중일 수 있습니다.' });
+        setStatus('error');
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [status, task, label, addToast]);
+
+  const run = async () => {
+    if (!api()) {
+      addToast?.('API가 준비되지 않았습니다.', 'error');
+      return;
+    }
+    try {
+      const res = await task.start();
+      if (res?.success) {
+        setElapsed(0);
+        setDetail({ summary: '', error: '' });
+        setStatus('running');
+      } else {
+        addToast?.(res?.message || `${label}를 시작하지 못했습니다.`, 'error');
+      }
+    } catch (e) {
+      addToast?.(`${label}를 시작하지 못했습니다: ${e}`, 'error');
+    }
+  };
+
+  return { status, elapsed, detail, run };
+}
+
+function ResultLine({ status, detail, elapsed }) {
+  if (status === 'success') {
+    return (
+      <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1">
+        <p className="font-bold text-emerald-500 flex items-center gap-1.5">
+          <CheckCircle2 className="w-4 h-4" /> 끝났습니다 (걸린 시간 {elapsedLabel(elapsed)})
+        </p>
+        <p className="text-gray-600 dark:text-slate-300">
+          {detail.summary || '도구가 결과 문장을 남기지 않았습니다. 자세한 내용은 C:\\Windows\\Logs\\CBS\\CBS.log 에 있습니다.'}
+        </p>
+      </div>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <div className="p-3 rounded-xl bg-rose-500/5 border border-rose-500/20 text-xs space-y-1">
+        <p className="font-bold text-rose-400 flex items-center gap-1.5">
+          <AlertCircle className="w-4 h-4" /> 실패했습니다
+        </p>
+        <p className="text-gray-600 dark:text-slate-300 break-words">{detail.error || '원인을 알 수 없습니다.'}</p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function SystemRepair({ addToast }) {
-  const [sfcStatus, setSfcStatus] = useState('idle');
-  // SFC·DISM 은 진행률을 알려 주지 않는다. 지어낸 %·남은 시간 대신 경과 시간만 보여 준다.
-  const [sfcElapsed, setSfcElapsed] = useState(0);
-  
-  const [dismStatus, setDismStatus] = useState('idle');
-  const [dismElapsed, setDismElapsed] = useState(0);
-
-  useEffect(() => {
-    let interval;
-    if (sfcStatus === 'running') {
-      interval = setInterval(async () => {
-        setSfcElapsed(t => t + 1);
-        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSfcStatus === 'function') {
-          try {
-            const state = await window.pywebview.api.getSfcStatus();
-            if (state && state.status !== 'running' && state.status !== 'idle') {
-              setSfcStatus(state.status);
-              if (addToast) addToast(state.status === 'success' ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
-            }
-          } catch (e) {
-            console.error('Error polling sfc status:', e);
-            setSfcStatus('error');
-            if (addToast) addToast("SFC 상태 확인 중 시스템 오류가 발생했습니다.", "error");
-          }
-        }
-      }, 1000);
-    } else if (sfcStatus === 'success') {
-    } else {
-      setSfcElapsed(0);
-    }
-    return () => clearInterval(interval);
-  }, [sfcStatus]);
-
-  useEffect(() => {
-    let interval;
-    if (dismStatus === 'running') {
-      interval = setInterval(async () => {
-        setDismElapsed(t => t + 1);
-        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDismStatus === 'function') {
-          try {
-            const state = await window.pywebview.api.getDismStatus();
-            if (state && state.status !== 'running' && state.status !== 'idle') {
-              setDismStatus(state.status);
-              if (addToast) addToast(state.status === 'success' ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
-            }
-          } catch (e) {
-            console.error('Error polling dism status:', e);
-            setDismStatus('error');
-            if (addToast) addToast("DISM 상태 확인 중 시스템 오류가 발생했습니다.", "error");
-          }
-        }
-      }, 1000);
-    } else if (dismStatus === 'success') {
-    } else {
-      setDismElapsed(0);
-    }
-    return () => clearInterval(interval);
-  }, [dismStatus]);
-
-  const runSfc = async () => {
-    
-    try {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runSfc === 'function') {
-        const res = await window.pywebview.api.runSfc();
-        if (res?.success) setSfcStatus('running');
-        else {
-          if (addToast) addToast("이미 실행 중입니다.", "error");
-        }
-      } else {
-        setSfcStatus('running');
-      }
-    } catch (e) {
-      setSfcStatus('error');
-    }
-  };
-
-  const runDism = async () => {
-    
-    try {
-      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.runDism === 'function') {
-        const res = await window.pywebview.api.runDism();
-        if (res?.success) setDismStatus('running');
-        else {
-          if (addToast) addToast("이미 실행 중입니다.", "error");
-        }
-      } else {
-        setDismStatus('running');
-      }
-    } catch (e) {
-      setDismStatus('error');
-    }
-  };
-
-  const isAnyRunning = sfcStatus === 'running' || dismStatus === 'running';
+  const sfc = useRepairTask(SFC, addToast);
+  const dism = useRepairTask(DISM, addToast);
+  const isAnyRunning = sfc.status === 'running' || dism.status === 'running';
 
   return (
     <div className="space-y-6">
@@ -113,18 +116,19 @@ export default function SystemRepair({ addToast }) {
         <div className="space-y-1 z-10">
           <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-semibold">
             <ShieldCheck className="w-4 h-4" />
-            WINDOWS OS CORE REPAIR & MAINTENANCE
+            WINDOWS SYSTEM FILE REPAIR
           </div>
-          <h2 className="text-2xl font-black text-black dark:text-white">OS 코어 파일 시스템 복구</h2>
+          <h2 className="text-2xl font-black text-black dark:text-white">시스템 파일 복구</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400">
             손상된 Windows 시스템 파일을 검사해 원본으로 복구하고(SFC), 그 원본이 들어 있는 Windows 이미지의 손상을 복구합니다(DISM). 시스템 파일 손상이 원인인 오류에만 효과가 있습니다.
+            SFC 가 손상을 고치지 못했다고 하면 DISM 을 먼저 실행한 뒤 SFC 를 다시 실행하세요.
           </p>
         </div>
       </div>
 
       {/* SFC Panel */}
       <div className={`glass-panel p-5 flex flex-col gap-4 transition-all duration-300 ${
-        sfcStatus === 'running' ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'border-black/10 dark:border-slate-800'
+        sfc.status === 'running' ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'border-black/10 dark:border-slate-800'
       }`}>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-start gap-4 flex-1">
@@ -138,49 +142,38 @@ export default function SystemRepair({ addToast }) {
                 </span>
               </div>
               <h3 className="font-bold text-black dark:text-white text-base">시스템 파일 검사기 (SFC)</h3>
-              <p className="text-xs text-gray-500 dark:text-slate-400">무결성 위반을 검사하고 손상된 시스템 코어 파일을 교체합니다. (약 3~5분 소요)</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">보호된 시스템 파일을 모두 검사하고, 손상된 파일은 Windows 가 보관한 원본으로 바꿉니다. 보통 5~15분 걸립니다.</p>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            {sfcStatus === 'success' ? (
-              <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 rounded-xl">
-                <CheckCircle2 className="w-4 h-4" />
-                무결성 복구 완료
-              </div>
-            ) : sfcStatus === 'error' ? (
-              <div className="flex items-center gap-1.5 text-xs font-mono text-rose-400 font-bold bg-rose-500/10 border border-rose-500/30 px-3 py-2 rounded-xl">
-                <AlertCircle className="w-4 h-4" />
-                오류 발생 (관리자 권한 필요)
-              </div>
-            ) : sfcStatus === 'running' ? (
+            {sfc.status === 'running' ? (
               <button disabled className="btn-primary text-xs px-5 py-2.5 flex items-center gap-2 opacity-75 cursor-not-allowed">
                 <RotateCw className="w-4 h-4 animate-spin" />
                 <span>검사 진행 중...</span>
               </button>
             ) : (
               <button
-                onClick={runSfc}
+                onClick={sfc.run}
                 disabled={isAnyRunning}
                 className={`btn-primary text-xs px-5 py-2.5 flex items-center gap-2 ${isAnyRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <RotateCw className="w-4 h-4" />
-                <span>SFC 검사 실행</span>
+                <span>{sfc.status === 'idle' ? 'SFC 검사 실행' : 'SFC 검사 다시 실행'}</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* SFC Progress Indicator */}
-        {sfcStatus === 'running' && (
+        {sfc.status === 'running' && (
           <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
             <div className="flex items-center justify-between text-cyan-500 dark:text-cyan-400 font-mono text-sm">
               <div className="flex items-center gap-2">
                 <RotateCw className="w-5 h-5 animate-spin" />
-                <span>시스템 무결성 스캔 및 원본 파일 복원 중...</span>
+                <span>시스템 파일을 검사하는 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">경과 {Math.floor(sfcElapsed / 60)}분 {sfcElapsed % 60}초</span>
+                <span className="font-bold">경과 {elapsedLabel(sfc.elapsed)}</span>
                 <span className="text-xs ml-3 text-slate-500">보통 5~15분 걸립니다</span>
               </div>
             </div>
@@ -189,11 +182,12 @@ export default function SystemRepair({ addToast }) {
             </div>
           </div>
         )}
+        <ResultLine status={sfc.status} detail={sfc.detail} elapsed={sfc.elapsed} />
       </div>
 
       {/* DISM Panel */}
       <div className={`glass-panel p-5 flex flex-col gap-4 transition-all duration-300 ${
-        dismStatus === 'running' ? 'border-purple-500/50 shadow-lg shadow-purple-500/10' : 'border-black/10 dark:border-slate-800'
+        dism.status === 'running' ? 'border-purple-500/50 shadow-lg shadow-purple-500/10' : 'border-black/10 dark:border-slate-800'
       }`}>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-start gap-4 flex-1">
@@ -206,50 +200,39 @@ export default function SystemRepair({ addToast }) {
                   DISM /RESTOREHEALTH
                 </span>
               </div>
-              <h3 className="font-bold text-black dark:text-white text-base">Windows 배포 이미지 서비스 및 관리 (DISM)</h3>
-              <p className="text-xs text-gray-500 dark:text-slate-400">Windows Update 서버를 통해 내부 OS 컴포넌트 저장소의 손상을 원격 복원합니다. (약 5~10분 소요)</p>
+              <h3 className="font-bold text-black dark:text-white text-base">Windows 이미지 복구 (DISM)</h3>
+              <p className="text-xs text-gray-500 dark:text-slate-400">SFC 가 원본으로 쓰는 Windows 구성 요소 저장소를 검사하고, 손상된 부분은 Windows Update 에서 받아 고칩니다. 인터넷 연결이 필요하며 보통 10~30분 걸립니다.</p>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            {dismStatus === 'success' ? (
-              <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 rounded-xl">
-                <CheckCircle2 className="w-4 h-4" />
-                이미지 복원 완료
-              </div>
-            ) : dismStatus === 'error' ? (
-              <div className="flex items-center gap-1.5 text-xs font-mono text-rose-400 font-bold bg-rose-500/10 border border-rose-500/30 px-3 py-2 rounded-xl">
-                <AlertCircle className="w-4 h-4" />
-                오류 발생 (관리자 권한 필요)
-              </div>
-            ) : dismStatus === 'running' ? (
+            {dism.status === 'running' ? (
               <button disabled className="btn-primary bg-gradient-to-r from-purple-500 to-indigo-600 shadow-purple-500/30 text-xs px-5 py-2.5 flex items-center gap-2 opacity-75 cursor-not-allowed">
                 <RotateCw className="w-4 h-4 animate-spin" />
-                <span>온라인 복구 중...</span>
+                <span>복구 진행 중...</span>
               </button>
             ) : (
               <button
-                onClick={runDism}
+                onClick={dism.run}
                 disabled={isAnyRunning}
                 className={`btn-primary bg-gradient-to-r from-purple-500 to-indigo-600 shadow-purple-500/30 text-xs px-5 py-2.5 flex items-center gap-2 ${isAnyRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Activity className="w-4 h-4" />
-                <span>DISM 복구 실행</span>
+                <span>{dism.status === 'idle' ? 'DISM 복구 실행' : 'DISM 복구 다시 실행'}</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* DISM Progress Indicator */}
-        {dismStatus === 'running' && (
+        {dism.status === 'running' && (
           <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
             <div className="flex items-center justify-between text-purple-500 dark:text-purple-400 font-mono text-sm">
               <div className="flex items-center gap-2">
                 <RotateCw className="w-5 h-5 animate-spin" />
-                <span>서버 연결 및 Windows 배포 이미지 원본 다운로드 및 복원 중...</span>
+                <span>Windows 이미지를 검사·복구하는 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">경과 {Math.floor(dismElapsed / 60)}분 {dismElapsed % 60}초</span>
+                <span className="font-bold">경과 {elapsedLabel(dism.elapsed)}</span>
                 <span className="text-xs ml-3 text-slate-500">보통 10~30분 걸립니다</span>
               </div>
             </div>
@@ -258,6 +241,7 @@ export default function SystemRepair({ addToast }) {
             </div>
           </div>
         )}
+        <ResultLine status={dism.status} detail={dism.detail} elapsed={dism.elapsed} />
       </div>
 
     </div>

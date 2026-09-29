@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Gamepad2, Leaf, Gauge, CheckCircle2, AlertTriangle,
   RotateCcw, Loader2, ChevronDown, ChevronRight, Info, ShieldCheck, Cpu, MinusCircle
@@ -25,7 +25,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
     try {
       const st = await a.getSystemStats();
       if (st) setLive({ mhz: st.cpuClockMHz ?? null, base: st.cpuBaseMHz ?? null, usage: st.cpuUsage ?? null });
-    } catch (e) {
+    } catch {
       // 이전 값을 그대로 둔다
     }
   }, []);
@@ -40,7 +40,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
     try {
       const r = await a.getCpuBenchmarks();
       if (r && typeof r === 'object') setBench(r);
-    } catch (e) {
+    } catch {
       // 결과를 못 읽으면 표를 비워 둔다
     }
   }, []);
@@ -148,9 +148,13 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   const revertAll = async () => {
     const a = api();
     if (!a?.revertAllSystemChanges) return;
+    // 성능 모드만이 아니라 이 프로그램이 기록한 변경 전부(맞춤 튜닝·게임 부스트·시작 프로그램·정책)를 되돌린다.
+    // 예전 안내는 전원·CPU·레지스트리만 말해, 끈 시작 프로그램이 다시 켜지는 것을 알 수 없었다.
     if (!window.confirm(
       '이 프로그램이 바꾼 모든 시스템 설정을 원래대로 되돌립니다.\n\n' +
-      '전원 플랜, CPU 속도 설정, 레지스트리 값이 프로그램을 쓰기 전 상태로 복구됩니다.\n계속할까요?'
+      '전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정, 시작 프로그램 켜기·끄기가\n' +
+      '바꾸기 전에 기록해 둔 값으로 복구되고, 성능 모드는 \'표준\' 으로 돌아갑니다.\n' +
+      '무엇이 바뀌었는지는 \'변경 내역 · 되돌리기\' 화면에서 볼 수 있습니다.\n\n계속할까요?'
     )) return;
 
     setReverting(true);
@@ -303,7 +307,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               {isActive && (
                 <div className="absolute top-4 right-4 flex items-center gap-1 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-gray-50 dark:bg-slate-800 border border-black/10 dark:border-slate-700">
                   <CheckCircle2 className={`w-3.5 h-3.5 ${accent.text}`} />
-                  ACTIVE
+                  사용 중
                 </div>
               )}
 
@@ -333,7 +337,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                   </ul>
                 ) : (
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1 leading-snug">
-                    이 프로그램이 바꾼 설정을 모두 원래대로 돌려놓습니다.
+                    성능 모드가 바꾼 전원·CPU 설정을 원래대로 돌려놓습니다. 새로 바꾸는 것은 없습니다.
                   </p>
                 )}
               </div>

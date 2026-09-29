@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, XCircle, ChevronRight, Loader2, Gauge, Sliders, MemoryStick } from 'lucide-react';
+
+// 사양 판정에 쓰는 메모리 용량. 꽂혀 있는 용량(설치)을 쓴다. Windows 가 쓸 수 있는 용량은 내장 그래픽 예약만큼
+// 작아서, 예전에는 8GB PC 가 7.8GB 로 읽혀 'RAM 8 GB 미만 = 저사양' 에 걸려 SysMain 이 꺼졌다.
+function ramForTier(stats) {
+  const installed = Number(stats?.ramInstalledGB);
+  return installed > 0 ? installed : Number(stats?.ramTotalGB) || 0;
+}
 
 export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   // 'result' | 'consent' | 'applying' | 'done'
@@ -26,7 +33,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
       setPreviewError('API가 준비되지 않아 제안할 설정을 불러오지 못했습니다.');
       return;
     }
-    api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, false)
+    api.applyHardwareTuning(stats.cpuCores, ramForTier(stats), false)
       .then(res => {
         if (res?.success && Array.isArray(res.changes)) setPreview({ tier: res.tier, changes: res.changes });
         else setPreviewError(res?.message || '제안할 설정을 불러오지 못했습니다.');
@@ -41,7 +48,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   const handleApply = async () => {
     setStep('applying');
     try {
-      const res = await window.pywebview.api.applyHardwareTuning(stats.cpuCores, stats.ramTotalGB, true);
+      const res = await window.pywebview.api.applyHardwareTuning(stats.cpuCores, ramForTier(stats), true);
       setApplyResult(res || { success: false, message: '응답이 없습니다.' });
     } catch (e) {
       console.error("Failed to apply hardware tuning:", e);
@@ -109,9 +116,11 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
         ) : step === 'consent' ? (
           <div className="flex flex-col animate-fade-in-up">
             <div className={`p-8 pb-6 border-b ${band}`}>
-              <h2 className="text-2xl font-black tracking-tight mb-2">적용 전 확인: 아래 항목이 영구적으로 변경됩니다</h2>
+              <h2 className="text-2xl font-black tracking-tight mb-2">적용 전 확인: 아래 항목이 바뀝니다</h2>
+              {/* 예전 제목 '영구적으로 변경됩니다' 는 되돌릴 수 없다는 뜻으로 읽혔다. 실제로는 원래 값을 기록해 되돌릴 수 있다. */}
               <p className={`text-sm ${muted}`}>
-                아래 변경 사항은 재부팅 후에도 그대로 유지됩니다. Windows Update 및 보안 관련 서비스는 변경하지 않습니다.
+                서비스 설정은 재부팅 후에도 유지되며, '변경 내역 · 되돌리기' 에서 원래대로 되돌릴 수 있습니다.
+                Windows Update 및 보안 관련 서비스는 변경하지 않습니다.
               </p>
             </div>
 
@@ -237,7 +246,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.cpuModel}>{stats?.cpuModel || '알 수 없음'}</div>
                       <div className={`text-[10px] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
-                        {stats?.cpuCores} Cores / {stats?.cpuThreads} Threads
+                        {stats?.cpuCores}코어 / {stats?.cpuThreads}스레드
                       </div>
                     </div>
                   </div>
@@ -258,7 +267,11 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                       <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-xs truncate">{stats?.ramTotalGB || 0} GB 탑재</div>
+                      <div className="font-semibold text-xs truncate">
+                        {Number(stats?.ramInstalledGB) > 0
+                          ? `${Number(stats.ramInstalledGB).toFixed(1)} GB 설치 (사용 가능 ${stats.ramTotalGB} GB)`
+                          : `${stats?.ramTotalGB || 0} GB (사용 가능)`}
+                      </div>
                     </div>
                   </div>
 
@@ -268,7 +281,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                       <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>C: 드라이브</div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-xs truncate">{stats?.diskTotalGB || 0} GB 공간</div>
+                      <div className="font-semibold text-xs truncate">전체 {stats?.diskTotalGB || 0} GB</div>
                     </div>
                   </div>
                 </div>
@@ -288,7 +301,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                       {TierInfo.desc}
                     </p>
                     <p className={`text-[10px] font-mono mt-3 ${muted}`}>
-                      기준: 코어 4개 이하 또는 RAM 8 GB 미만이면 저사양 · 이 PC 코어 {stats.cpuCores}개, RAM {stats.ramTotalGB} GB
+                      기준: 코어 4개 이하 또는 RAM 8 GB 미만이면 저사양 · 이 PC 코어 {stats.cpuCores}개, RAM {ramForTier(stats)} GB
                     </p>
                   </div>
                 ) : (

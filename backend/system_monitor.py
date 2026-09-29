@@ -7,6 +7,7 @@ import platform
 import os
 import ctypes
 import ctypes.wintypes
+import re
 import time
 import threading
 import subprocess
@@ -212,10 +213,48 @@ def _get_cpu_model():
         winreg.CloseKey(key)
     except Exception as e:
         log.debug(f"Failed to get CPU model: {e}")
-        _cpu_model_cache = platform.processor() or "Unknown CPU"
+        _cpu_model_cache = platform.processor() or "알 수 없음"
     return _cpu_model_cache
 
 _gpu_model_cache = None
+
+# 화면 출력만 하는 가상·원격 어댑터. 실제 그래픽카드가 따로 있으면 이 이름을 보여 주지 않는다.
+_VIRTUAL_GPU_HINTS = ('microsoft basic', 'microsoft 기본', 'remote display', 'remote desktop', 'virtual',
+                      'parsec', 'citrix', 'displaylink', 'spacedesk', 'indirect display')
+
+
+def _is_integrated_gpu(low):
+    """내장 그래픽인가. 외장 그래픽카드가 함께 있으면 외장을 대표로 보여 준다(게임이 쓰는 쪽).
+
+    Intel 은 Arc A·B 시리즈(외장)만 빼고 내장이다. AMD 는 'Radeon ... Graphics' 로 끝나면
+    APU 내장(Radeon 780M Graphics, RX Vega 11 Graphics)이고, 외장은 'Radeon RX 7800 XT' 처럼 끝난다.
+    """
+    if 'intel' in low:
+        return not re.search(r'arc\S*\s+[ab]\d', low)
+    return 'radeon' in low and low.rstrip().endswith('graphics')
+
+
+def pick_gpu_name(names):
+    """그래픽 어댑터 이름 목록에서 대표 하나를 고른다.
+
+    예전에는 WMI 가 처음 돌려준 것을 썼다. 내장+외장 노트북은 내장 그래픽이, 원격 접속 도구를
+    깐 PC 는 'Microsoft 기본 디스플레이 어댑터' 같은 가상 어댑터가 GPU 로 보였다.
+    외장 > 내장 > 가상 순으로 고르고, 같은 순위면 WMI 순서를 따른다. 목록이 비었으면 None.
+    """
+    names = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+    if not names:
+        return None
+
+    def rank(n):
+        low = n.lower()
+        if any(h in low for h in _VIRTUAL_GPU_HINTS):
+            return 2
+        if _is_integrated_gpu(low):
+            return 1
+        return 0
+    return sorted(names, key=rank)[0]
+
+
 def _get_gpu_model():
     global _gpu_model_cache
     if _gpu_model_cache is not None:
@@ -225,15 +264,11 @@ def _get_gpu_model():
         pythoncom.CoInitialize()
         import win32com.client
         wmi = win32com.client.GetObject('winmgmts:')
-        controllers = wmi.InstancesOf('Win32_VideoController')
-        for c in controllers:
-            _gpu_model_cache = c.Name
-            break
-        if not _gpu_model_cache:
-            _gpu_model_cache = "Unknown GPU"
+        names = [c.Name for c in wmi.InstancesOf('Win32_VideoController')]
+        _gpu_model_cache = pick_gpu_name(names) or "알 수 없음"
     except Exception as e:
         log.debug(f"Failed to get GPU model: {e}")
-        _gpu_model_cache = "Unknown GPU"
+        _gpu_model_cache = "알 수 없음"
     return _gpu_model_cache
 
 # ── 메모리 목록 크기 (Windows 성능 카운터) ─────────────────────────
@@ -342,6 +377,8 @@ def get_system_stats():
             'ramAvailableGB': round(mem.available / GB, 1),
             'diskUsedGB': round(disk.used / (1024**3)),
             'diskTotalGB': round(disk.total / (1024**3)),
+            # 반올림한 전체에서 반올림한 사용량을 빼면 1GB 씩 어긋난다. 남은 용량은 따로 잰다.
+            'diskFreeGB': round(disk.free / (1024**3)),
             'diskPct': round(disk.percent),
             'gpuUsage': _gpu_usage,
             'gpuModel': _get_gpu_model(),
@@ -368,8 +405,11 @@ _PRIORITY_LABEL = {
 _cpu_seen_pids = set()
 
 
-def get_processes():
-    """Get top 8 processes by memory. Pure psutil, no external calls.
+def get_processes(limit=8):
+    """메모리를 많이 쓰는 순으로 프로세스 목록. limit 개까지(0 이나 None 이면 전부). psutil 만 쓴다.
+
+    RAM 화면은 상위 8개를 보여 주고, 게이밍 탭의 우선순위 조정은 이름으로 찾아야 하므로 전부 받는다.
+    예전에는 늘 8개만 돌려줘서 게이밍 탭의 검색으로 게임이나 원하는 앱을 찾을 수 없었다.
 
     시스템 필수 프로세스와 APEX CARE 자기 가족 PID 는 목록 단계에서 제외한다.
     RamBooster.jsx 가 모든 행에 '프로세스 종료' 버튼을 조건 없이 그리기 때문에,
@@ -414,7 +454,11 @@ def get_processes():
         
         _cpu_seen_pids = seen_now
         procs.sort(key=lambda x: x['memoryMB'], reverse=True)
-        return procs[:8]
+        try:
+            limit = int(limit or 0)
+        except (TypeError, ValueError):
+            limit = 8
+        return procs[:limit] if limit > 0 else procs
     except Exception as e:
         print(f"[SystemMonitor] Process list error: {e}")
         return []

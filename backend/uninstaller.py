@@ -50,6 +50,19 @@ def _read(subkey, name, default=''):
         return default
 
 
+# 표시 이름 → 프로그램이 등록한 InstallLocation. 목록을 읽을 때마다 채운다(이 프로세스 동안 유지).
+# 제거가 끝나면 등록 정보가 지워지므로, 잔여물 탐색은 제거 전에 읽어 둔 이 값을 쓴다.
+_known_locations = {}
+
+
+def _format_install_date(raw):
+    """레지스트리의 InstallDate(보통 20240115)를 2024-01-15 로. 형식이 다르면 그대로."""
+    s = str(raw or '').strip()
+    if re.fullmatch(r'(19|20)\d{6}', s):
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s
+
+
 def get_installed_apps():
     """설치된 프로그램 목록.
 
@@ -81,14 +94,18 @@ def get_installed_apps():
 
                             seen.add(name)
                             app_id += 1
+                            location = _read(sub, "InstallLocation")
+                            if isinstance(location, str) and location.strip():
+                                # 제거가 끝나면 레지스트리에서 사라진다. 잔여물 탐색이 쓰도록 기억해 둔다.
+                                _known_locations[name] = location.strip().strip('"')
                             apps.append({
                                 "id": str(app_id),
                                 "name": name,
                                 "publisher": _read(sub, "Publisher"),
-                                "installDate": _read(sub, "InstallDate"),
-                                "sizeMB": round(size_kb / 1024) if size_kb else 0,
+                                "installDate": _format_install_date(_read(sub, "InstallDate")),
+                                "sizeMB": round(size_kb / 1024) if isinstance(size_kb, int) and size_kb > 0 else 0,
                                 "uninstallString": uninstall_string,
-                                "installLocation": _read(sub, "InstallLocation"),
+                                "installLocation": location if isinstance(location, str) else '',
                                 "quietUninstall": _read(sub, "QuietUninstallString"),
                             })
                     except Exception as e:
@@ -122,6 +139,21 @@ def _split_command(cmdline):
     except Exception as e:
         log.warning(f"명령줄 파싱 실패: {e}")
         return None
+
+
+def uninstall_by_name(app_name):
+    """목록에 있는 프로그램의 제거 프로그램을 실행한다. 명령줄은 레지스트리에서 직접 읽는다.
+
+    예전에는 화면이 넘긴 UninstallString 을 그대로 실행했다. 관리자 권한 창이 UI 에서 온 문자열을
+    명령으로 실행하면 안 된다. 이제 화면은 이름만 넘기고, 명령은 백엔드가 레지스트리에서 찾는다.
+    """
+    if not isinstance(app_name, str) or not app_name.strip():
+        return {"success": False, "message": "프로그램 이름이 올바르지 않습니다."}
+    match = next((a for a in get_installed_apps() if a['name'] == app_name), None)
+    if not match:
+        return {"success": False,
+                "message": f"'{app_name}' 을(를) 설치된 프로그램 목록에서 찾지 못했습니다. 이미 제거되었을 수 있습니다."}
+    return run_uninstall(match['uninstallString'])
 
 
 def run_uninstall(uninstall_string):
@@ -228,10 +260,16 @@ def find_leftovers(app_name, install_location='', publisher=''):
       2순위: 정규화한 '전체 이름' 과 폴더명이 정확히 일치할 때만.
              부분 일치는 쓰지 않는다.
 
-    어느 쪽이든 safe_delete 의 보호 경로 판정을 통과해야 목록에 오른다.
+    어느 쪽이든 safe_delete 의 보호 경로 판정을 통과해야 하고, 정리 단계가 허용하는 폴더
+    (AppData·Program Files·ProgramData) 안이어야 목록에 오른다. 목록에 보여 놓고 정리에서
+    거부하면 사용자는 '지웠다' 고 믿게 된다. 아직 설치된 다른 프로그램의 설치 경로를 품은 폴더도 뺀다.
     """
     out = []
     seen = set()
+    roots = _leftover_roots()
+    installed_now = {a['name'] for a in get_installed_apps()}
+    others = [safe_delete.norm(loc) for n, loc in _known_locations.items()
+              if n != app_name and n in installed_now and loc]
 
     def add(path, confidence, why):
         p = safe_delete.norm(path)
@@ -239,6 +277,12 @@ def find_leftovers(app_name, install_location='', publisher=''):
             return
         if safe_delete.is_protected(path):
             log.info(f"잔여물 후보에서 제외(보호 경로): {path}")
+            return
+        if not any(safe_delete.is_inside(path, r) for r in roots):
+            log.info(f"잔여물 후보에서 제외(정리할 수 있는 폴더 밖): {path}")
+            return
+        if any(o == p or o.startswith(p + os.sep) for o in others):
+            log.info(f"잔여물 후보에서 제외(설치된 다른 프로그램이 이 안에 있음): {path}")
             return
         seen.add(p)
         out.append({
@@ -248,7 +292,8 @@ def find_leftovers(app_name, install_location='', publisher=''):
             "reason": why,
         })
 
-    # 1순위 — 프로그램이 신고한 설치 경로
+    # 1순위 — 프로그램이 신고한 설치 경로(인자로 받지 않았으면 제거 전에 읽어 둔 값)
+    install_location = install_location or _known_locations.get(app_name, '')
     if install_location and os.path.isdir(install_location):
         add(install_location, 'certain', '프로그램이 등록한 설치 경로')
 
@@ -280,6 +325,34 @@ def find_leftovers(app_name, install_location='', publisher=''):
     return out
 
 
+def _leftover_roots():
+    """잔여물을 찾고 지울 수 있는 폴더(이 안의 하위 폴더만). 이 밖은 건드리지 않는다."""
+    roots = [os.environ.get(v, '') for v in
+             ('APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData')]
+    return [r for r in roots if r]
+
+
+def scan_leftovers(app_name):
+    """화면이 부르는 잔여물 탐색. 프로그램이 아직 설치돼 있으면 찾지 않는다.
+
+    예전에는 '삭제 완료! 찌꺼기 스캔하기' 를 누르면 제거가 끝났는지 보지 않고 찾았다.
+    제거 창을 닫았거나 취소했으면, 아직 쓰이는 프로그램 폴더가 '잔여물' 로 올라와
+    휴지통으로 갈 수 있었다.
+    반환: {success, stillInstalled, items, message}
+    """
+    if not isinstance(app_name, str) or not app_name.strip():
+        return {"success": False, "stillInstalled": False, "items": [],
+                "message": "프로그램 이름이 올바르지 않습니다."}
+    check = verify_uninstalled(app_name)
+    if not check["uninstalled"]:
+        return {"success": False, "stillInstalled": True, "items": [],
+                "message": f"'{app_name}' 이(가) 아직 설치된 프로그램 목록에 있습니다. "
+                           "제거 창에서 제거를 마친 뒤 다시 눌러 주세요."}
+    items = find_leftovers(app_name)
+    return {"success": True, "stillInstalled": False, "items": items,
+            "message": (f"남은 폴더 {len(items)}개를 찾았습니다." if items else "남은 폴더가 없습니다.")}
+
+
 def clean_leftovers(paths):
     """잔여 폴더를 휴지통으로 보낸다.
 
@@ -289,9 +362,9 @@ def clean_leftovers(paths):
         return {"success": True, "freedMB": 0, "deleted": 0, "failed": [],
                 "message": "선택된 항목이 없습니다."}
 
-    allowed = [os.environ.get(v, '') for v in
-               ('APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData')]
-    allowed = [a for a in allowed if a]
+    allowed = _leftover_roots()
+    installed = [safe_delete.norm(a['installLocation']) for a in get_installed_apps()
+                 if a.get('installLocation')]
 
     targets, rejected = [], []
     for p in paths:
@@ -303,13 +376,17 @@ def clean_leftovers(paths):
         if not any(safe_delete.is_inside(p, root) for root in allowed):
             rejected.append({"path": p, "reason": "허용된 폴더 범위 밖"})
             continue
+        np_ = safe_delete.norm(p)
+        if any(loc == np_ or loc.startswith(np_ + os.sep) for loc in installed):
+            rejected.append({"path": p, "reason": "설치된 프로그램이 쓰는 폴더"})
+            continue
         targets.append(p)
 
     res = safe_delete.to_recycle_bin(targets)
     failed = rejected + res['failed']
 
     return {
-        "success": bool(res['ok']) or not targets,
+        "success": bool(res['ok']) or not failed,
         "freedMB": round(res['bytes'] / (1024 ** 2), 2),
         "deleted": len(res['ok']),
         "failed": failed,

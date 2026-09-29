@@ -44,6 +44,10 @@ if __name__ == '__main__':
         background_color='#080c14'
     )
     api._window = window
+    # 창이 최대화됐는지 Api 가 알고 있어야 최대화 버튼이 '최대화 ↔ 이전 크기' 를 맞게 오간다
+    # (Windows 키+↑ 나 제목 표시줄 더블클릭으로 바뀐 경우 포함).
+    window.events.maximized += api._on_window_maximized
+    window.events.restored += api._on_window_restored
     # Ensure persistent storage across version updates by setting a fixed storage path
     app_data_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'APEX_CARE_DATA')
     os.makedirs(app_data_path, exist_ok=True)

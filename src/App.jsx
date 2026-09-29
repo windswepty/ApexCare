@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { attachSmoothScroll } from './smoothScroll';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import TitleBar from './components/TitleBar';
@@ -32,7 +32,7 @@ export default function App() {
   }, [activeTab]);
   const isMounted = (tab) => tab === activeTab || visitedTabs.has(tab);
   const [currentMode, setCurrentMode] = useState('standard');
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
   const [isBackendReady, setIsBackendReady] = useState(false);
   // 초기 설정 마법사는 첫 실행 때만 띄운다. 백엔드에서 기록을 읽기 전에는 띄우지 않는다.
@@ -44,8 +44,11 @@ export default function App() {
   // 색 조합과 직접 고른 강조색(저장된 값). main.jsx 가 캐시 값으로 먼저 적용해 둔다.
   const [appearance, setAppearance] = useState(cachedAppearance);
 
+  // 같은 밀리초에 알림이 둘 뜨면 Date.now() 가 같아 하나를 닫을 때 둘 다 사라졌다. 순번을 쓴다.
+  const toastSeq = useRef(0);
   const addToast = useCallback((message, type = 'success') => {
-    const id = Date.now();
+    toastSeq.current += 1;
+    const id = toastSeq.current;
     setToasts(prev => {
       // Prevent identical messages from stacking up
       if (prev.some(t => t.message === message)) return prev;
@@ -184,17 +187,14 @@ export default function App() {
           
           {/* Fixed Header */}
           <div className="pt-6 px-6 flex-shrink-0 z-30">
-            <Header
-              isDarkMode={isDarkMode}
-              setIsDarkMode={setIsDarkMode}
-            />
+            <Header />
           </div>
 
           {/* Scrollable Content */}
           <main ref={scrollWrapperRef} className="flex-1 overflow-y-auto px-6 pb-6 flex flex-col">
             <div ref={scrollContentRef} className="flex flex-col flex-1">
               <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('dashboard') && <Dashboard active={activeTab === 'dashboard'} onNavigate={(tab) => setActiveTab(tab)} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} addToast={addToast} />}
+                {isMounted('dashboard') && <Dashboard active={activeTab === 'dashboard'} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'restore' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('restore') && <RestoreCenter active={activeTab === 'restore'} addToast={addToast} />}

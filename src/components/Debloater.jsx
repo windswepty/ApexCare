@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Trash2, 
-  CheckCircle2, 
+import { useState, useEffect } from 'react';
+import {
+  Trash2,
+  CheckCircle2,
   AlertTriangle,
   RotateCw,
   RotateCcw,
@@ -124,8 +124,8 @@ export default function Debloater({ addToast }) {
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.startDebloater === 'function') {
         const res = await window.pywebview.api.startDebloater(selectedIds);
-        if (!res.success) {
-          alert(res.message);
+        if (!res?.success) {
+          if (addToast) addToast(res?.message || '시작하지 못했습니다.', 'error');
           setIsScanning(false);
           return;
         }
@@ -140,7 +140,6 @@ export default function Debloater({ addToast }) {
                   clearInterval(poll);
                   setIsScanning(false);
                   if (st.error) {
-                    alert("오류 발생: " + st.error);
                     if (addToast) addToast("오류 발생: " + st.error, 'error');
                   } else {
                     // 백엔드가 항목별 성패를 돌려준다. 하나도 못 지웠는데
@@ -167,6 +166,7 @@ export default function Debloater({ addToast }) {
             } catch (e) {
               clearInterval(poll);
               setIsScanning(false);
+              if (addToast) addToast(`진행 상태를 확인하지 못했습니다: ${e}. 작업은 계속 진행 중일 수 있습니다.`, 'error');
             }
           }
         }, 500);
@@ -187,9 +187,9 @@ export default function Debloater({ addToast }) {
         <div className="space-y-1 z-10">
           <div className="flex items-center gap-2 text-red-400 font-mono text-xs font-semibold">
             <ServerCrash className="w-4 h-4" />
-            WINDOWS DEEP DEBLOATER
+            WINDOWS DEBLOATER
           </div>
-          <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">윈도우 하드코어 적출</h2>
+          <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">Windows 기본 앱 정리</h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xl">
             잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(아래 '제거한 앱' 에서 되살릴 수 있습니다),
             원격 분석·Cortana 정책을 바꿉니다(복구 센터에서 되돌릴 수 있습니다).
@@ -205,12 +205,12 @@ export default function Debloater({ addToast }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="font-bold text-black dark:text-white">적출 가능 항목 ({items.length})</h3>
+            <h3 className="font-bold text-black dark:text-white">정리할 수 있는 항목 ({items.length})</h3>
             <button 
               onClick={selectAll}
               className="text-xs font-bold text-cyan-500 hover:text-cyan-400 transition-colors"
             >
-              {selectedIds.length === items.length ? '전체 해제' : '전체 선택'}
+              {items.length > 0 && selectedIds.length === items.length ? '전체 해제' : '전체 선택'}
             </button>
           </div>
           
@@ -273,12 +273,12 @@ export default function Debloater({ addToast }) {
               {isScanning ? (
                 <>
                   <RotateCw className="w-5 h-5 animate-spin" />
-                  <span>적출 진행 중...</span>
+                  <span>진행 중...</span>
                 </>
               ) : (
                 <>
                   <Trash2 className="w-5 h-5" />
-                  <span>선택 항목 적출</span>
+                  <span>선택 항목 제거·적용</span>
                 </>
               )}
             </button>
