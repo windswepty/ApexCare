@@ -24,3 +24,20 @@ def test_mode_is_switched_only_where_it_is_really_applied():
     header = _read('src/components/Header.jsx')
     assert 'setCurrentMode' not in header and "'gaming'" not in header
     assert 'setCurrentMode=' not in re.search(r'<Header[^>]*>', _read('src/App.jsx'), re.S).group(0)
+
+
+def test_no_invented_progress_or_remaining_time():
+    # SFC·DISM·잔여물 정리는 진행률을 알려 주지 않는다. 예전에는 타이머로 %를 올리고 '예상 남은 시간' 을 셌다.
+    comp_dir = os.path.join(ROOT, 'src', 'components')
+    for f in os.listdir(comp_dir):
+        if f.endswith('.jsx'):
+            src = _read(os.path.join('src', 'components', f))
+            assert not re.search(r'set\w*Progress\(\s*\w+\s*=>\s*\(\s*\w+\s*<\s*99', src), f
+            assert '예상 남은 시간' not in src, f
+
+
+def test_result_toasts_follow_the_result():
+    storage = _read('src/components/StorageCenter.jsx')
+    assert "st?.status === 'success'" in storage              # TRIM: 실패·진행 중을 '마쳤습니다' 로 보이지 않는다
+    uninst = _read('src/components/Uninstaller.jsx')
+    assert '완벽 삭제' not in uninst and 'failedCount > 0' in uninst

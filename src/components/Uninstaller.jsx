@@ -10,19 +10,15 @@ export default function Uninstaller({ addToast }) {
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
 
-  const [cleanProgress, setCleanProgress] = useState(0);
-  const [cleanEta, setCleanEta] = useState(3);
+  const [cleanElapsed, setCleanElapsed] = useState(0);
 
+  // 잔여물 찾기·정리는 진행률을 알 수 없다. 예전에는 1초마다 33%씩 올려 지어낸 진행률을 보였다. 경과 시간만 센다.
   useEffect(() => {
     let interval;
     if (isCleaning) {
-      interval = setInterval(() => {
-        setCleanProgress(p => (p < 99 ? p + 33 : 99));
-        setCleanEta(e => (e > 0 ? e - 1 : 0));
-      }, 1000);
+      interval = setInterval(() => setCleanElapsed(t => t + 1), 1000);
     } else {
-      setCleanProgress(0);
-      setCleanEta(3);
+      setCleanElapsed(0);
     }
     return () => clearInterval(interval);
   }, [isCleaning]);
@@ -112,10 +108,14 @@ export default function Uninstaller({ addToast }) {
       const paths = leftovers.map(l => l.path);
       const res = await window.pywebview.api.cleanAppLeftovers(paths);
       
-      if (res && res.success === false) {
-          if (addToast) addToast(res.error || "삭제에 실패했습니다.", "error");
+      // 결과 그대로 알린다. 일부를 건너뛰었는데 '완벽 삭제' 라고 하지 않는다.
+      const failedCount = Array.isArray(res?.failed) ? res.failed.length : 0;
+      if (!res || res.success === false) {
+          if (addToast) addToast(res?.message || res?.error || "잔여 폴더를 정리하지 못했습니다.", "error");
+      } else if (failedCount > 0) {
+          if (addToast) addToast(`[${activeApp.name}] ${res.message}`, 'error');
       } else {
-          if (addToast) addToast(`[${activeApp.name}] 완벽 삭제 및 잔여 파일 정리가 완료되었습니다!`, 'success');
+          if (addToast) addToast(`[${activeApp.name}] ${res.message || '잔여 폴더를 휴지통으로 보냈습니다.'}`, 'success');
       }
     } catch (e) {
       console.error('IPC Error cleaning leftovers:', e);
@@ -260,14 +260,13 @@ export default function Uninstaller({ addToast }) {
               
               <div className="w-full bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 rounded-xl p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between text-rose-500 dark:text-rose-400 font-mono text-sm">
-                  <span>작업 진행률</span>
+                  <span>진행 중</span>
                   <div className="text-right">
-                    <span className="font-bold">{Math.floor(cleanProgress)}%</span>
-                    <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {cleanEta}초</span>
+                    <span className="font-bold">경과 {cleanElapsed}초</span>
                   </div>
                 </div>
-                <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                  <div className="bg-rose-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${cleanProgress}%` }}></div>
+                <div className="relative w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="absolute inset-y-0 w-1/3 bg-rose-400 rounded-full animate-indeterminate motion-reduce:w-full motion-reduce:opacity-40"></div>
                 </div>
               </div>
             </div>

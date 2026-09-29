@@ -12,26 +12,22 @@ import {
 
 export default function SystemRepair({ addToast }) {
   const [sfcStatus, setSfcStatus] = useState('idle');
-  const [sfcProgress, setSfcProgress] = useState(0);
-  const [sfcEta, setSfcEta] = useState(240); // 4 minutes
+  // SFC·DISM 은 진행률을 알려 주지 않는다. 지어낸 %·남은 시간 대신 경과 시간만 보여 준다.
+  const [sfcElapsed, setSfcElapsed] = useState(0);
   
   const [dismStatus, setDismStatus] = useState('idle');
-  const [dismProgress, setDismProgress] = useState(0);
-  const [dismEta, setDismEta] = useState(480); // 8 minutes
+  const [dismElapsed, setDismElapsed] = useState(0);
 
   useEffect(() => {
     let interval;
     if (sfcStatus === 'running') {
       interval = setInterval(async () => {
-        setSfcProgress(p => (p < 99 ? p + 0.5 : 99));
-        setSfcEta(e => (e > 0 ? e - 1 : 0));
+        setSfcElapsed(t => t + 1);
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSfcStatus === 'function') {
           try {
             const state = await window.pywebview.api.getSfcStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
               setSfcStatus(state.status);
-              setSfcProgress(100);
-              setSfcEta(0);
               if (addToast) addToast(state.status === 'success' ? 'SFC 시스템 무결성 검사 및 복구가 완료되었습니다!' : 'SFC 검사에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
           } catch (e) {
@@ -42,11 +38,8 @@ export default function SystemRepair({ addToast }) {
         }
       }, 1000);
     } else if (sfcStatus === 'success') {
-      setSfcProgress(100);
-      setSfcEta(0);
     } else {
-      setSfcProgress(0);
-      setSfcEta(240);
+      setSfcElapsed(0);
     }
     return () => clearInterval(interval);
   }, [sfcStatus]);
@@ -55,15 +48,12 @@ export default function SystemRepair({ addToast }) {
     let interval;
     if (dismStatus === 'running') {
       interval = setInterval(async () => {
-        setDismProgress(p => (p < 99 ? p + 0.2 : 99));
-        setDismEta(e => (e > 0 ? e - 1 : 0));
+        setDismElapsed(t => t + 1);
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDismStatus === 'function') {
           try {
             const state = await window.pywebview.api.getDismStatus();
             if (state && state.status !== 'running' && state.status !== 'idle') {
               setDismStatus(state.status);
-              setDismProgress(100);
-              setDismEta(0);
               if (addToast) addToast(state.status === 'success' ? 'DISM 시스템 이미지 복구가 완료되었습니다!' : 'DISM 복구에 실패했습니다.', state.status === 'success' ? 'success' : 'error');
             }
           } catch (e) {
@@ -74,11 +64,8 @@ export default function SystemRepair({ addToast }) {
         }
       }, 1000);
     } else if (dismStatus === 'success') {
-      setDismProgress(100);
-      setDismEta(0);
     } else {
-      setDismProgress(0);
-      setDismEta(480);
+      setDismElapsed(0);
     }
     return () => clearInterval(interval);
   }, [dismStatus]);
@@ -193,12 +180,12 @@ export default function SystemRepair({ addToast }) {
                 <span>시스템 무결성 스캔 및 원본 파일 복원 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">{Math.floor(sfcProgress)}%</span>
-                <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {Math.floor(sfcEta / 60)}분 {sfcEta % 60}초</span>
+                <span className="font-bold">경과 {Math.floor(sfcElapsed / 60)}분 {sfcElapsed % 60}초</span>
+                <span className="text-xs ml-3 text-slate-500">보통 5~15분 걸립니다</span>
               </div>
             </div>
-            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div className="bg-cyan-400 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${sfcProgress}%` }}></div>
+            <div className="relative w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div className="absolute inset-y-0 w-1/3 bg-cyan-400 rounded-full animate-indeterminate motion-reduce:w-full motion-reduce:opacity-40"></div>
             </div>
           </div>
         )}
@@ -262,12 +249,12 @@ export default function SystemRepair({ addToast }) {
                 <span>서버 연결 및 Windows 배포 이미지 원본 다운로드 및 복원 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">{Math.floor(dismProgress)}%</span>
-                <span className="text-xs ml-3 text-slate-500">예상 남은 시간: {Math.floor(dismEta / 60)}분 {dismEta % 60}초</span>
+                <span className="font-bold">경과 {Math.floor(dismElapsed / 60)}분 {dismElapsed % 60}초</span>
+                <span className="text-xs ml-3 text-slate-500">보통 10~30분 걸립니다</span>
               </div>
             </div>
-            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div className="bg-gradient-to-r from-purple-500 to-indigo-600 h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${dismProgress}%` }}></div>
+            <div className="relative w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-purple-500 to-indigo-600 rounded-full animate-indeterminate motion-reduce:w-full motion-reduce:opacity-40"></div>
             </div>
           </div>
         )}

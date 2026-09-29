@@ -415,13 +415,17 @@ function DiskSection({ addToast, overview }) {
         setRunning(false);
         return;
       }
+      let st = null;
       for (let i = 0; i < 900; i++) {
         await new Promise((r) => setTimeout(r, 1000));
-        const st = await a.getTrimStatus();
+        st = await a.getTrimStatus();
         setStatus(st);
         if (st?.status !== 'running') break;
       }
-      addToast?.('디스크 최적화를 마쳤습니다.', 'success');
+      // 끝난 상태를 그대로 알린다. 실패나 시간 초과를 '마쳤습니다' 로 보이지 않는다.
+      if (st?.status === 'success') addToast?.('디스크 최적화를 마쳤습니다.', 'success');
+      else if (st?.status === 'running') addToast?.('디스크 최적화가 아직 진행 중입니다. 잠시 뒤 다시 확인해 주세요.', 'info');
+      else addToast?.(`디스크 최적화에 실패했습니다${st?.error ? `: ${st.error}` : '.'}`, 'error');
     } catch (e) {
       addToast?.(`실행 실패: ${e}`, 'error');
     }
