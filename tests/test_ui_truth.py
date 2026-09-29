@@ -40,4 +40,4 @@ def test_result_toasts_follow_the_result():
     storage = _read('src/components/StorageCenter.jsx')
     assert "st?.status === 'success'" in storage              # TRIM: 실패·진행 중을 '마쳤습니다' 로 보이지 않는다
     uninst = _read('src/components/Uninstaller.jsx')
-    assert '완벽 삭제' not in uninst and 'failedCount > 0' in uninst
+    assert '완벽 삭제 및 잔여 파일 정리가 완료' not in uninst and 'failedCount > 0' in uninst
