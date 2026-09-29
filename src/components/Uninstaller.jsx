@@ -149,7 +149,7 @@ export default function Uninstaller({ addToast }) {
             프로그램 완전 삭제 (Advanced Uninstaller)
           </h2>
           <p className="text-gray-500 dark:text-slate-400 mt-1">
-            프로그램을 삭제하고 숨어있는 레지스트리 및 찌꺼기 파일까지 완벽하게 제거합니다.
+            프로그램의 제거 프로그램을 실행한 뒤, 설치 폴더에 남은 폴더를 찾아 휴지통으로 보냅니다(휴지통에서 되살릴 수 있습니다).
           </p>
         </div>
       </div>

@@ -41,3 +41,10 @@ def test_result_toasts_follow_the_result():
     assert "st?.status === 'success'" in storage              # TRIM: 실패·진행 중을 '마쳤습니다' 로 보이지 않는다
     uninst = _read('src/components/Uninstaller.jsx')
     assert '완벽 삭제 및 잔여 파일 정리가 완료' not in uninst and 'failedCount > 0' in uninst
+
+
+def test_descriptions_do_not_promise_what_the_code_does_not_do():
+    # 잔여물 정리는 설치 폴더에 남은 폴더만 휴지통으로 보낸다(레지스트리는 건드리지 않는다).
+    # SFC·DISM 은 시스템 파일 손상만 고친다. 블루스크린을 '원천 방지' 하지 않는다.
+    assert '레지스트리 및 찌꺼기 파일까지 완벽하게' not in _read('src/components/Uninstaller.jsx')
+    assert '원천 방지' not in _read('src/components/DriverUpdater.jsx')

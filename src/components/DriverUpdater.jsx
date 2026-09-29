@@ -117,7 +117,7 @@ export default function SystemRepair({ addToast }) {
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white">OS 코어 파일 시스템 복구</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400">
-            손상된 윈도우 시스템 파일을 스캔하여 원본으로 복구하고(SFC), Windows 이미지 손상을 복구(DISM)하여 블루스크린(BSOD)과 앱 크래시를 원천 방지합니다.
+            손상된 Windows 시스템 파일을 검사해 원본으로 복구하고(SFC), 그 원본이 들어 있는 Windows 이미지의 손상을 복구합니다(DISM). 시스템 파일 손상이 원인인 오류에만 효과가 있습니다.
           </p>
         </div>
       </div>
