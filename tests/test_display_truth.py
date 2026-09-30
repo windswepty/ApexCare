@@ -131,6 +131,32 @@ def test_windows_update_cache_is_not_selected_by_default(junk_root):
     assert '이미 설치 완료된' not in items[3]['description']
 
 
+def test_browser_cache_covers_edge_whale_and_every_profile(tmp_path, monkeypatch):
+    # 예전에는 Chrome 'Default' 프로필의 Cache 만 정리했다
+    local = tmp_path / 'Local'
+    made = {}
+    for rel, profile in ((r'Google\Chrome\User Data', 'Default'), (r'Google\Chrome\User Data', 'Profile 2'),
+                         (r'Microsoft\Edge\User Data', 'Default'), (r'Naver\Naver Whale\User Data', 'Default')):
+        cache = local.joinpath(*rel.split('\\'), profile, 'Cache')
+        cache.mkdir(parents=True)
+        (cache / 'data_1').write_bytes(b'c' * 1024)
+        made[(rel, profile)] = cache
+    # 캐시가 아닌 것: 쿠키 DB·시스템 프로필(System Profile)은 대상이 아니다
+    local.joinpath('Google', 'Chrome', 'User Data', 'Default', 'Network').mkdir(parents=True)
+    (local / 'Google' / 'Chrome' / 'User Data' / 'Default' / 'Network' / 'Cookies').write_bytes(b'cookie')
+    local.joinpath('Google', 'Chrome', 'User Data', 'System Profile', 'Cache').mkdir(parents=True)
+    monkeypatch.setenv('LOCALAPPDATA', str(local))
+
+    dirs = optimizer.browser_cache_dirs()
+    assert {os.path.normcase(p) for _, p in dirs} == {os.path.normcase(str(p)) for p in made.values()}
+    assert optimizer._browser_label(dirs) == 'Chrome, Edge, Whale'
+
+    optimizer.clean_junk_background([2], cancel_event=None)
+    assert optimizer.get_junk_clean_status()['status'] == 'success'
+    assert all(not (p / 'data_1').exists() for p in made.values())
+    assert (local / 'Google' / 'Chrome' / 'User Data' / 'Default' / 'Network' / 'Cookies').exists()
+
+
 def test_one_click_refuses_to_start_while_storage_clean_runs(monkeypatch):
     started = []
     monkeypatch.setattr(optimizer.threading, 'Thread', lambda *a, **k: started.append(1))

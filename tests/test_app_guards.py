@@ -37,3 +37,27 @@ def test_uninstaller_mentions_removed_apps_it_will_not_reinstall():
     call = 'removed_apps = _removed_app_count()'
     assert call in src and '+ removed_note' in src          # 확인 창 문구에 붙는다
     assert src.index(call) < src.index('reverted, why = _revert_system_changes(install_dir)')
+
+
+def test_maximize_fills_the_work_area_not_the_whole_screen():
+    # 테두리 없는 창을 Windows 최대화하면 작업 표시줄까지 덮었다(실측 1920×1080, 작업 영역 1920×1032).
+    from backend import window_frame
+    moves = []
+    rect = {'now': (130, 130, 1224, 801)}
+
+    def move(hwnd, r):
+        moves.append(r)
+        rect['now'] = r
+        return True
+    kw = dict(get_rect=lambda h: rect['now'], get_work=lambda h: (0, 0, 1920, 1032), move=move)
+
+    saved = window_frame.toggle(1, None, **kw)
+    assert rect['now'] == (0, 0, 1920, 1032) and saved == (130, 130, 1224, 801)
+    saved = window_frame.toggle(1, saved, **kw)
+    assert rect['now'] == (130, 130, 1224, 801) and saved is None
+    # 옮기지 못하면 상태를 바꾸지 않는다(다음 클릭이 엉뚱한 쪽으로 가지 않게)
+    kw['move'] = lambda h, r: False
+    assert window_frame.toggle(1, None, **kw) is None
+    assert window_frame.toggle(1, (5, 5, 10, 10), **kw) == (5, 5, 10, 10)
+    api_src = open(os.path.join(ROOT, 'backend', 'api.py'), encoding='utf-8').read()
+    assert 'window_frame.toggle(' in api_src and 'toggle_fullscreen' not in api_src

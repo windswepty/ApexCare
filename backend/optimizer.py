@@ -3,6 +3,7 @@ APEX CARE - Optimizer (Pure Python)
 All system control via ctypes Win32 API or psutil.
 """
 import os
+import re
 import shutil
 import ctypes
 import ctypes.wintypes
@@ -121,7 +122,7 @@ _optimization_state = {
     "cancel_requested": False
 }
 
-# 원클릭이 정리하는 정크 분류(scan_junk_background 의 id). 1 = 임시 파일, 2 = Chrome 캐시.
+# 원클릭이 정리하는 정크 분류(scan_junk_background 의 id). 1 = 임시 파일, 2 = 브라우저 캐시(Chrome·Edge·웨일).
 # Windows Update 다운로드 캐시(3)와 Prefetch(4)는 뺐다. 업데이트가 받는 중에 캐시를 지우면 설치가 실패할 수
 # 있고, Prefetch 는 저장공간 화면에서도 기본으로 꺼 둔 항목이다. 둘 다 저장공간 화면에서 직접 고를 때만 지운다.
 DEEP_OPT_JUNK_CATEGORIES = (1, 2)
@@ -138,7 +139,7 @@ def get_deep_optimization_plan():
     return {
         "steps": [
             {"id": "junk", "name": "임시 파일·브라우저 캐시 정리",
-             "detail": "%TEMP%·Windows\\Temp 의 임시 파일과 Chrome 캐시를 지웁니다. 휴지통을 거치지 않아 "
+             "detail": "%TEMP%·Windows\\Temp 의 임시 파일과 브라우저(Chrome·Edge·웨일) 캐시를 지웁니다. 쿠키·로그인 정보는 지우지 않습니다. 휴지통을 거치지 않아 "
                        "되돌릴 수 없습니다. 사용 중인 파일은 건너뜁니다."},
             {"id": "ram", "name": "대기 메모리 비우기",
              "detail": "Windows 가 캐시로 잡아 둔 대기 메모리를 비웁니다. 실행 중인 프로그램은 건드리지 않습니다."},
@@ -365,6 +366,46 @@ def _empty_recycle_bin():
 def get_junk_scan_status():
     return _junk_scan_state
 
+# 브라우저 캐시를 찾을 곳: (표시 이름, %LOCALAPPDATA% 아래 User Data 경로)
+# 예전에는 Chrome 의 'Default' 프로필만 봤다. Windows 기본 브라우저인 Edge, 국내에서 많이 쓰는 웨일,
+# Chrome 의 다른 프로필(Profile 1 …)은 정리 대상이 아니었다.
+_BROWSERS = (
+    ('Chrome', r'Google\Chrome\User Data'),
+    ('Edge', r'Microsoft\Edge\User Data'),
+    ('Whale', r'Naver\Naver Whale\User Data'),
+)
+# 프로필 안의 캐시 폴더. 브라우저가 다시 만든다. 쿠키·로그인·방문 기록·북마크는 이 폴더들에 없다.
+_CACHE_SUBDIRS = ('Cache', 'Code Cache', 'GPUCache')
+
+
+def browser_cache_dirs():
+    """있는 브라우저 캐시 폴더 [(브라우저, 경로)]. 프로필은 Default 와 'Profile N' 만 본다."""
+    base = os.environ.get('LOCALAPPDATA')
+    out = []
+    if not base:
+        return out
+    for label, rel in _BROWSERS:
+        user_data = os.path.join(base, rel)
+        try:
+            profiles = [p for p in os.listdir(user_data) if p == 'Default' or re.fullmatch(r'Profile \d+', p)]
+        except OSError:
+            continue
+        for profile in sorted(profiles):
+            for sub in _CACHE_SUBDIRS:
+                path = os.path.join(user_data, profile, sub)
+                if os.path.isdir(path) and not _is_link_like(path):
+                    out.append((label, path))
+    return out
+
+
+def _browser_label(dirs):
+    names = []
+    for label, _ in dirs:
+        if label not in names:
+            names.append(label)
+    return ', '.join(names)
+
+
 def scan_junk_background():
     global _junk_scan_state
     _junk_scan_state["status"] = "running"
@@ -375,13 +416,14 @@ def scan_junk_background():
         system_temp = os.path.expandvars('%SystemRoot%\\Temp')
         prefetch = os.path.expandvars('%SystemRoot%\\Prefetch')
         soft_dist = os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download')
-        chrome_cache = os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache')
+        caches = browser_cache_dirs()
 
         temp_size = _get_dir_size_mb(user_temp, _junk_scan_state, max_files=2000)
         _junk_scan_state["progress"] = 25
         temp_size += _get_dir_size_mb(system_temp, _junk_scan_state, max_files=2000)
         _junk_scan_state["progress"] = 50
-        cache_size = _get_dir_size_mb(chrome_cache, _junk_scan_state, max_files=3000)
+        cache_size = round(sum(_get_dir_size_mb(p, _junk_scan_state) for _, p in caches), 2)
+        found = _browser_label(caches)
         _junk_scan_state["progress"] = 75
         soft_dist_size = _get_dir_size_mb(soft_dist, _junk_scan_state, max_files=1000)
         prefetch_size = _get_dir_size_mb(prefetch, _junk_scan_state, max_files=500)
@@ -391,7 +433,11 @@ def scan_junk_background():
 
         _junk_scan_state["data"] = [
             {"id": 1, "name": "Windows 임시 파일 (%TEMP%, Windows\\Temp)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치·업데이트·실행 중에 만들어진 임시 파일. 사용 중인 파일은 건너뜁니다"},
-            {"id": 2, "name": "웹 브라우저 캐시 (Chrome)", "sizeMB": cache_size, "category": "Browser", "selected": True, "description": "Chrome 브라우저가 저장한 이미지·스크립트 캐시. 쿠키와 로그인 정보는 지우지 않습니다"},
+            {"id": 2, "name": f"웹 브라우저 캐시 ({found})" if found else "웹 브라우저 캐시",
+             "sizeMB": cache_size, "category": "Browser", "selected": True,
+             "description": ("브라우저가 저장한 이미지·스크립트 캐시(모든 프로필). 쿠키·로그인·방문 기록은 지우지 않습니다. "
+                             "브라우저가 열려 있으면 사용 중인 파일은 건너뜁니다")
+                            if found else "Chrome·Edge·웨일 캐시를 찾지 못했습니다"},
             # 기본 해제. 원클릭 최적화도 이 항목은 뺀다. 업데이트를 받는 중에 지우면 설치가 실패하거나
             # 처음부터 다시 받는다. 예전 설명('이미 설치 완료된 … 잔여물')은 사실이 아니었다.
             {"id": 3, "name": "Windows Update 다운로드 캐시", "sizeMB": soft_dist_size, "category": "System", "selected": False, "description": "Windows Update 가 내려받은 설치 파일. 설치가 끝난 파일은 필요 없지만, 받는 중이거나 설치 대기 중인 업데이트는 다시 내려받게 됩니다"},
@@ -459,7 +505,6 @@ def clean_junk_background(category_ids, cancel_event):
         system_temp = os.path.expandvars('%SystemRoot%\\Temp')
         prefetch = os.path.expandvars('%SystemRoot%\\Prefetch')
         soft_dist = os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download')
-        chrome_cache = os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache')
         skipped_files_log = []
 
         def _clean_dir(path, max_files=5000):
@@ -531,7 +576,7 @@ def clean_junk_background(category_ids, cancel_event):
         if 1 in category_ids:
             target_dirs.extend([user_temp, system_temp])
         if 2 in category_ids:
-            target_dirs.append(chrome_cache)
+            target_dirs.extend(p for _, p in browser_cache_dirs())
 
         if 3 in category_ids:
             target_dirs.append(soft_dist)
@@ -956,7 +1001,7 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
                 "applied": False,
                 "tier": tier,
                 "changes": changes,
-                "message": "아래 항목이 바뀝니다. 복구 센터에서 되돌릴 수 있습니다. 전원 플랜은 바꾸지 않습니다(성능 모드에서 고릅니다). Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
+                "message": "아래 항목이 바뀝니다. '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다. 전원 플랜은 바꾸지 않습니다(성능 모드에서 고릅니다). Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
             }
 
         steps = []
@@ -985,7 +1030,7 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
         label = "저사양" if is_low_end else "고사양"
         if not failed:
             msg = (f"{label} 맞춤 튜닝을 적용했습니다. 서비스 시작 유형은 다음 부팅부터 반영되며, "
-                   "복구 센터에서 되돌릴 수 있습니다.")
+                   "'변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.")
         else:
             msg = (f"{label} 맞춤 튜닝 {len(steps)}개 항목 중 {len(failed)}개가 실패했습니다: "
                    f"{failed[0]['name']} — {failed[0]['detail']}")
@@ -1023,7 +1068,69 @@ RUN_LOCATIONS = {
              r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run", '모든 사용자'),
     'HKLM32': ('HKLM', winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32", '모든 사용자 (32비트)'),
+    # 시작프로그램 폴더의 바로 가기. Run 경로는 없다(None). 작업 관리자처럼 파일은 그대로 두고
+    # StartupApproved\StartupFolder 에 파일 이름으로 켜짐/꺼짐만 표시한다.
+    # 예전에는 이 항목들이 목록에 아예 없어, 작업 관리자에 보이는 시작 앱 일부를 이 앱에서 끌 수 없었다.
+    'FOLDER': ('HKCU', winreg.HKEY_CURRENT_USER, None, _APPROVED + r"\StartupFolder", '시작프로그램 폴더 (현재 사용자)'),
+    'FOLDER_ALL': ('HKLM', winreg.HKEY_LOCAL_MACHINE, None,
+                   r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder",
+                   '시작프로그램 폴더 (모든 사용자)'),
 }
+
+# 시작프로그램 폴더 위치: (User Shell Folders 하이브, 값 이름, 읽지 못할 때 쓸 경로)
+_SHELL_FOLDERS = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+_FOLDER_SOURCES = {
+    'FOLDER': (winreg.HKEY_CURRENT_USER, 'Startup',
+               ('APPDATA', r'Microsoft\Windows\Start Menu\Programs\Startup')),
+    'FOLDER_ALL': (winreg.HKEY_LOCAL_MACHINE, 'Common Startup',
+                   ('ProgramData', r'Microsoft\Windows\Start Menu\Programs\StartUp')),
+}
+
+
+def _startup_folder(tag):
+    """시작프로그램 폴더 경로. 찾지 못하면 None."""
+    hive, value_name, (env, rel) = _FOLDER_SOURCES[tag]
+    exists, value, _ = _reg_read(hive, _SHELL_FOLDERS, value_name)
+    if exists and isinstance(value, str) and value.strip():
+        path = os.path.expandvars(value.strip())
+    elif os.environ.get(env):
+        path = os.path.join(os.environ[env], rel)
+    else:
+        return None
+    return path if os.path.isdir(path) else None
+
+
+def _folder_entries(tag):
+    """시작프로그램 폴더의 항목 [(파일 이름, 전체 경로)]. desktop.ini 는 뺀다."""
+    folder = _startup_folder(tag)
+    if not folder:
+        return []
+    out = []
+    try:
+        for name in sorted(os.listdir(folder)):
+            full = os.path.join(folder, name)
+            if name.lower() == 'desktop.ini' or not os.path.isfile(full):
+                continue
+            out.append((name, full))
+    except OSError:
+        pass
+    return out
+
+
+def _entry_exists(tag, name):
+    """그 위치에 그 시작 프로그램이 지금 있는가(Run 값 또는 폴더의 파일)."""
+    loc = RUN_LOCATIONS[tag]
+    if loc[2] is None:
+        return any(n == name for n, _ in _folder_entries(tag))
+    return _reg_read(loc[1], loc[2], name)[0]
+
+
+def _entries(tag):
+    """위치 하나의 시작 프로그램 [(이름, 명령줄 또는 파일 경로)]."""
+    loc = RUN_LOCATIONS[tag]
+    if loc[2] is None:
+        return _folder_entries(tag)
+    return [(n, v) for n, v, _ in _reg_values(loc[1], loc[2])]
 
 _LEGACY_BACKUP = r"Software\APEXCARE\DisabledStartup"
 _LEGACY_ORIGIN = r"Software\APEXCARE\DisabledStartup\_origin"
@@ -1108,22 +1215,25 @@ def _legacy_target(origin):
         return None, '원래 위치 기록 형식이 올바르지 않습니다'
     tag, path = origin.split('|', 1)
     loc = RUN_LOCATIONS.get(tag)
-    if not loc or path.strip().lower() != loc[2].lower():
+    if not loc or not loc[2] or path.strip().lower() != loc[2].lower():
         return None, '원래 위치 기록이 허용된 시작 프로그램 위치가 아닙니다'
     return tag, True
 
 
 def get_startup_apps():
-    """Run 키 3곳의 시작 프로그램과 켜짐/꺼짐 상태, 그리고 구버전에서 끈 항목.
+    """Run 키 3곳·시작프로그램 폴더 2곳의 시작 프로그램과 켜짐/꺼짐 상태, 그리고 구버전에서 끈 항목.
 
-    레지스트리에서 읽은 사실만 담는다. 같은 이름도 위치가 다르면 따로 보여 준다(id 로 구분).
+    레지스트리·폴더에서 읽은 사실만 담는다. 같은 이름도 위치가 다르면 따로 보여 준다(id 로 구분).
     """
     apps = []
     for tag, loc in RUN_LOCATIONS.items():
-        for raw_name, value, _ in _reg_values(loc[1], loc[2]):
+        for raw_name, value in _entries(tag):
             state = _approved_state(tag, raw_name)
+            shown = _clean(raw_name)
+            if loc[2] is None and shown.lower().endswith('.lnk'):
+                shown = shown[:-4]                 # 작업 관리자처럼 바로 가기 확장자는 보이지 않는다(id 에는 파일 이름 그대로)
             apps.append({
-                "id": _make_id(tag, raw_name), "name": _clean(raw_name),
+                "id": _make_id(tag, raw_name), "name": shown,
                 "command": _clean(value) if isinstance(value, str) else str(value),
                 "location": tag, "locationLabel": loc[4],
                 "enabled": state != 'disabled', "legacy": False,
@@ -1262,7 +1372,7 @@ def toggle_startup_app(app_id, enabled):
             tag = m['tag']
 
         loc = RUN_LOCATIONS[tag]
-        if not _reg_read(loc[1], loc[2], name)[0]:
+        if not _entry_exists(tag, name):
             return {"success": False,
                     "message": f"'{shown}' 을 {loc[4]} 시작 프로그램에서 찾지 못했습니다. 이미 제거되었을 수 있습니다."}
 

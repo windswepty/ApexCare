@@ -798,6 +798,8 @@ def _sandbox_env():
         'LOCALAPPDATA': os.path.join(SANDBOX, 'AppData', 'Local'),
         'USERPROFILE': os.path.join(SANDBOX, 'home'),
         'HOME': os.path.join(SANDBOX, 'home'),
+        # 모든 사용자 시작프로그램 폴더 등이 여기 있다. 진짜 C:\ProgramData 를 읽지 않게 한다.
+        'ProgramData': os.path.join(SANDBOX, 'ProgramData'),
     }
     for k, v in dirs.items():
         os.makedirs(v, exist_ok=True)

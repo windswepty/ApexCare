@@ -252,6 +252,10 @@ class Api:
     def getDebloatList(self):
         return debloater.get_debloat_list()
         
+    def getDebloatInstallState(self):
+        """앱 항목별 설치 여부(읽기만). 화면이 없는 앱을 고르지 않게 한다."""
+        return debloater.get_install_state()
+
     def getDebloatStatus(self):
         return debloater.get_debloat_status()
         
@@ -385,18 +389,20 @@ class Api:
             self._window.minimize()
 
     def maximizeWindow(self):
-        """최대화 ↔ 이전 크기. 예전에는 전체 화면(작업 표시줄까지 덮음)으로 바꿔 버튼 설명과 달랐다."""
+        """최대화 ↔ 이전 크기.
+
+        예전에는 전체 화면으로 바꿨고, 그다음에는 Windows 최대화를 썼는데 테두리 없는 창이라 둘 다 작업 표시줄까지
+        덮었다. 창이 있는 모니터의 작업 영역으로 옮긴다(backend/window_frame.py).
+        """
         if not self._window:
             return
-        if getattr(self, '_maximized', False):
-            self._window.restore()
-            self._maximized = False
-        else:
-            self._window.maximize()
-            self._maximized = True
-
-    def _on_window_maximized(self, *args):
-        self._maximized = True
-
-    def _on_window_restored(self, *args):
-        self._maximized = False
+        from backend import window_frame
+        try:
+            hwnd = window_frame.find_own_window(self._window.title)
+            if hwnd:
+                self._restore_rect = window_frame.toggle(hwnd, getattr(self, '_restore_rect', None))
+                return
+        except Exception as e:
+            log.warning(f"창 크기를 바꾸지 못했습니다: {e}")
+        # 창을 찾지 못한 경우에만 pywebview 기본 동작을 쓴다
+        self._window.maximize()

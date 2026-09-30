@@ -121,6 +121,8 @@ foreach ($rk in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
                   'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
                   'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
                   'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32',
+                  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder',
+                  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder',
                   'HKCU:\Software\APEXCARE\DisabledStartup',
                   'HKCU:\Software\APEXCARE\DisabledStartup\_origin')) {
     Line "[시작 프로그램] $rk"

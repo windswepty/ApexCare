@@ -67,6 +67,8 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 - [ ] 1-3. APEX CARE 실행 → UAC 창이 뜬다(관리자 권한)
 - [ ] 1-3a. 대시보드: 켜자마자 CPU·GPU 는 "측정 중" 이다가 수 초 안에 숫자가 된다. 작업 관리자 성능 탭의 CPU %·GPU '3D'·
       메모리 '사용 중'·'사용 가능' 과 몇 % 안에서 같다. GPU 카운터가 없는 PC(가상 머신 등)는 "측정 불가" 로 보인다(0% 아님)
+- [ ] 1-3b. 제목 표시줄의 최대화 버튼 → 창이 작업 표시줄을 **가리지 않고** 화면을 채운다(모니터가 여럿이면 창이 있는 모니터).
+      다시 누르면 전의 위치·크기로 돌아간다
 - [ ] 1-4. 초기 설정 마법사가 뜬다. 맞춤 튜닝 **미리보기**에 바뀔 항목(SysMain 등)이 보이지만, **적용하지 않고** 닫는다
 - [ ] 1-5. 앱을 닫고 **스냅숏** `01-first-run` → **비교** `00-before-install` `01-first-run`
       기대: `[APEX CARE]` 부분(설정 파일 생김, `setup_wizard_done = True`)만 다르다. 전원·레지스트리·서비스는 같다
@@ -140,6 +142,8 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
       "다른 계정으로 실행 중" 이유로 거부되고 아무것도 지워지지 않는다
 - [ ] 5-10. 실패한 항목이 있으면 "완료" 가 아니라 무엇이 왜 실패했는지 나온다
 - [ ] 5-11. 앱 제거·되살리기 도중 창을 닫으려 하면 "기본 앱 제거·되살리기 진행 중" 안내가 나오고 닫히지 않는다
+- [ ] 5-12. 화면을 열면 앱 항목마다 "설치됨"·"설치되어 있지 않음" 이 `Get-AppxPackage -Name <패키지>` 결과와 같게 보이고,
+      설치되어 있지 않은 앱은 고를 수 없다('전체 선택' 에도 들어가지 않는다)
 
 ---
 
@@ -203,6 +207,9 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 8-3. 잠긴 `apex_locked.tmp` 는 건너뛰고, 그 기록이 `%APPDATA%\APEX_CARE_DATA\skipped_files.log` 에 있다.
       **바탕화면에 로그 파일이 생기지 않는다**. 결과 화면이 확보 용량(실제로 지운 파일 크기)과
       건너뛴 파일 수·용량을 보여준다. 정리 도중 다른 프로그램이 파일을 받아도 확보 용량이 0 으로 보이지 않는다
+- [ ] 8-3a. 브라우저 캐시 항목 이름에 설치된 브라우저(Chrome·Edge·Whale)가 보이고, 크기가 각 브라우저의
+      `%LOCALAPPDATA%\…\User Data\<Default|Profile N>\Cache·Code Cache·GPUCache` 합계와 같다. 정리 뒤에도
+      브라우저의 로그인·쿠키·방문 기록·북마크는 그대로다(브라우저를 열어 확인)
 - [ ] 8-4. `$lock.Close()` 로 잠금을 푼다
 - [ ] 8-5. 정리 도중 창을 닫으려 하면 "진행 중" 안내가 나온다
 - [ ] 8-6. 대시보드 **원클릭 최적화** → 시작 전에 확인 창이 뜨고 4단계(임시 파일·브라우저 캐시, 대기 메모리, DNS, 디스크 최적화)와
@@ -219,13 +226,16 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 **스냅숏** `09-before`
 
 - [ ] 9-1. 두 항목을 앱에서 끔 → **Run 값은 그대로** 남고 `Explorer\StartupApproved\Run` 에 `hex:03...` 값이 생긴다.
-      작업 관리자 '시작 앱' 탭과 설정 → 앱 → 시작 프로그램에도 **사용 안 함** 으로 보인다. 복구 센터에 두 항목이 나온다
+      작업 관리자 '시작 앱' 탭과 설정 → 앱 → 시작 프로그램에도 **사용 안 함** 으로 보인다. '변경 내역 · 되돌리기' 에 '시작 프로그램 켜기·끄기' 로 두 항목이 나온다
 - [ ] 9-2. 앱에서 다시 켬 → **비교** `09-before` 와 같다(StartupApproved 값까지 원래대로)
-- [ ] 9-3. 다시 끈 뒤 복구 센터 "전부 원래대로" → 두 항목이 켜지고 `09-before` 와 같다
+- [ ] 9-3. 다시 끈 뒤 '변경 내역 · 되돌리기' 의 "전부 원래대로" → 두 항목이 켜지고 `09-before` 와 같다
 - [ ] 9-4. 작업 관리자에서 끈 항목을 앱에서 켰다가 다시 끄면 `StartupApproved` 값이 작업 관리자가 쓴 값과 **같은 바이트** 로 돌아간다
 - [ ] 9-5. 예전 버전 흉내: `reg add HKCU\Software\APEXCARE\DisabledStartup /v ApexOld /d "C:\Windows\System32\notepad.exe"` 와
       `reg add HKCU\Software\APEXCARE\DisabledStartup\_origin /v ApexOld /d "HKLM|SOFTWARE\Microsoft\Windows\CurrentVersion\Run"` →
       목록에 '예전 버전에서 끔' 으로 보인다 → 켬 → `HKLM\...\Run` 에 되살아나 켜지고 `APEXCARE` 의 기록이 사라진다
+- [ ] 9-5a. 시작프로그램 폴더(`shell:startup`)에 메모장 바로 가기를 넣는다 → 목록에 '시작프로그램 폴더 (현재 사용자)' 로
+      이름만(.lnk 없이) 보인다 → 끔 → **바로 가기 파일은 그대로** 있고 `Explorer\StartupApproved\StartupFolder` 에 꺼짐 값이 생긴다.
+      작업 관리자 '시작 앱' 에도 사용 안 함으로 보인다 → 켬 → **비교** `09-before` 와 같다. 끝나면 바로 가기를 지운다
 - [ ] 9-6. 목록에 "영향도"·"부팅 +1.4s" 같은 지어낸 수치가 없다
 - [ ] 9-7. 끝나면 테스트 항목(ApexTestUser·ApexTestMachine·ApexOld)을 `reg delete` 로 지운다
 

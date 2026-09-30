@@ -307,6 +307,51 @@ def startup():
         reg_del('HKLM', RUN_M, 'ApexSbxMachine')
 
 
+@check('시작 프로그램: 시작프로그램 폴더의 바로 가기 끄기·켜기·전부 원래대로 (파일은 그대로)')
+def startup_folder():
+    from backend import optimizer, perf_modes
+    problems = []
+    created = []
+    try:
+        for tag, name in (('FOLDER', 'ApexSbxFolder.lnk'), ('FOLDER_ALL', 'ApexSbxFolderAll.lnk')):
+            folder = optimizer._startup_folder(tag)
+            if not folder:
+                problems.append(f'{tag} 시작프로그램 폴더를 찾지 못했습니다')
+                continue
+            path = os.path.join(folder, name)
+            with open(path, 'wb') as f:
+                f.write(b'apex sandbox check')          # 점검용 빈 파일(실행되지 않는다)
+            created.append((tag, name, path))
+        base = snapshot('startup_folder_base')
+        for tag, name, path in created:
+            r = optimizer.toggle_startup_app(f'{tag}:{name}', False)
+            if not r.get('success'):
+                problems.append(f'{tag}:{name} 끄기 실패: {r.get("message")}')
+            if not os.path.exists(path):
+                problems.append(f'끄기가 바로 가기 파일을 지웠습니다: {path}')
+        state = {a['id']: a['enabled'] for a in optimizer.get_startup_apps()}
+        for tag, name, _ in created:
+            if state.get(f'{tag}:{name}') is not False:
+                problems.append(f'끈 뒤 목록 상태가 다릅니다: {tag}:{name} → {state.get(f"{tag}:{name}")}')
+        for tag, name, _ in created:
+            optimizer.toggle_startup_app(f'{tag}:{name}', True)
+        changes = diff(base, snapshot('startup_folder_on_again'))
+        if changes:
+            problems.append('다시 켠 뒤 상태가 처음과 다릅니다')
+        for tag, name, _ in created:
+            optimizer.toggle_startup_app(f'{tag}:{name}', False)
+        r = perf_modes.revert_everything()
+        if not r.get('success'):
+            problems.append(f"전부 원래대로 실패: {r.get('message')}")
+        return verdict(problems, changes + diff(base, snapshot('startup_folder_after_revert')))
+    finally:
+        for _, _, path in created:
+            try:
+                os.remove(path)                          # 이 점검이 만든 파일만 지운다
+            except OSError:
+                pass
+
+
 @check('시작 프로그램: 예전 버전이 숨긴 항목을 원래 위치로 되살림')
 def startup_legacy():
     from backend import optimizer, system_state as ss

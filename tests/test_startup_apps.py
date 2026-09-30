@@ -131,3 +131,66 @@ def test_tampered_legacy_origin_is_refused(pc):
     r = optimizer.toggle_startup_app('LEGACY:Evil', True)
     assert r['success'] is False
     assert not [w for w in REGISTRY.writes if w[0] == 'set']
+
+
+# ── 시작프로그램 폴더 ─────────────────────────────────────
+APP_FOLDER_U = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder'
+APP_FOLDER_M = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder'
+
+
+@pytest.fixture
+def folders(pc, tmp_path, monkeypatch):
+    """시작프로그램 폴더 두 곳(임시 폴더). 바로 가기 파일은 이 테스트가 만든 빈 파일이다."""
+    user, common = tmp_path / 'Startup', tmp_path / 'CommonStartup'
+    user.mkdir()
+    common.mkdir()
+    (user / 'Notes.lnk').write_bytes(b'lnk')
+    (user / 'desktop.ini').write_bytes(b'[.ShellClassInfo]')          # 목록에 나오면 안 된다
+    (common / 'Vendor Agent.lnk').write_bytes(b'lnk')
+    monkeypatch.setattr(optimizer, '_startup_folder',
+                        lambda tag: str(user) if tag == 'FOLDER' else str(common))
+    return {'user': user, 'common': common, 'dump': _dump()}
+
+
+def test_startup_folder_items_are_listed_like_task_manager(folders):
+    apps = {a['id']: a for a in optimizer.get_startup_apps()}
+    assert 'FOLDER:Notes.lnk' in apps and 'FOLDER_ALL:Vendor Agent.lnk' in apps
+    assert not any('desktop.ini' in i for i in apps)
+    assert apps['FOLDER:Notes.lnk']['enabled'] is True
+    assert apps['FOLDER:Notes.lnk']['command'].endswith('Notes.lnk')
+    assert apps['FOLDER:Notes.lnk']['name'] == 'Notes'                 # 작업 관리자처럼 .lnk 없이
+
+
+def test_disabling_a_folder_item_keeps_the_file_and_marks_startupapproved(folders):
+    r = optimizer.toggle_startup_app('FOLDER:Notes.lnk', False)
+
+    assert r['success'], r
+    assert (folders['user'] / 'Notes.lnk').exists()                    # 파일은 그대로(작업 관리자와 같은 방식)
+    flag = REGISTRY.value('HKCU', APP_FOLDER_U, 'Notes.lnk')
+    assert isinstance(flag, bytes) and flag[0] & 1
+    assert _app('FOLDER:Notes.lnk')['enabled'] is False
+
+    assert optimizer.toggle_startup_app('FOLDER:Notes.lnk', True)['success']
+    assert _dump() == folders['dump'] and ss.pending_changes() == {}   # 원래 없던 값·키는 지워진다
+
+
+@pytest.mark.usefixtures('as_admin')
+def test_revert_everything_turns_folder_items_back_on(folders):
+    assert optimizer.toggle_startup_app('FOLDER_ALL:Vendor Agent.lnk', False)['success']
+    assert REGISTRY.value('HKLM', APP_FOLDER_M, 'Vendor Agent.lnk')[0] & 1
+    assert perf_modes.revert_everything()['success']
+    assert _dump() == folders['dump']
+
+
+def test_removed_folder_item_is_reported_not_toggled(folders):
+    (folders['user'] / 'Notes.lnk').unlink()
+    r = optimizer.toggle_startup_app('FOLDER:Notes.lnk', False)
+    assert r['success'] is False and '찾지 못했습니다' in r['message']
+    assert REGISTRY.writes == []
+
+
+def test_folder_location_cannot_be_used_as_legacy_origin(pc):
+    # 예전 버전 기록은 Run 경로만 받는다. 폴더 위치 이름으로 위조한 기록은 거부한다.
+    REGISTRY.seed('HKCU', LEGACY, 'X', r'C:\x.exe', fakewin.REG_SZ)
+    REGISTRY.seed('HKCU', LEGACY + r'\_origin', 'X', 'FOLDER|anything', fakewin.REG_SZ)
+    assert optimizer.toggle_startup_app('LEGACY:X', True)['success'] is False

@@ -68,9 +68,9 @@ DEBLOAT_SAFE_LIST = [
      "packages": ["Microsoft.XboxApp"],
      "note": "게임 로그인, Xbox Game Bar, 새 Xbox 앱은 건드리지 않습니다. " + _APPX_NOTE},
     {"id": "telemetry", "name": "Windows 원격 분석 (Telemetry) 줄이기", "kind": "policy",
-     "note": "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 '사용 안 함'으로 바꿉니다(다음 부팅부터). 복구 센터에서 되돌릴 수 있습니다."},
+     "note": "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 '사용 안 함'으로 바꿉니다(다음 부팅부터). '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다."},
     {"id": "cortana", "name": "Cortana 끄기", "kind": "policy",
-     "note": "Cortana 사용 안 함 정책을 켭니다. 복구 센터에서 되돌릴 수 있습니다."},
+     "note": "Cortana 사용 안 함 정책을 켭니다. '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다."},
 ]
 for _it in DEBLOAT_SAFE_LIST:
     # UI 가 쓰는 키. reversible = 복구 센터에서 되돌림, restorable = 이 화면에서 되살림(설치 파일이 남아 있을 때)
@@ -613,6 +613,32 @@ def _apply_cortana_policy():
 
 def get_debloat_list():
     return DEBLOAT_SAFE_LIST
+
+
+def get_install_state():
+    """앱 항목마다 이 계정에 설치돼 있는지. 읽기만 한다(Get-AppxPackage, 정확한 이름).
+
+    반환: {'ok', 'items': {항목 id: 'installed'|'not_installed'|'unknown'}, 'error'}
+    예전에는 설치 여부를 보여 주지 않아, 없는 앱을 골라 실행하면 '변경 없음' 만 돌아왔다.
+    확인하지 못한 항목은 'unknown' 으로 둔다(없다고 단정하지 않는다).
+    """
+    appx = [x for x in DEBLOAT_SAFE_LIST if x['kind'] == 'appx']
+    names = sorted({p for x in appx for p in x['packages']})
+    ok, rows, err = _query_packages(names)
+    if not ok:
+        return {'ok': False, 'items': {x['id']: 'unknown' for x in appx}, 'error': err}
+    installed = {r.get('query') for r in rows if not r.get('error') and r.get('fullName')}
+    failed = {r.get('query') for r in rows if r.get('error')}
+    items = {}
+    for x in appx:
+        pk = set(x['packages'])
+        if pk & installed:
+            items[x['id']] = 'installed'
+        elif pk & failed:
+            items[x['id']] = 'unknown'
+        else:
+            items[x['id']] = 'not_installed'
+    return {'ok': True, 'items': items, 'error': None}
 
 
 def get_debloat_status():

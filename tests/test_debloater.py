@@ -160,6 +160,22 @@ def test_wildcards_are_never_sent_to_powershell(appx):
     assert appx.ran('query') == [('query', ['Microsoft.BingNews'])]
 
 
+def test_install_state_is_read_only_and_exact(appx):
+    appx.add('Microsoft.BingWeather')                     # 'MSN 뉴스·날씨' 중 하나만 있어도 설치됨
+    appx.add('Microsoft.SkypeApp')
+    r = debloater.get_install_state()
+    assert r['ok'] and r['items']['bing'] == 'installed' and r['items']['skype'] == 'installed'
+    assert r['items']['solitaire'] == 'not_installed'
+    assert 'telemetry' not in r['items']                   # 정책 항목은 설치 여부가 없다
+    assert appx.ran('remove') == [] and appx.ran('register') == []     # 읽기만 한다
+
+
+def test_install_state_unknown_is_not_reported_as_missing(appx, monkeypatch):
+    monkeypatch.setattr(debloater, '_run_ps_json', lambda *a: (False, [], 'PowerShell 시간 초과'))
+    r = debloater.get_install_state()
+    assert r['ok'] is False and set(r['items'].values()) == {'unknown'}
+
+
 def test_not_installed_is_not_reported_as_removed(appx):
     debloater._run_debloater(['solitaire'])
     st = debloater.get_debloat_status()
