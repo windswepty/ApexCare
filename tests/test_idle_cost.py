@@ -150,14 +150,57 @@ def test_stats_report_clock_fields():
     assert 'cpuClockMHz' in _read('src/components/PerformanceModes.jsx')
 
 
-def test_stale_cpu_usage_is_replaced_by_a_real_average(monkeypatch):
-    # 수집기가 쉬는 동안 남은 옛 값을 대시보드가 막 열렸을 때 보여 주지 않는다
+def test_stale_cpu_usage_is_not_shown_as_a_measurement(monkeypatch):
+    # 수집기가 쉬는 동안 남은 옛 값을 대시보드가 막 열렸을 때 보여 주지 않는다.
+    # 예전에는 이때 psutil.cpu_percent(interval=None) 을 불렀는데, psutil 7 은 기준점을 스레드마다 두고
+    # pywebview 는 요청마다 새 스레드를 쓰므로 늘 0% 가 나왔다. 이제 '측정 중'(None)이다.
+    calls = []
     monkeypatch.setattr(system_monitor, '_cpu_usage', 88)
     monkeypatch.setattr(system_monitor, '_cpu_sample', [real_time.time() - 60])
-    monkeypatch.setattr(system_monitor.psutil, 'cpu_percent', lambda interval=None: 12.0 if interval is None else 99.0)
-    assert system_monitor._fresh_cpu_usage() == 12.0
+    monkeypatch.setattr(system_monitor.psutil, 'cpu_percent', lambda interval=None: calls.append(interval) or 0.0)
+    assert system_monitor._fresh_cpu_usage() is None and calls == []
     monkeypatch.setattr(system_monitor, '_cpu_sample', [real_time.time()])
     assert system_monitor._fresh_cpu_usage() == 88
+
+
+def test_psutil_cpu_percent_baseline_is_per_thread():
+    # 위 테스트가 왜 필요한지의 근거: 다른 스레드에서 처음 부르면 기준점이 없어 의미 없는 값이 나온다.
+    import psutil
+    src = __import__('inspect').getsource(psutil.cpu_percent)
+    assert '_last_cpu_times.get(tid)' in src
+
+
+def test_gpu_usage_is_the_busiest_adapter_not_the_sum_of_all():
+    s = {
+        'pid_100_luid_0x00000000_0x0000A1_phys_0_eng_0_engtype_3D': 30.0,
+        'pid_200_luid_0x00000000_0x0000A1_phys_0_eng_0_engtype_3D': 20.0,     # 외장: 50
+        'pid_300_luid_0x00000000_0x0000B2_phys_0_eng_0_engtype_3D': 40.0,     # 내장: 40
+        'pid_300_luid_0x00000000_0x0000B2_phys_0_eng_3_engtype_VideoDecode': 90.0,
+    }
+    assert system_monitor.gpu_3d_usage(s) == 50           # 예전 방식(전부 합)은 90
+    assert system_monitor.gpu_3d_usage({}) == 0
+    assert system_monitor.gpu_3d_usage({'pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D': 170.0}) == 100
+
+
+def test_gpu_usage_is_none_until_measured_and_when_unavailable(monkeypatch):
+    monkeypatch.setattr(system_monitor, '_gpu_usage', 42)
+    monkeypatch.setattr(system_monitor, '_gpu_state', 'ok')
+    monkeypatch.setattr(system_monitor, '_gpu_sample', [real_time.time() - 60])
+    assert system_monitor._fresh_gpu_usage() is None          # 오래된 값
+    monkeypatch.setattr(system_monitor, '_gpu_sample', [real_time.time()])
+    assert system_monitor._fresh_gpu_usage() == 42
+    monkeypatch.setattr(system_monitor, '_gpu_state', 'unavailable')
+    assert system_monitor._fresh_gpu_usage() is None          # 이 PC 에서는 읽을 수 없음(0% 로 꾸미지 않음)
+
+
+def test_failed_stats_are_not_filled_with_zeros(monkeypatch):
+    from backend.api import Api
+    monkeypatch.setattr(system_monitor, 'get_system_stats', lambda: None)
+    r = Api.getSystemStats(None)
+    assert r.get('error') and 'cpuUsage' not in r and 'ramTotalGB' not in r
+    dash = _read('src/components/Dashboard.jsx')
+    assert 'useState(0)' not in dash.split('const [totalFreed')[0] + dash.split('const [totalFreed')[1].split('\n', 1)[1]
+    assert 'fill(0)' not in dash and 'stats.cpuUsage || 0' not in dash
 
 
 def test_numbers_shown_match_their_meaning():

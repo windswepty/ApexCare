@@ -25,6 +25,8 @@ export default function RestoreCenter({ addToast, active = true }) {
   const [pending, setPending] = useState({ count: 0, groups: {} });
   const [procCount, setProcCount] = useState(0);
   const [removedApps, setRemovedApps] = useState(0);   // 'Windows 기본 앱 정리' 에서 제거한 앱 수(되살리기는 그 화면에서)
+  // 'loading' → 'ok' | 'error'. 기록을 읽기 전·읽지 못했을 때 '되돌릴 변경이 없습니다' 라고 말하지 않는다.
+  const [loadState, setLoadState] = useState('loading');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -32,7 +34,15 @@ export default function RestoreCenter({ addToast, active = true }) {
     const a = api();
     if (!a) return;
     try {
-      if (a.getPendingSystemChanges) setPending(await a.getPendingSystemChanges());
+      if (a.getPendingSystemChanges) {
+        const p = await a.getPendingSystemChanges();
+        if (p && typeof p.count === 'number') {
+          setPending(p);
+          setLoadState('ok');
+        } else {
+          setLoadState('error');
+        }
+      }
       if (a.getAdjustedProcessCount) {
         const c = await a.getAdjustedProcessCount();
         setProcCount(c?.count || 0);
@@ -43,6 +53,7 @@ export default function RestoreCenter({ addToast, active = true }) {
       }
     } catch (e) {
       console.error('변경 내역 조회 실패:', e);
+      setLoadState((s) => (s === 'ok' ? s : 'error'));
     }
   }, []);
 
@@ -91,7 +102,7 @@ export default function RestoreCenter({ addToast, active = true }) {
     refresh();
   };
 
-  const nothingToRevert = pending.count === 0 && procCount === 0;
+  const nothingToRevert = loadState === 'ok' && pending.count === 0 && procCount === 0;
   const groups = Object.entries(pending.groups || {});
 
   return (
@@ -107,7 +118,13 @@ export default function RestoreCenter({ addToast, active = true }) {
         </p>
       </div>
 
-      {nothingToRevert ? (
+      {loadState !== 'ok' ? (
+        <div className="glass-panel p-8 text-center text-sm">
+          {loadState === 'loading'
+            ? <p className="text-gray-500 flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 변경 기록을 읽는 중…</p>
+            : <p className="text-rose-400">변경 기록을 읽지 못했습니다. 잠시 뒤 다시 확인합니다.</p>}
+        </div>
+      ) : nothingToRevert ? (
         <div className="glass-panel p-8 text-center">
           <ShieldCheck className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
           <p className="font-bold text-black dark:text-white">되돌릴 설정 변경이 없습니다.</p>

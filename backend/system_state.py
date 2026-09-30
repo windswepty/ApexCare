@@ -699,7 +699,9 @@ def _restore(predicate):
                 r = fn(None, ctypes.byref(pg), ctypes.byref(sg), ctypes.byref(stg),
                        ctypes.c_ulong(e['value']))
                 if r != 0:
-                    failed.append({'key': key, 'reason': f'쓰기 오류 {r}'})
+                    why = (f"값을 바꿨던 전원 플랜({KNOWN_PLANS.get(e['plan'], e['plan'])})이 이 PC 에서 삭제되어 되돌릴 수 없습니다"
+                           if r == _ERROR_FILE_NOT_FOUND else f'쓰기 오류 {r}')
+                    failed.append({'key': key, 'reason': why})
                     continue
                 now = _read_power_value(e['plan'], e['sub'], e['setting'], e['ac'])
                 if now != e['value']:
@@ -713,7 +715,10 @@ def _restore(predicate):
                 if e.get('value'):
                     res = _powrprof().PowerSetActiveScheme(None, ctypes.byref(_guid(e['value'])))
                     if res != 0:
-                        failed.append({'key': key, 'reason': f'플랜 복구 실패 {res}'})
+                        name = KNOWN_PLANS.get(str(e['value']).lower(), e['value'])
+                        failed.append({'key': key, 'reason': (
+                            f"원래 전원 플랜({name})이 이 PC 에서 삭제되어 되돌릴 수 없습니다. Windows 설정에서 플랜을 고르세요"
+                            if res == _ERROR_FILE_NOT_FOUND else f'플랜 복구 실패 {res}')})
                         continue
                     if active_plan_guid() != str(e['value']).lower():
                         failed.append({'key': key, 'reason': '플랜을 되돌린 뒤 확인에 실패했습니다'})

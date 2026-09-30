@@ -205,7 +205,7 @@ export default function Debloater({ addToast }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="font-bold text-black dark:text-white">정리할 수 있는 항목 ({items.length})</h3>
+            <h3 className="font-bold text-black dark:text-white">정리할 수 있는 항목{items.length ? ` (${items.length})` : ''}</h3>
             <button 
               onClick={selectAll}
               className="text-xs font-bold text-cyan-500 hover:text-cyan-400 transition-colors"

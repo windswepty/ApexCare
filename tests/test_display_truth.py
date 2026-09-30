@@ -398,3 +398,41 @@ def test_ui_wording_matches_what_the_features_do():
     assert 'F12' not in _code('src/components/ErrorBoundary.jsx')
     # 설치 RAM 으로 사양을 판정한다(8GB PC 가 7.8GB 로 읽혀 저사양이 되지 않게)
     assert 'ramInstalledGB' in _code('src/components/InitialSetupWizard.jsx')
+
+
+# ── 읽기 전 가짜 기본값 ──────────────────────────────────
+
+def test_screens_do_not_claim_states_before_reading_them():
+    # 받기 전에 '0개'·'자동 감지 꺼짐'·'되돌릴 변경이 없습니다' 를 보여 주지 않는다
+    game = _code('src/components/GameBooster.jsx')
+    assert 'useState(null)' in game and "!status ? '확인 중…'" in game
+    restore = _code('src/components/RestoreCenter.jsx')
+    assert "loadState === 'ok' && pending.count === 0" in restore
+    startup = _code('src/components/StartupManager.jsx')
+    assert "loadState === 'loading' ? '…'" in startup
+    assert "useState('확인 중…')" in _code('src/components/Header.jsx')
+
+
+def test_failed_system_stats_are_not_shown_as_zero():
+    for rel in ('src/App.jsx', 'src/components/RamBooster.jsx', 'src/components/Dashboard.jsx'):
+        src = _code(rel)
+        assert "cpuModel !== 'Error'" not in src, rel
+        assert '!stats.error' in src, rel
+
+
+# ── 설치 마법사 ────────────────────────────────────────
+
+def test_installer_progress_is_real_and_failures_are_reported():
+    src = _read('tools/setup_wizard.py')
+    # 예전: 'Simulate some progress for realism' 로 잠깐씩 멈추며 막대를 채웠다
+    assert 'time.sleep' not in src and 'Simulate' not in src
+    assert 'def copy_with_progress' in src and 'on_bytes(done, total)' in src
+    # 제거 프로그램이 없으면 설치하지 않고, 등록 실패를 삼키지 않는다
+    assert 'if missing:' in src
+    run = src[src.index('class InstallWorker'):src.index('class LicensePage')]
+    assert 'register_uninstall(install_dir' in run
+    reg = src[src.index('def register_uninstall'):src.index('class InstallWorker')]
+    assert 'except' not in reg                      # 실패는 부르는 쪽으로 올린다
+    # 사용자에게 보이는 화면 이름이 앱과 같다
+    un = _read('tools/uninstall.py')
+    assert "'Windows 기본 앱 정리'" in un and '디블로터 화면' not in un

@@ -32,11 +32,23 @@ def _measure(seconds):
 
 
 def _current_mode():
+    """지금 실제로 걸려 있는 모드. (모드, 모를 때의 이유) — 이유가 있으면 측정 결과를 어느 모드에도 두지 않는다.
+
+    저장된 모드만 보면 틀린다. 게임 부스트가 게임 동안 게이밍 모드를 임시로 쓰는 중이면 실제는 게이밍이고,
+    앱 밖에서 전원 플랜이 바뀌었으면(inSync=False) 어느 모드의 결과인지 알 수 없다.
+    예전에는 이런 때에도 저장된 모드 이름으로 결과를 남겨 비교표가 틀렸다.
+    """
     try:
         from backend import perf_modes
-        return perf_modes.get_mode().get('mode') or 'standard'
-    except Exception:
-        return 'standard'
+        info = perf_modes.get_mode()
+    except Exception as e:
+        return None, f'지금 모드를 읽지 못했습니다: {e}'
+    if info.get('boostOverride'):
+        return 'gaming', None
+    if not info.get('inSync', True):
+        return None, ("지금 전원 설정이 선택한 모드와 달라 어느 모드의 결과인지 알 수 없습니다. "
+                      "성능 모드를 다시 눌러 맞춘 뒤 측정해 주세요.")
+    return info.get('mode') or 'standard', None
 
 
 def get_results():
@@ -55,7 +67,9 @@ def run(seconds=BENCH_SECONDS):
         return {'success': False, 'busy': True, 'message': '이미 측정 중입니다.'}
     try:
         from backend import system_monitor
-        mode = _current_mode()
+        mode, why = _current_mode()
+        if why:
+            return {'success': False, 'message': why}
         system_monitor.note_demand()                 # 측정 동안 클럭 수집기가 깨어 있게 한다
         _measure(0.3)                                # 부스트가 올라올 시간을 준다
         score = _measure(seconds)

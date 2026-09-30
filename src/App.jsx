@@ -81,7 +81,7 @@ export default function App() {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
           const stats = await window.pywebview.api.getSystemStats();
-          if (stats && stats.cpuModel !== 'Error') {
+          if (stats && !stats.error) {
             // 대시보드가 잠깐 보였다 마법사로 바뀌지 않도록 준비 완료 전에 먼저 확인한다.
             // 읽지 못하면 띄우지 않는다(마법사의 튜닝은 선택 사항이고, 설정 창에서 다시 열 수 있다).
             if (typeof window.pywebview.api.getSetupWizardDone === 'function') {

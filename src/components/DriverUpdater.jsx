@@ -32,6 +32,18 @@ function useRepairTask(task, addToast) {
   const [elapsed, setElapsed] = useState(0);
   const [detail, setDetail] = useState({ summary: '', error: '' });
 
+  // 화면을 새로 띄웠을 때(오류 화면에서 다시 불러오기 등) 이미 돌고 있거나 끝난 작업이 있으면 그 상태를 보여 준다.
+  // 예전에는 늘 '대기' 로 시작해, 돌고 있는 검사를 다시 누르면 '이미 실행 중' 만 떴다.
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve(task.status()).then((st) => {
+      if (!alive || !st || st.status === 'idle') return;
+      if (st.status !== 'running') setDetail({ summary: st.summary || '', error: st.error || '' });
+      setStatus(st.status);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [task]);
+
   useEffect(() => {
     if (status !== 'running') return undefined;
     const interval = setInterval(async () => {

@@ -29,7 +29,7 @@ export default function RamBooster({ addToast, active = true }) {
       if (typeof api.getSystemStats === 'function') {
         try {
           const stats = await api.getSystemStats();
-          if (stats && stats.cpuModel !== 'Error' && Number(stats.ramTotalGB) > 0) {
+          if (stats && !stats.error && Number(stats.ramTotalGB) > 0) {
             const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
             setRam({
               totalGB: num(stats.ramTotalGB),

@@ -21,7 +21,7 @@ export default function Header() {
   // 가동 시간은 '마지막으로 받은 값 + 받은 뒤 흐른 시간' 으로 센다. 백엔드 값을 받기 전에는 표시하지 않는다.
   const [uptimeBase, setUptimeBase] = useState(null);   // { sec, at }
   const [now, setNow] = useState(() => Date.now());
-  const [osLabel, setOsLabel] = useState('Windows');
+  const [osLabel, setOsLabel] = useState('확인 중…');
   const [cpuLabel, setCpuLabel] = useState('확인 중…');
   // 지금 CPU 가 실제로 도는 속도. 성능 모드를 바꾸면 몇 초 안에 이 숫자가 달라진다.
   const [clock, setClock] = useState({ mhz: null, base: null });

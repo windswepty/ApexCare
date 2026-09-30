@@ -1,7 +1,6 @@
 import sys
 import os
 import shutil
-import time
 from PyQt6.QtWidgets import (QApplication, QWizard, QWizardPage, QVBoxLayout, 
                              QLabel, QRadioButton, QTextEdit, QMessageBox, 
                              QProgressBar, QCheckBox)
@@ -12,6 +11,50 @@ from PyQt6.QtGui import QIcon
 # package.json 의 version 과 다르면 빌드를 멈춘다.
 APP_VERSION = '1.0.1'
 
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE"
+
+
+def copy_with_progress(src, dst, on_bytes):
+    """src 를 dst 로 복사한다. 옆에 임시 파일로 다 쓴 뒤 바꿔 끼워, 도중에 실패해도 반쯤 쓴 exe 가 남지 않는다.
+
+    on_bytes(복사한 바이트, 전체 바이트) 를 실제로 쓴 만큼 부른다(진행률은 이 값으로만 움직인다).
+    """
+    total = os.path.getsize(src)
+    tmp = dst + ".new"
+    done = 0
+    try:
+        with open(src, "rb") as fi, open(tmp, "wb") as fo:
+            while True:
+                chunk = fi.read(1 << 20)
+                if not chunk:
+                    break
+                fo.write(chunk)
+                done += len(chunk)
+                on_bytes(done, total)
+        shutil.copystat(src, tmp)
+        os.replace(tmp, dst)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)                  # 이 함수가 만든 임시 파일만 지운다
+    return total
+
+
+def register_uninstall(install_dir, app_exe, size_bytes):
+    """'앱 및 기능' 에 등록한다. 실패하면 예외를 올린다(등록 없이 '설치 완료' 라고 하지 않는다)."""
+    import winreg
+    uninstaller_exe = os.path.join(install_dir, "APEX CARE Uninstaller.exe")
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "APEX CARE")
+        winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, f'"{uninstaller_exe}"')
+        winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, install_dir)
+        winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, app_exe)
+        winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "APEX CARE Team")
+        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, APP_VERSION)
+        winreg.SetValueEx(key, "EstimatedSize", 0, winreg.REG_DWORD, max(1, size_bytes // 1024))
+        winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
+        winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
+
+
 class InstallWorker(QThread):
     progress_update = pyqtSignal(int)
     finished_install = pyqtSignal(bool, str)
@@ -21,39 +64,45 @@ class InstallWorker(QThread):
         self.resource_path_func = resource_path_func
 
     def run(self):
+        # 진행률은 실제로 복사한 바이트로만 움직인다. 예전에는 '그럴듯해 보이게' 일부러 잠깐씩 멈추며 막대를 채웠다.
         try:
-            # Simulate some progress for realism
-            for i in range(1, 40):
-                time.sleep(0.02)
-                self.progress_update.emit(i)
-                
             payload_path = self.resource_path_func("APEX CARE Payload.exe")
             uninstaller_path = self.resource_path_func("APEX CARE Uninstaller.exe")
-            if not os.path.exists(payload_path):
-                self.finished_install.emit(False, "설치 패키지를 찾을 수 없습니다!")
+            # 제거 프로그램이 없으면 설치하지 않는다. 예전에는 조용히 건너뛰어, 지울 방법이 없는 설치가 됐다.
+            missing = [os.path.basename(p) for p in (payload_path, uninstaller_path) if not os.path.exists(p)]
+            if missing:
+                self.finished_install.emit(False, f"설치 패키지가 손상되었습니다(없는 파일: {', '.join(missing)}).")
                 return
 
             install_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "APEX CARE")
-            if not os.path.exists(install_dir):
-                os.makedirs(install_dir)
-                
-            for i in range(40, 70):
-                time.sleep(0.02)
-                self.progress_update.emit(i)
-
+            os.makedirs(install_dir, exist_ok=True)
             target_path = os.path.join(install_dir, "APEX CARE.exe")
-            shutil.copy2(payload_path, target_path)
-            
-            if os.path.exists(uninstaller_path):
-                shutil.copy2(uninstaller_path, os.path.join(install_dir, "APEX CARE Uninstaller.exe"))
-            
-            for i in range(70, 101):
-                time.sleep(0.01)
-                self.progress_update.emit(i)
-                
+            uninst_target = os.path.join(install_dir, "APEX CARE Uninstaller.exe")
+
+            sizes = [os.path.getsize(payload_path), os.path.getsize(uninstaller_path)]
+            grand = sum(sizes) or 1
+
+            def report(offset):
+                return lambda done, _total: self.progress_update.emit(min(95, int((offset + done) * 95 / grand)))
+
+            try:
+                copy_with_progress(payload_path, target_path, report(0))
+                copy_with_progress(uninstaller_path, uninst_target, report(sizes[0]))
+            except PermissionError:
+                self.finished_install.emit(False, "APEX CARE 가 실행 중이라 파일을 바꿀 수 없습니다.\n"
+                                                  "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.")
+                return
+
+            try:
+                register_uninstall(install_dir, target_path, sum(sizes))
+            except OSError as e:
+                self.finished_install.emit(False, f"'앱 및 기능' 에 등록하지 못했습니다: {e}\n"
+                                                  "파일은 복사됐지만 제거 목록에 나오지 않습니다. 다시 설치해 주세요.")
+                return
+            self.progress_update.emit(100)
             self.finished_install.emit(True, target_path)
         except Exception as e:
-            self.finished_install.emit(False, str(e))
+            self.finished_install.emit(False, str(e) or type(e).__name__)
 
 
 class LicensePage(QWizardPage):
@@ -205,31 +254,19 @@ class SetupWizard(QWizard):
         return os.path.join(base_path, relative_path)
 
     def on_finished(self, result):
+        # '앱 및 기능' 등록은 설치 단계(InstallWorker)에서 이미 끝났다. 실패했으면 완료 화면까지 오지 않는다.
         if result == 1 and self.installed_path: # Accepted/Finished
-            self.register_uninstall()
-            if self.finish_page.chk_shortcut.isChecked():
-                self.create_shortcut()
+            if self.finish_page.chk_shortcut.isChecked() and not self.create_shortcut():
+                QMessageBox.warning(self, "바로 가기", "바탕 화면에 바로 가기를 만들지 못했습니다.\n"
+                                    f"APEX CARE 는 설치되었습니다: {self.installed_path}")
             if self.finish_page.chk_run.isChecked():
-                os.startfile(self.installed_path)
-
-    def register_uninstall(self):
-        try:
-            import winreg
-            install_dir = os.path.dirname(self.installed_path)
-            uninstaller_exe = os.path.join(install_dir, "APEX CARE Uninstaller.exe")
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE"
-            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
-            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "APEX CARE")
-            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, f'"{uninstaller_exe}"')
-            winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, install_dir)
-            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, self.installed_path)
-            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "APEX CARE Team")
-            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, APP_VERSION)
-            winreg.CloseKey(key)
-        except Exception:
-            pass
+                try:
+                    os.startfile(self.installed_path)
+                except OSError:
+                    pass                     # 관리자 권한 확인 창에서 '아니요' 를 눌렀다. 설치는 끝났다.
 
     def create_shortcut(self):
+        """바탕 화면 바로 가기를 만든다. 만들었으면 True."""
         try:
             import win32com.client
             desktop_path = None
@@ -253,8 +290,9 @@ class SetupWizard(QWizard):
             shortcut.Targetpath = self.installed_path
             shortcut.WorkingDirectory = os.path.dirname(self.installed_path)
             shortcut.save()
+            return os.path.exists(shortcut_path)
         except Exception:
-            pass
+            return False
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

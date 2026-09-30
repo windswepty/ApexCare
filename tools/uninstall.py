@@ -100,10 +100,12 @@ def main():
 
     removed_apps = _removed_app_count()
     # 사용자가 일부러 지운 앱을 프로그램 제거 때 다시 설치하지 않는다. 대신 그 사실을 먼저 알린다.
-    removed_note = (f"\n\n디블로터로 제거한 앱 {removed_apps}개는 다시 설치하지 않습니다. 필요하면 '아니요' 를 누르고 "
-                    "APEX CARE 디블로터 화면의 '제거한 앱' 에서 먼저 되살리세요." if removed_apps else "")
+    # 화면 이름은 앱 사이드바와 같아야 사용자가 찾아갈 수 있다('Windows 기본 앱 정리', '변경 내역 · 되돌리기').
+    removed_note = (f"\n\n'Windows 기본 앱 정리' 로 제거한 앱 {removed_apps}개는 다시 설치하지 않습니다. 필요하면 "
+                    "'아니요' 를 누르고 APEX CARE 의 'Windows 기본 앱 정리' 화면 → '제거한 앱' 에서 먼저 되살리세요."
+                    if removed_apps else "")
     if _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
-                "APEX CARE 프로그램을 완전히 삭제하시겠습니까?\n\n"
+                "APEX CARE 프로그램을 삭제하시겠습니까?\n\n"
                 "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석 정책, "
                 "맞춤 튜닝, 꺼 둔 시작 프로그램)을 원래대로 되돌립니다." + removed_note,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -140,7 +142,7 @@ def main():
         if _message(QMessageBox.Icon.Warning, "설정을 모두 되돌리지 못했습니다",
                     f"{why}\n\n그래도 삭제하시겠습니까?\n"
                     "삭제하면 남은 설정을 이 프로그램으로 되돌릴 수 없습니다. '아니요' 를 누르고 "
-                    "APEX CARE 복구 센터에서 다시 시도하는 것을 권합니다.",
+                    "APEX CARE 의 '변경 내역 · 되돌리기' 화면에서 다시 시도하는 것을 권합니다.",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             sys.exit(1)

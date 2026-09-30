@@ -12,25 +12,36 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-// Global variable to persist history across unmounts (e.g. when changing tabs/modes)
-let globalCpuHistory = Array(25).fill(0);
-let globalGpuHistory = Array(25).fill(0);
+// 탭을 바꿔도 그래프를 이어 가려고 모듈 변수에 둔다. 칸은 null(아직 재지 않음)로 시작한다.
+// 예전에는 0 으로 채워, 앱을 켜자마자 '지난 75초 동안 0%' 인 그래프가 그려졌다(재지 않은 과거를 지어냄).
+const HISTORY_POINTS = 25;
+let globalCpuHistory = Array(HISTORY_POINTS).fill(null);
+let globalGpuHistory = Array(HISTORY_POINTS).fill(null);
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const pctText = (v, state) => (isNum(v) ? `${v}%` : state === 'unavailable' ? '측정 불가' : '측정 중');
+const barWidth = (v) => `${isNum(v) ? Math.max(0, Math.min(100, v)) : 0}%`;
 
 const renderLineGraph = (history) => {
-  const maxPoints = 25;
   const height = 64; // h-16
   const width = 200;
-  
-  const points = history.map((val, i) => {
-    const x = (i / (maxPoints - 1)) * width;
-    const y = height - (val / 100) * height;
+
+  // 잰 칸만 잇는다. 재지 않은 칸(null)은 그리지 않는다.
+  const measured = history.map((val, i) => ({ val, i })).filter((p) => isNum(p.val));
+  if (measured.length < 2) {
+    return <p className="text-[11px] text-gray-500 font-mono">기록을 모으는 중…</p>;
+  }
+  const points = measured.map(({ val, i }) => {
+    const x = (i / (HISTORY_POINTS - 1)) * width;
+    const y = height - (Math.min(100, Math.max(0, val)) / 100) * height;
     return `${x},${y}`;
   });
-  
+  const firstX = (measured[0].i / (HISTORY_POINTS - 1)) * width;
+
   const linePath = `M ${points.join(' L ')}`;
-  const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
-  
-  const currentVal = history[history.length - 1] || 0;
+  const areaPath = `${linePath} L ${width},${height} L ${firstX},${height} Z`;
+
+  const currentVal = measured[measured.length - 1].val;
   let strokeColor = "stroke-emerald-500";
   let fillColor = "fill-emerald-500/20";
   
@@ -65,10 +76,11 @@ const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기
 function ramTotalLabel(info) {
   const usable = Number(info.ramTotalGB);
   const installed = Number(info.ramInstalledGB);
-  if (installed > 0 && usable > 0 && installed - usable >= 0.1) {
+  if (!(usable > 0)) return '…';
+  if (installed > 0 && installed - usable >= 0.1) {
     return `설치 ${installed.toFixed(1)} GB · 사용 가능 ${usable.toFixed(1)} GB`;
   }
-  return `${info.ramTotalGB} GB`;
+  return `${usable.toFixed(1)} GB`;
 }
 
 export default function Dashboard({ addToast, active = true }) {
@@ -90,24 +102,28 @@ export default function Dashboard({ addToast, active = true }) {
   const [lastOptimized, setLastOptimized] = useState(() => localStorage.getItem('apex_last_optimized') || '기록 없음');
   const [totalFreed, setTotalFreed] = useState(() => parseFloat(localStorage.getItem('apex_total_freed')) || 0);
 
-  // Real-time metric states
-  const [cpuUsage, setCpuUsage] = useState(0);
-  const [gpuUsage, setGpuUsage] = useState(0);
-  const [ramUsage, setRamUsage] = useState(0);
-  const [diskUsage, setDiskUsage] = useState(0);
+  // 실시간 값. null = 아직 받지 못함('측정 중'). 0 으로 시작하면 받기 전에도 '0%' 로 보였다.
+  const [cpuUsage, setCpuUsage] = useState(null);
+  const [gpuUsage, setGpuUsage] = useState(null);
+  const [gpuState, setGpuState] = useState('measuring');
+  const [ramUsage, setRamUsage] = useState(null);
+  const [diskUsage, setDiskUsage] = useState(null);
 
+  // 받기 전에는 모든 값이 null 이고 화면은 '…' 을 보여 준다(0 GB 같은 지어낸 값을 그리지 않는다).
   const [sysInfo, setSysInfo] = useState({
     cpuModel: '확인 중…',
     gpuModel: '확인 중…',
-    cpuCores: 0,
-    cpuThreads: 0,
-    ramTotalGB: '0',
-    ramUsedGB: '0',
-    ramAvailableGB: '0',
-    diskTotalGB: '0',
-    diskUsedGB: '0',
-    diskFreeGB: '0'
+    cpuCores: null,
+    cpuThreads: null,
+    ramTotalGB: null,
+    ramInstalledGB: null,
+    ramInUseGB: null,
+    ramAvailableGB: null,
+    diskTotalGB: null,
+    diskUsedGB: null,
+    diskFreeGB: null
   });
+  const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : '…');
 
   // Live sparkline histories
   const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
@@ -119,35 +135,42 @@ export default function Dashboard({ addToast, active = true }) {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
           const stats = await window.pywebview.api.getSystemStats();
-          if (stats) {
-            setCpuUsage(stats.cpuUsage || 0);
-            setGpuUsage(stats.gpuUsage || 0);
-            setRamUsage(stats.ramPct || 0);
-            setDiskUsage(stats.diskPct || 0);
+          // 읽기에 실패하면(error) 이전 값을 그대로 둔다. 0 으로 바꾸지 않는다.
+          if (stats && !stats.error) {
+            const cpu = isNum(stats.cpuUsage) ? stats.cpuUsage : null;
+            const gpu = isNum(stats.gpuUsage) ? stats.gpuUsage : null;
+            setCpuUsage(cpu);
+            setGpuUsage(gpu);
+            setGpuState(stats.gpuUsageState || 'measuring');
+            setRamUsage(isNum(stats.ramPct) ? stats.ramPct : null);
+            setDiskUsage(isNum(stats.diskPct) ? stats.diskPct : null);
+            // 잰 값만 그래프에 넣는다. 아직 재지 못한 순간(null)을 0% 로 넣지 않는다.
             setCpuHistory(prev => {
-              const next = [...prev.slice(1), stats.cpuUsage || 0];
+              const next = [...prev.slice(1), cpu];
               globalCpuHistory = next;
               return next;
             });
             setGpuHistory(prev => {
-              const next = [...prev.slice(1), stats.gpuUsage || 0];
+              const next = [...prev.slice(1), gpu];
               globalGpuHistory = next;
               return next;
             });
-            
+
             setSysInfo({
               cpuModel: stats.cpuModel || '알 수 없음',
-              cpuCores: stats.cpuCores || 0,
-              cpuThreads: stats.cpuThreads || 0,
+              cpuCores: stats.cpuCores ?? null,
+              cpuThreads: stats.cpuThreads ?? null,
               gpuModel: stats.gpuModel || '알 수 없음',
-              ramTotalGB: stats.ramTotalGB || '0',
+              ramTotalGB: stats.ramTotalGB ?? null,
               ramInstalledGB: stats.ramInstalledGB ?? null,
-              ramUsedGB: stats.ramUsedGB || '0',
-              ramAvailableGB: stats.ramAvailableGB ?? '0',
-              diskTotalGB: stats.diskTotalGB || '0',
-              diskUsedGB: stats.diskUsedGB || '0',
+              // '사용 중' 은 작업 관리자·RAM 화면과 같은 값(수정됨 목록 제외)을 쓴다. 성능 카운터를 못 읽었으면
+              // 전체 − 사용 가능. 예전에는 두 화면의 '사용 중' 이 서로 달랐다.
+              ramInUseGB: stats.ramInUseGB ?? stats.ramUsedGB ?? null,
+              ramAvailableGB: stats.ramAvailableGB ?? null,
+              diskTotalGB: stats.diskTotalGB ?? null,
+              diskUsedGB: stats.diskUsedGB ?? null,
               // 백엔드가 직접 잰 남은 용량. 반올림한 전체 − 반올림한 사용량으로 계산하면 1GB 씩 어긋났다.
-              diskFreeGB: stats.diskFreeGB ?? '0'
+              diskFreeGB: stats.diskFreeGB ?? null
             });
           }
         } catch {
@@ -260,6 +283,7 @@ export default function Dashboard({ addToast, active = true }) {
   };
 
   const getUsageColor = (val) => {
+    if (!isNum(val)) return 'bg-gray-400';
     if (val < 60) return 'bg-emerald-500';
     if (val < 85) return 'bg-amber-500';
     return 'bg-rose-500';
@@ -438,11 +462,11 @@ export default function Dashboard({ addToast, active = true }) {
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             {/* C: 드라이브만 잰 값이다. 예전에는 'Storage' 라고 써서 전체 저장 장치 용량처럼 보였다. */}
             <span className="text-gray-500 dark:text-gray-400">C: 드라이브</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.diskTotalGB} GB</span>
+            <span className="text-black dark:text-white font-medium text-right">{gb(sysInfo.diskTotalGB)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400">코어 / 스레드</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores}코어 / {sysInfo.cpuThreads}스레드</span>
+            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores ?? '…'}코어 / {sysInfo.cpuThreads ?? '…'}스레드</span>
           </div>
         </div>
       </div>
@@ -458,16 +482,16 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores}코어 / {sysInfo.cpuThreads}스레드 · CPU 사용률</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores ?? '…'}코어 / {sysInfo.cpuThreads ?? '…'}스레드 · CPU 사용률</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{cpuUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(cpuUsage)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
           <div 
             className={`${getUsageColor(cpuUsage)} h-full rounded-full transition-all duration-500`}
-            style={{ width: `${cpuUsage}%` }}
+            style={{ width: barWidth(cpuUsage) }}
           ></div>
         </div>
 
@@ -489,13 +513,13 @@ export default function Dashboard({ addToast, active = true }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">3D 엔진 사용률</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{gpuUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(gpuUsage, gpuState)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-5">
           <div 
             className={`${getUsageColor(gpuUsage)} h-full rounded-full transition-all duration-500`}
-            style={{ width: `${gpuUsage}%` }}
+            style={{ width: barWidth(gpuUsage) }}
           ></div>
         </div>
 
@@ -517,19 +541,19 @@ export default function Dashboard({ addToast, active = true }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{ramTotalLabel(sysInfo)}</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{ramUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(ramUsage)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
           <div 
             className={`${getUsageColor(ramUsage)} h-full rounded-full transition-all duration-500`}
-            style={{ width: `${ramUsage}%` }}
+            style={{ width: barWidth(ramUsage) }}
           ></div>
         </div>
 
         <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
-          <span>사용 중: {sysInfo.ramUsedGB} GB</span>
-          <span>사용 가능: {sysInfo.ramAvailableGB} GB</span>
+          <span title="작업 관리자의 '사용 중' 과 같은 값(디스크 기록을 기다리는 '수정됨' 메모리 제외)">사용 중: {gb(sysInfo.ramInUseGB)}</span>
+          <span>사용 가능: {gb(sysInfo.ramAvailableGB)}</span>
         </div>
       </div>
 
@@ -542,22 +566,22 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브 (C:\)</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {sysInfo.diskTotalGB} GB</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {gb(sysInfo.diskTotalGB)}</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{diskUsage}%</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(diskUsage)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
           <div 
             className={`${getUsageColor(diskUsage)} h-full rounded-full transition-all duration-500`}
-            style={{ width: `${diskUsage}%` }}
+            style={{ width: barWidth(diskUsage) }}
           ></div>
         </div>
 
         <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
-          <span>사용 중: {sysInfo.diskUsedGB} GB</span>
-          <span>남은 용량: {sysInfo.diskFreeGB} GB</span>
+          <span>사용 중: {gb(sysInfo.diskUsedGB)}</span>
+          <span>남은 용량: {gb(sysInfo.diskFreeGB)}</span>
         </div>
       </div>
 

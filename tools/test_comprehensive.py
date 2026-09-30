@@ -29,11 +29,16 @@ def run_tests():
 
     # 1. System Monitor
     try:
+        # 첫 호출은 수집기를 깨울 뿐이라 CPU 가 None('측정 중')이다. 수집기가 한 번 재도록 기다린 뒤 다시 읽는다.
+        system_monitor.get_system_stats()
+        time.sleep(3)
         stats = system_monitor.get_system_stats()
-        if 'cpuUsage' in stats and 'ramPct' in stats:
-            report("System Monitor (get_system_stats)", True, f"CPU: {stats['cpuUsage']}%, RAM: {stats['ramPct']}%")
+        if isinstance(stats.get('cpuUsage'), int) and 'ramPct' in stats:
+            report("System Monitor (get_system_stats)", True,
+                   f"CPU: {stats['cpuUsage']}%, GPU: {stats.get('gpuUsage')}% ({stats.get('gpuUsageState')}), "
+                   f"RAM: {stats['ramPct']}%, 대기 {stats.get('ramStandbyGB')} GB")
         else:
-            report("System Monitor (get_system_stats)", False, "Missing keys in stats")
+            report("System Monitor (get_system_stats)", False, f"CPU 를 재지 못했습니다: {stats.get('cpuUsage')}")
     except Exception as e:
         report("System Monitor", False, str(e))
 

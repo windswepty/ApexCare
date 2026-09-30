@@ -18,10 +18,9 @@ log = logging.getLogger('SystemMonitor')
 # Cache CPU model info once at import time (WMI is heavy, only call once)
 _cpu_model_cache = None
 
-# CPU, GPU, and RAM Cache
-_cpu_usage = 0
-_gpu_usage = 0
-_standby_gb = 0
+# 마지막으로 잰 CPU·GPU 사용률. 아직 재지 못했으면 None 이다(0 으로 채워 두면 '0%' 로 보인다).
+_cpu_usage = None
+_gpu_usage = None
 
 # 화면이 최근에 값을 요청했을 때만 잰다. 창이 최소화됐거나 값을 보여 주는 화면이 없으면
 # 백엔드도 쉰다. 예전에는 CPU·GPU 수집 스레드가 창 상태와 상관없이 1초마다 돌았고,
@@ -46,12 +45,20 @@ def _cpu_tick():
         time.sleep(1)
         return False
     try:
-        _cpu_usage = psutil.cpu_percent(interval=1)
-        _cpu_sample[0] = time.time()
+        by_time = psutil.cpu_percent(interval=1)
     except Exception as e:
+        # 못 쟀으면 지난 값을 두고 시각을 갱신하지 않는다. 오래되면 _fresh_cpu_usage 가 None 을 준다.
         log.debug(f"CPU poller error: {e}")
-        _cpu_usage = 0
+        by_time = None
+    _cpu_utility[0] = None
     _cpu_clock_mhz = _sample_clock()
+    # 작업 관리자의 CPU % 는 '% Processor Utility'(시간 × 클럭 비율, 100 에서 자름)다. 부스트 중이면 시간 기준
+    # (psutil)보다 높게 나온다. 같은 값을 보여 줘야 사용자가 작업 관리자와 비교해도 어긋나지 않는다.
+    # 그 카운터를 못 읽는 PC 에서는 시간 기준 값을 쓴다.
+    usage = _cpu_utility[0] if _cpu_utility[0] is not None else by_time
+    if usage is not None:
+        _cpu_usage = max(0.0, min(100.0, usage))
+        _cpu_sample[0] = time.time()
     return True
 
 
@@ -59,13 +66,15 @@ _cpu_sample = [0.0]      # 마지막으로 CPU 사용률을 잰 시각
 
 
 def _fresh_cpu_usage():
-    """수집기가 쉬다가 막 깨어났으면 그 값은 오래된 것이다. 그때는 지난 호출 이후 평균(실측)을 쓴다."""
+    """최근(3초 안)에 잰 CPU 사용률. 아직 못 쟀거나 수집기가 쉬다 막 깨어났으면 None('측정 중').
+
+    예전에는 이때 psutil.cpu_percent(interval=None) 을 불렀다. psutil 7 은 그 기준점을 스레드마다 따로
+    두는데, pywebview 는 화면 요청마다 새 스레드에서 처리하므로 늘 '첫 호출' 이 되어 0% 가 나왔다.
+    수집기는 요청을 받으면 1초 안에 다시 잰다. 그 사이에는 재지 않은 값을 보여 주지 않는다.
+    """
     if time.time() - _cpu_sample[0] <= 3:
         return _cpu_usage
-    try:
-        return psutil.cpu_percent(interval=None)
-    except Exception:
-        return _cpu_usage
+    return None
 
 
 # ── 실제 CPU 클럭 ──────────────────────────────────────────────
@@ -73,8 +82,10 @@ def _fresh_cpu_usage():
 # 부스트 중이면 100% 를 넘는다. 성능 모드가 실제로 무엇을 바꿨는지 사용자가 숫자로 볼 수 있게 한다.
 _PDH_FMT_DOUBLE = 0x00000200
 _CLOCK_COUNTER = r'\Processor Information(_Total)\% Processor Performance'
+_UTILITY_COUNTER = r'\Processor Information(_Total)\% Processor Utility'     # 작업 관리자의 CPU %
 _cpu_clock_mhz = None
-_clock = {'pdh': None, 'query': None, 'counter': None, 'failed': False}
+_cpu_utility = [None]      # 마지막 수집의 % Processor Utility (못 읽었으면 None)
+_clock = {'pdh': None, 'query': None, 'counter': None, 'utility': None, 'failed': False, 'last': 0.0}
 
 
 class _PdhDoubleValue(ctypes.Structure):
@@ -125,25 +136,40 @@ def clock_from(base_mhz, perf_pct):
 
 
 def _sample_clock():
-    """지금 CPU 가 도는 클럭(MHz). 처음 한 번은 기준점만 잡고 None. 한 번 실패하면 다시 시도하지 않는다."""
+    """지금 CPU 가 도는 클럭(MHz). 처음 한 번은 기준점만 잡고 None. 한 번 실패하면 다시 시도하지 않는다.
+
+    같은 수집에서 작업 관리자의 CPU %(% Processor Utility)도 읽어 _cpu_utility 에 둔다.
+    두 카운터는 '지난 수집 이후 평균' 이다. 수집기가 쉬다 깨어나 지난 수집이 오래됐으면(3초 넘게)
+    그 평균은 지금 값이 아니므로 버리고 기준점만 새로 잡는다.
+    """
     c = _clock
     if c['failed']:
         return None
     try:
         if c['query'] is None:
             pdh = ctypes.WinDLL('pdh')
-            q, h = ctypes.c_void_p(), ctypes.c_void_p()
+            q, h, u = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
             if pdh.PdhOpenQueryW(None, None, ctypes.byref(q)) != 0:
                 raise OSError('PdhOpenQueryW')
             if pdh.PdhAddEnglishCounterW(q, ctypes.c_wchar_p(_CLOCK_COUNTER), None, ctypes.byref(h)) != 0:
                 pdh.PdhCloseQuery(q)
                 raise OSError('PdhAddEnglishCounterW')
+            # Windows 8 이전에는 없다. 없으면 CPU % 는 시간 기준(psutil)으로 둔다.
+            if pdh.PdhAddEnglishCounterW(q, ctypes.c_wchar_p(_UTILITY_COUNTER), None, ctypes.byref(u)) != 0:
+                u = None
             pdh.PdhCollectQueryData(q)
-            c.update(pdh=pdh, query=q, counter=h)
+            c.update(pdh=pdh, query=q, counter=h, utility=u, last=time.time())
             return None
         pdh = c['pdh']
-        if pdh.PdhCollectQueryData(c['query']) != 0:
+        stale = time.time() - c['last'] > 3
+        c['last'] = time.time()
+        if pdh.PdhCollectQueryData(c['query']) != 0 or stale:
             return None
+        v = _PdhDoubleValue()
+        if c['utility'] is not None:
+            if (pdh.PdhGetFormattedCounterValue(c['utility'], _PDH_FMT_DOUBLE, None, ctypes.byref(v)) == 0
+                    and v.CStatus == 0):
+                _cpu_utility[0] = v.doubleValue
         v = _PdhDoubleValue()
         if pdh.PdhGetFormattedCounterValue(c['counter'], _PDH_FMT_DOUBLE, None, ctypes.byref(v)) != 0 or v.CStatus != 0:
             return None
@@ -162,17 +188,40 @@ def _cpu_poller():
 _cpu_thread = threading.Thread(target=_cpu_poller, daemon=True)
 _cpu_thread.start()
 
+_ADAPTER_RE = re.compile(r'luid_0x[0-9a-fA-F]+_0x[0-9a-fA-F]+_phys_\d+')
+
+
+def gpu_3d_usage(samples):
+    """'GPU Engine(*)\\Utilization Percentage' 값들에서 3D 엔진 사용률(%)을 구한다.
+
+    인스턴스 하나가 '프로세스 × 그래픽 어댑터 × 엔진' 이다. 어댑터마다 프로세스들의 3D 값을 더하고,
+    가장 바쁜 어댑터 값을 쓴다(작업 관리자의 GPU '3D' 와 같은 방식). 예전에는 어댑터를 가리지 않고 모두
+    더해, 내장·외장 그래픽이 함께 일하면 두 장치의 합이 한 장치의 사용률처럼 보였다.
+    3D 인스턴스가 하나도 없으면 0(3D 를 쓰는 프로세스가 없음).
+    """
+    per_adapter = {}
+    for name, value in (samples or {}).items():
+        if 'engtype_3D' not in name:
+            continue
+        m = _ADAPTER_RE.search(name)
+        key = m.group(0) if m else ''
+        per_adapter[key] = per_adapter.get(key, 0.0) + (value or 0.0)
+    usage = max(per_adapter.values()) if per_adapter else 0.0
+    return min(100, round(usage))
+
+
 def _gpu_poller():
-    global _gpu_usage
+    global _gpu_usage, _gpu_state
     try:
         import win32pdh
         hq = win32pdh.OpenQuery()
         hc = win32pdh.AddCounter(hq, '\\GPU Engine(*)\\Utilization Percentage')
         win32pdh.CollectQueryData(hq)
     except Exception as e:
-        # GPU monitoring not available — exit thread silently
+        # 이 PC 에서는 GPU 사용률을 읽을 수 없다. 0% 로 꾸며 보이지 않고 '측정 불가' 로 알린다.
         log.debug(f"GPU pdh init error: {e}")
-        _gpu_usage = 0
+        _gpu_usage = None
+        _gpu_state = 'unavailable'
         return
 
     while True:
@@ -183,16 +232,27 @@ def _gpu_poller():
                 continue
             win32pdh.CollectQueryData(hq)
             arr = win32pdh.GetFormattedCounterArray(hc, win32pdh.PDH_FMT_DOUBLE)
-            usage = 0.0
-            if isinstance(arr, dict):
-                for k, v in arr.items():
-                    if 'engtype_3D' in k:
-                        usage += v
-            _gpu_usage = min(100, round(usage))      # 엔진·프로세스별 값의 합이라 100 을 넘을 수 있다
+            usage = gpu_3d_usage(arr if isinstance(arr, dict) else {})
+            _gpu_usage = min(100, round(usage))      # 가장 바쁜 어댑터의 3D 엔진 값(작업 관리자와 같은 방식)
+            _gpu_sample[0] = time.time()
+            _gpu_state = 'ok'
         except Exception as e:
+            # 한 번 못 읽었다고 0% 로 보이지 않는다. 지난 값은 오래되면 get_system_stats 가 버린다.
             log.debug(f"GPU poller error: {e}")
-            _gpu_usage = 0
             time.sleep(1)
+
+
+_gpu_sample = [0.0]          # 마지막으로 GPU 사용률을 잰 시각
+_gpu_state = 'measuring'     # 'measuring' | 'ok' | 'unavailable'
+
+
+def _fresh_gpu_usage():
+    """최근(3초 안)에 잰 GPU 사용률. 아직 못 쟀거나 쉬다 막 깨어났으면 None('측정 중')."""
+    if _gpu_state == 'unavailable':
+        return None
+    if time.time() - _gpu_sample[0] <= 3:
+        return _gpu_usage
+    return None
 
 # Start GPU poller automatically
 _gpu_thread = threading.Thread(target=_gpu_poller, daemon=True)
@@ -363,8 +423,10 @@ def get_system_stats():
             'cpuModel': cpu_model,
             'cpuCores': cpu_cores,
             'cpuThreads': cpu_threads,
-            'cpuUsage': round(cpu_usage),
-            'cpuClockMHz': _cpu_clock_mhz,        # 아직 재지 못했으면 None (화면은 '측정 중')
+            # 작업 관리자와 같은 % Processor Utility(없으면 시간 기준). None = 아직 재지 못함('측정 중')
+            'cpuUsage': None if cpu_usage is None else round(cpu_usage),
+            # 클럭도 수집기가 쉬다 깨어난 직후에는 오래된 값이라 CPU % 와 같은 기준으로 버린다
+            'cpuClockMHz': _cpu_clock_mhz if cpu_usage is not None else None,   # 아직 못 쟀으면 None('측정 중')
             'cpuBaseMHz': cpu_base_mhz(),
             'ramUsedGB': round(mem.used / (1024**3), 1),
             'ramTotalGB': round(mem.total / (1024**3), 1),          # Windows 가 쓸 수 있는 용량
@@ -380,9 +442,9 @@ def get_system_stats():
             # 반올림한 전체에서 반올림한 사용량을 빼면 1GB 씩 어긋난다. 남은 용량은 따로 잰다.
             'diskFreeGB': round(disk.free / (1024**3)),
             'diskPct': round(disk.percent),
-            'gpuUsage': _gpu_usage,
+            'gpuUsage': _fresh_gpu_usage(),       # None = 측정 중 또는 측정 불가(gpuUsageState 로 구분)
+            'gpuUsageState': _gpu_state,
             'gpuModel': _get_gpu_model(),
-            'cpuTemp': 0, # Not easily available without admin + WMI classes or external tools
             'osInfo': f"{platform.system()} {platform.release()} ({platform.machine()})",
             'uptimeSec': int(time.time() - psutil.boot_time())
         }

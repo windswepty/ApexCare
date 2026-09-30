@@ -29,12 +29,9 @@ class Api:
     def getSystemStats(self):
         stats = system_monitor.get_system_stats()
         if not stats:
-            return {
-                'cpuUsage': 0, 'ramPct': 0, 'diskPct': 0,
-                'cpuModel': 'Error', 'cpuCores': 0, 'cpuThreads': 0,
-                'ramTotalGB': '0', 'ramUsedGB': '0',
-                'diskTotalGB': '0', 'diskUsedGB': '0'
-            }
+            # 숫자를 0 으로 채워 돌려주지 않는다. 예전에는 읽기에 실패하면 CPU 0%·RAM 0 GB 가
+            # 측정값처럼 대시보드에 그려졌다. 화면은 error 를 보고 이전 값을 그대로 둔다.
+            return {'error': '시스템 정보를 읽지 못했습니다.'}
         return stats
 
     def getDeepOptimizationPlan(self):

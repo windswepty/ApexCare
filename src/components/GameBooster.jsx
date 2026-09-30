@@ -52,10 +52,11 @@ const RISK_STYLE = {
 };
 
 export default function GameBooster({ addToast, active = true }) {
+  // 받기 전에는 null. 예전에는 받기 전에도 '자동 감지 꺼짐'·'대기 중'·'0개'·모든 항목 꺼짐으로 보였다.
   const [status, setStatus] = useState(null);
-  const [settings, setSettings] = useState({});
-  const [procs, setProcs] = useState([]);
-  const [adjusted, setAdjusted] = useState(0);
+  const [settings, setSettings] = useState(null);
+  const [procs, setProcs] = useState(null);
+  const [adjusted, setAdjusted] = useState(null);
   const [busyPid, setBusyPid] = useState(null);
   const [filter, setFilter] = useState('');
   const [toggling, setToggling] = useState(false);
@@ -68,7 +69,7 @@ export default function GameBooster({ addToast, active = true }) {
       if (a.getBoostSettings) setSettings(await a.getBoostSettings());
       if (a.getAdjustedProcessCount) {
         const c = await a.getAdjustedProcessCount();
-        setAdjusted(c?.count || 0);
+        if (typeof c?.count === 'number') setAdjusted(c.count);
       }
       if (a.getProcesses) {
         // 0 = 전부. 예전에는 메모리 상위 8개만 받아 검색으로 게임이나 원하는 앱을 찾을 수 없었다.
@@ -90,7 +91,7 @@ export default function GameBooster({ addToast, active = true }) {
 
   const toggleBooster = async () => {
     const a = api();
-    if (!a?.toggleGameBooster || toggling) return;
+    if (!a?.toggleGameBooster || toggling || !status) return;
     setToggling(true);
     const next = !status?.enabled;
     try {
@@ -109,7 +110,7 @@ export default function GameBooster({ addToast, active = true }) {
 
   const toggleOption = async (key) => {
     const a = api();
-    if (!a?.setBoostSetting) return;
+    if (!a?.setBoostSetting || !settings) return;
     const next = !settings[key];
     const opt = BOOST_OPTIONS.find((o) => o.key === key);
 
@@ -163,7 +164,7 @@ export default function GameBooster({ addToast, active = true }) {
     refresh();
   };
 
-  const matched = procs.filter((p) => !filter || (p.name || '').toLowerCase().includes(filter.toLowerCase()));
+  const matched = (procs || []).filter((p) => !filter || (p.name || '').toLowerCase().includes(filter.toLowerCase()));
   const visible = matched.slice(0, 60);
 
   return (
@@ -183,7 +184,7 @@ export default function GameBooster({ addToast, active = true }) {
         </div>
         <button
           onClick={toggleBooster}
-          disabled={toggling}
+          disabled={toggling || !status}
           className={`shrink-0 flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 ${
             status?.enabled
               ? 'bg-rose-500 text-white hover:bg-rose-600'
@@ -191,7 +192,7 @@ export default function GameBooster({ addToast, active = true }) {
           }`}
         >
           {toggling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-          {status?.enabled ? '자동 감지 켜짐' : '자동 감지 꺼짐'}
+          {!status ? '확인 중…' : status.enabled ? '자동 감지 켜짐' : '자동 감지 꺼짐'}
         </button>
       </div>
 
@@ -202,9 +203,9 @@ export default function GameBooster({ addToast, active = true }) {
             <Gamepad2 className="w-3.5 h-3.5" /> 감지된 게임
           </div>
           <p className="font-bold text-black dark:text-white truncate" title={status?.detected_game_label || ''}>
-            {status?.detected_game_label || status?.detected_game || '없음'}
+            {!status ? '…' : status.detected_game_label || status.detected_game || '없음'}
           </p>
-          {!status?.enabled && (
+          {status && !status.enabled && (
             <p className="text-[11px] text-gray-500 mt-1">자동 감지가 꺼져 있어 게임을 찾지 않습니다.</p>
           )}
         </div>
@@ -213,7 +214,7 @@ export default function GameBooster({ addToast, active = true }) {
             <Activity className="w-3.5 h-3.5" /> 부스트 상태
           </div>
           <p className={`font-bold ${status?.active ? 'text-rose-400' : 'text-black dark:text-white'}`}>
-            {status?.active ? '적용 중' : '대기 중'}
+            {!status ? '…' : status.active ? '적용 중' : '대기 중'}
           </p>
           {status?.appliedBoosts?.length > 0 && (
             <p className="text-[11px] text-gray-500 mt-1">{status.appliedBoosts.join(' · ')}</p>
@@ -224,7 +225,7 @@ export default function GameBooster({ addToast, active = true }) {
             <Cpu className="w-3.5 h-3.5" /> 우선순위 조정됨
           </div>
           <div className="flex items-center justify-between gap-2">
-            <p className="font-bold text-black dark:text-white">{adjusted}개</p>
+            <p className="font-bold text-black dark:text-white">{adjusted === null ? '…' : `${adjusted}개`}</p>
             {adjusted > 0 && (
               <button onClick={restoreAll}
                 className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-1">
@@ -244,12 +245,13 @@ export default function GameBooster({ addToast, active = true }) {
         </p>
         <div className="space-y-3">
           {BOOST_OPTIONS.map((opt) => {
-            const on = !!settings[opt.key];
+            const on = !!settings?.[opt.key];
             return (
               <button
                 key={opt.key}
                 onClick={() => toggleOption(opt.key)}
-                className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                disabled={!settings}
+                className={`w-full text-left p-4 rounded-xl border transition-colors disabled:opacity-50 ${
                   on ? 'border-cyan-500/50 bg-cyan-500/5'
                      : 'border-black/10 dark:border-slate-700 hover:border-black/20 dark:hover:border-slate-600'
                 }`}
@@ -297,7 +299,10 @@ export default function GameBooster({ addToast, active = true }) {
         </div>
 
         <div className="max-h-[360px] overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
-          {visible.length === 0 && (
+          {procs === null && (
+            <p className="text-sm text-gray-500 py-6 text-center">프로세스 목록을 읽는 중…</p>
+          )}
+          {procs !== null && visible.length === 0 && (
             <p className="text-sm text-gray-500 py-6 text-center">
               {filter ? `'${filter}' 이(가) 들어간 프로세스가 없습니다.` : '표시할 프로세스가 없습니다.'}
             </p>
@@ -308,7 +313,7 @@ export default function GameBooster({ addToast, active = true }) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-black dark:text-white truncate">{p.name}</p>
                 <p className="text-[11px] text-gray-500 font-mono">
-                  PID {p.pid} · CPU {p.cpuPct ?? '측정 중'} · {p.memoryMB ?? 0}MB · 우선순위 {p.priority || '알 수 없음'}
+                  PID {p.pid} · CPU {p.cpuPct ?? '측정 중'} · {p.memoryMB ?? '?'}MB · 우선순위 {p.priority || '알 수 없음'}
                 </p>
               </div>
               <div className="flex gap-1 shrink-0">
