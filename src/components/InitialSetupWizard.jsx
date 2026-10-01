@@ -28,6 +28,11 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
   // 저사양 판정 기준도 백엔드 한 곳(optimizer.apply_hardware_tailored_tuning)에서 온다.
   useEffect(() => {
     if (!stats || preview) return;
+    // 코어 수나 메모리 용량을 모르면 사양을 판정하지 않는다(0 은 저사양으로 읽혀 SysMain 을 끄자고 했다)
+    if (!(Number(stats.cpuCores) >= 1) || !(ramForTier(stats) > 0)) {
+      setPreviewError('코어 수나 메모리 용량을 읽지 못해 사양에 맞는 설정을 제안할 수 없습니다. 건너뛰어도 아무것도 바뀌지 않습니다.');
+      return;
+    }
     const api = window.pywebview?.api;
     if (!api?.applyHardwareTuning) {
       setPreviewError('API가 준비되지 않아 제안할 설정을 불러오지 못했습니다.');
@@ -246,7 +251,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.cpuModel}>{stats?.cpuModel || '알 수 없음'}</div>
                       <div className={`text-[10px] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
-                        {stats?.cpuCores}코어 / {stats?.cpuThreads}스레드
+                        {stats?.cpuCores || '?'}코어 / {stats?.cpuThreads || '?'}스레드
                       </div>
                     </div>
                   </div>
@@ -270,7 +275,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                       <div className="font-semibold text-xs truncate">
                         {Number(stats?.ramInstalledGB) > 0
                           ? `${Number(stats.ramInstalledGB).toFixed(1)} GB 설치 (사용 가능 ${stats.ramTotalGB} GB)`
-                          : `${stats?.ramTotalGB || 0} GB (사용 가능)`}
+                          : Number(stats?.ramTotalGB) > 0 ? `${stats.ramTotalGB} GB (사용 가능)` : '알 수 없음'}
                       </div>
                     </div>
                   </div>
@@ -281,7 +286,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                       <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>C: 드라이브</div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-xs truncate">전체 {stats?.diskTotalGB || 0} GB</div>
+                      <div className="font-semibold text-xs truncate">{Number(stats?.diskTotalGB) > 0 ? `전체 ${stats.diskTotalGB} GB` : '알 수 없음'}</div>
                     </div>
                   </div>
                 </div>

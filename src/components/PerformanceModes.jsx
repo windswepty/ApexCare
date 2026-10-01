@@ -165,7 +165,8 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
       res = { success: false, message: String(e) };
     }
     setReverting(false);
-    addToast?.(res?.message || '되돌리기를 완료했습니다.', res?.success ? 'success' : 'error');
+    addToast?.(res?.message || (res?.success ? '되돌리기를 완료했습니다.' : '되돌리지 못했습니다.'),
+      res?.success ? 'success' : 'error');
     refresh();
   };
 
@@ -272,15 +273,29 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
       )}
 
       {/* 앱 밖에서 전원 플랜이 바뀐 경우 알림 */}
-      {status && status.inSync === false && status.userSet && !status.boostOverride && (
+      {status && status.outOfSync === 'plan' && status.userSet && !status.boostOverride && (
         <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="text-sm text-black/80 dark:text-white/80">
             <strong className="text-black dark:text-white">현재 시스템 상태가 선택한 모드와 다릅니다.</strong>{' '}
-            저장된 모드는 <span className="font-mono">{status.label}</span> 인데 실제 전원 플랜은{' '}
+            {status.label} 모드는 <span className="font-mono">{status.expectedPlanName}</span> 전원 플랜을 쓰는데 지금 전원 플랜은{' '}
             <span className="font-mono">{status.activePlanName}</span> 입니다.
             다른 프로그램이나 Windows 설정에서 전원 플랜이 바뀌었을 수 있습니다.
             아래에서 모드를 다시 누르면 맞춰집니다.
+          </div>
+        </div>
+      )}
+
+      {/* 표준인데 성능 모드가 바꾼 설정이 남아 있음(되돌리기 실패 등). 전원 플랜 문제가 아니다. */}
+      {status && status.outOfSync === 'leftover' && !status.boostOverride && (
+        <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-sm text-black/80 dark:text-white/80">
+            <strong className="text-black dark:text-white">
+              성능 모드가 바꾼 설정 {status.leftoverModeChanges}개가 아직 원래대로 돌아가지 않았습니다.
+            </strong>{' '}
+            아래 표준 모드를 다시 누르면 되돌리기를 다시 시도합니다. 무엇이 남았는지는
+            '변경 내역 · 되돌리기' 화면에서 볼 수 있습니다.
           </div>
         </div>
       )}

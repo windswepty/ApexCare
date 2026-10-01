@@ -356,7 +356,7 @@ def _restore_nagle():
     r = ss.restore_group(BOOST_GROUP)
     _booster_state["nagle_disabled"] = not r['ok']
     if r['failed']:
-        log.warning(f"⚠ Nagle 복구 실패 {len(r['failed'])}건 — 복구 센터에서 다시 시도할 수 있습니다")
+        log.warning(f"⚠ Nagle 복구 실패 {len(r['failed'])}건 — '변경 내역 · 되돌리기' 에서 다시 시도할 수 있습니다")
     return r
 
 

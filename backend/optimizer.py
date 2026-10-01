@@ -3,6 +3,7 @@ APEX CARE - Optimizer (Pure Python)
 All system control via ctypes Win32 API or psutil.
 """
 import os
+import math
 import re
 import shutil
 import ctypes
@@ -973,11 +974,19 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
     적용 결과는 항목별 steps 로 돌려준다. 하나라도 실패하면 success=False 다.
     """
     try:
+        unread = {"success": False, "applied": False,
+                  "message": "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다."}
+        if isinstance(cpu_cores, bool) or isinstance(ram_gb, bool):
+            return unread
         try:
             cpu_cores = int(cpu_cores)
             ram_gb = float(ram_gb)
-        except (TypeError, ValueError):
-            return {"success": False, "applied": False, "message": "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다."}
+        except (TypeError, ValueError, OverflowError):
+            return unread
+        # 0·음수·NaN 은 '읽지 못함' 이다. 예전에는 0 코어·0 GB 가 저사양으로 판정되어
+        # 사양을 모르는 PC 에서 SysMain 을 끄자고 제안했다.
+        if cpu_cores < 1 or not math.isfinite(ram_gb) or ram_gb <= 0:
+            return unread
 
         is_low_end = (cpu_cores <= 4 or ram_gb < 8)
         tier = "LowEnd" if is_low_end else "HighEnd"

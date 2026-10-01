@@ -404,8 +404,10 @@ def get_system_stats():
         disk = psutil.disk_usage('C:\\')
         
         cpu_model = _get_cpu_model()
-        cpu_cores = psutil.cpu_count(logical=False) or 0
-        cpu_threads = psutil.cpu_count(logical=True) or 0
+        # 읽지 못하면(일부 가상 머신에서 None) None 으로 둔다. 0 은 '코어 0개' 라는 거짓이고,
+        # 초기 설정 마법사가 그 0 으로 저사양을 판정해 SysMain 을 끄자고 제안했다.
+        cpu_cores = psutil.cpu_count(logical=False) or None
+        cpu_threads = psutil.cpu_count(logical=True) or None
         
         # 메모리 구성은 작업 관리자와 같은 성능 카운터 값이다. 읽지 못하면 None 으로 둔다(추측하지 않는다).
         GB = 1024 ** 3

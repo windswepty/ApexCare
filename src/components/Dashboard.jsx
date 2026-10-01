@@ -124,6 +124,10 @@ export default function Dashboard({ addToast, active = true }) {
     diskFreeGB: null
   });
   const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : '…');
+  // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않은 값은 '?' (0 으로 지어내지 않는다)
+  const loaded = sysInfo.cpuModel !== '확인 중…';
+  const count = (v) => (isNum(v) && v > 0 ? v : loaded ? '?' : '…');
+  const coresText = `${count(sysInfo.cpuCores)}코어 / ${count(sysInfo.cpuThreads)}스레드`;
 
   // Live sparkline histories
   const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
@@ -466,7 +470,7 @@ export default function Dashboard({ addToast, active = true }) {
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400">코어 / 스레드</span>
-            <span className="text-black dark:text-white font-medium text-right">{sysInfo.cpuCores ?? '…'}코어 / {sysInfo.cpuThreads ?? '…'}스레드</span>
+            <span className="text-black dark:text-white font-medium text-right">{coresText}</span>
           </div>
         </div>
       </div>
@@ -482,7 +486,7 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{sysInfo.cpuCores ?? '…'}코어 / {sysInfo.cpuThreads ?? '…'}스레드 · CPU 사용률</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{coresText} · CPU 사용률</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(cpuUsage)}</span>

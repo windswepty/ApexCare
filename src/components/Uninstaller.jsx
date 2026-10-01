@@ -9,6 +9,11 @@ const CONFIDENCE_LABEL = {
   likely: '프로그램 이름과 같은 폴더',
 };
 
+// 1024 MB 이상은 GB 로
+const mbText = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Number(mb).toFixed(1)} MB`);
+// 너무 큰 폴더는 백엔드가 끝까지 세지 않는다(sizeCapped). 그 값은 '이 이상' 이다.
+const leftoverSize = (l) => `${mbText(l.sizeMB || 0)}${l.sizeCapped ? ' 이상' : ''}`;
+
 export default function Uninstaller({ addToast }) {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -152,7 +157,10 @@ export default function Uninstaller({ addToast }) {
   const filteredApps = apps.filter(app =>
     !q || app.name.toLowerCase().includes(q) || (app.publisher || '').toLowerCase().includes(q)
   );
-  const chosenMB = leftovers.filter((l) => chosen.has(l.path)).reduce((s, l) => s + (l.sizeMB || 0), 0);
+  const chosenList = leftovers.filter((l) => chosen.has(l.path));
+  const chosenMB = chosenList.reduce((s, l) => s + (l.sizeMB || 0), 0);
+  // 너무 커서 끝까지 세지 않은 폴더가 있으면 합계도 '이상' 이다
+  const chosenCapped = chosenList.some((l) => l.sizeCapped);
 
   return (
     <div className="h-full flex flex-col glass-panel rounded-2xl p-6 relative overflow-hidden">
@@ -300,6 +308,7 @@ export default function Uninstaller({ addToast }) {
                       <li key={l.path}>
                         <button
                           type="button"
+                          aria-pressed={chosen.has(l.path)}
                           onClick={() => toggleLeftover(l.path)}
                           className={`w-full text-left text-xs bg-white dark:bg-slate-900 p-2 rounded border flex items-center gap-3 ${
                             chosen.has(l.path) ? 'border-rose-500/50' : 'border-black/10 dark:border-slate-800 opacity-60'}`}
@@ -309,7 +318,7 @@ export default function Uninstaller({ addToast }) {
                             <span className="block font-mono text-gray-700 dark:text-slate-300 truncate" title={l.path}>{l.path}</span>
                             <span className="block text-[11px] text-gray-500">{CONFIDENCE_LABEL[l.confidence] || l.reason}</span>
                           </span>
-                          <span className="text-rose-400 flex-shrink-0 font-mono">{l.sizeMB} MB</span>
+                          <span className="text-rose-400 flex-shrink-0 font-mono">{leftoverSize(l)}</span>
                         </button>
                       </li>
                     ))}
@@ -331,7 +340,7 @@ export default function Uninstaller({ addToast }) {
                     className="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white rounded-xl transition-all shadow-lg shadow-rose-500/25 font-medium flex items-center gap-2 disabled:opacity-40"
                   >
                     <Trash2 className="w-4 h-4" />
-                    {chosen.size ? `선택한 ${chosen.size}개를 휴지통으로 (${chosenMB.toFixed(1)} MB)` : '폴더를 선택하세요'}
+                    {chosen.size ? `선택한 ${chosen.size}개를 휴지통으로 (${mbText(chosenMB)}${chosenCapped ? ' 이상' : ''})` : '폴더를 선택하세요'}
                   </button>
                 )}
               </div>

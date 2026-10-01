@@ -38,6 +38,17 @@ def test_preview_changes_nothing(ram_ok):
     assert ss.pending_changes() == {}
 
 
+
+@pytest.mark.parametrize('spec', [(0, 16), (8, 0), (None, 16), (8, None), (-2, 16), (8, float('nan')),
+                                  (True, 16), ('', 16)])
+def test_unknown_specs_are_refused_not_judged_low_end(ram_ok, spec):
+    # 사양을 읽지 못해 0·None 이 오면 '저사양' 으로 판정해 SysMain 을 끄면 안 된다
+    _services()
+    for consent in (False, True):
+        r = optimizer.apply_hardware_tailored_tuning(*spec, consent=consent)
+        assert r['success'] is False and 'tier' not in r and '읽지 못해' in r['message']
+    assert SERVICES.calls == [] and ram_ok == [] and ss.pending_changes() == {}
+
 def test_low_end_only_disables_sysmain(ram_ok):
     _services()
     POWER.active = fakewin.PLAN_HIGH_PERF

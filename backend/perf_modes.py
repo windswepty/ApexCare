@@ -112,6 +112,25 @@ def is_admin():
         return False
 
 
+def plan_name(guid, plans=None):
+    """전원 플랜 이름. 이 PC 에 등록된 이름(사용자·제조사 플랜 포함)을 먼저 쓴다.
+
+    예전에는 Windows 기본 플랜 4개만 이름을 알아서, 제조사 플랜이나 사용자가 만든 플랜을
+    쓰면 '알 수 없음' 으로 보였다.
+    """
+    if not guid:
+        return '알 수 없음'
+    if plans is None:
+        try:
+            plans = ss.available_plans()
+        except Exception:
+            plans = {}
+    name = plans.get(guid)
+    if name and name != guid:
+        return name
+    return ss.KNOWN_PLANS.get(guid, name or '알 수 없음')
+
+
 def _plan_fallback(wanted):
     """원하는 플랜이 없으면 대안을 고른다.
 
@@ -156,7 +175,8 @@ def apply_mode(mode, user_set=True, persist=True):
         'name': '이전 모드 설정 되돌리기',
         'ok': reverted['ok'],
         'detail': f"{reverted['restored']}개 항목 복구"
-                  + (f", {len(reverted['failed'])}개 실패" if reverted['failed'] else ''),
+                  + (f", {len(reverted['failed'])}개 실패 — {reverted['failed'][0].get('reason', '')}"
+                     if reverted['failed'] else ''),
         'failures': reverted['failed'],
     })
     if reverted['failed']:
@@ -172,7 +192,7 @@ def apply_mode(mode, user_set=True, persist=True):
         if target_plan:
             r = ss.set_active_plan(target_plan, group=MODE_GROUP, why=f'{spec["label"]} 모드')
             steps.append({
-                'name': f"전원 플랜 → {ss.KNOWN_PLANS.get(target_plan, target_plan)}",
+                'name': f"전원 플랜 → {plan_name(target_plan)}",
                 'ok': r['ok'], 'detail': '' if r['ok'] else r.get('reason', ''),
             })
         else:
@@ -211,15 +231,30 @@ def apply_mode(mode, user_set=True, persist=True):
     else:
         plan_ok = reverted['ok']
     success = plan_ok and not failed
+    partial = plan_ok and bool(failed)
+    if not spec['plan']:
+        # 표준 = 되돌리기. 일부만 되돌렸어도 사용자는 표준을 골랐으므로 표준으로 기록하고,
+        # 남은 설정은 get_mode() 가 'leftover' 로 알린다. 예전에는 하나만 실패해도 저장된 모드가
+        # 게이밍으로 남아 '게이밍인데 전원 플랜이 다르다' 는 엉뚱한 안내가 떴다.
+        partial = bool(reverted['failed']) and reverted['restored'] > 0
 
-    if persist and (success or plan_ok):
+    if persist and (success or plan_ok or not spec['plan']):
         try:
             from backend import config_manager
             config_manager.set_optimization_mode(mode, user_set=user_set)
         except Exception as e:
             log.warning(f'모드 저장 실패: {e}')
 
-    if failed:
+    if not spec['plan']:
+        n_ok, n_fail = reverted['restored'], len(reverted['failed'])
+        if n_fail:
+            msg = (f"성능 모드가 바꾼 설정 {n_fail}개를 되돌리지 못했습니다"
+                   + (f" ({n_ok}개는 되돌렸습니다)." if n_ok else "."))
+        elif n_ok:
+            msg = f"표준 모드로 돌아왔습니다. 성능 모드가 바꾼 설정 {n_ok}개를 원래대로 되돌렸습니다."
+        else:
+            msg = "표준 모드입니다. 되돌릴 성능 모드 설정이 없었습니다."
+    elif failed:
         msg = (f"{spec['label']} 모드를 적용했지만 {len(failed)}개 항목이 실패했습니다."
                if plan_ok else f"{spec['label']} 모드 적용에 실패했습니다.")
     else:
@@ -230,7 +265,7 @@ def apply_mode(mode, user_set=True, persist=True):
 
     return {
         'success': success,
-        'partial': plan_ok and bool(failed),
+        'partial': partial,
         'mode': mode,
         'label': spec['label'],
         'message': msg,
@@ -240,7 +275,7 @@ def apply_mode(mode, user_set=True, persist=True):
         'failedCount': len(failed),
         'notes': notes,
         'activePlan': ss.active_plan_guid(),
-        'activePlanName': ss.KNOWN_PLANS.get(ss.active_plan_guid() or '', '알 수 없음'),
+        'activePlanName': plan_name(ss.active_plan_guid()),
     }
 
 
@@ -265,26 +300,35 @@ def get_mode():
     if saved not in MODES:
         saved = 'standard'
 
+    pending = ss.pending_changes()
+    left_over = sum(1 for e in pending.values() if e.get('group') == MODE_GROUP)
     if MODES[saved]['plan']:
         expected_plan, _ = _plan_fallback(MODES[saved]['plan'])
         in_sync = (active == expected_plan) if (active and expected_plan) else False
+        # 화면이 '무엇이 어긋났는지' 를 사실대로 말하게 한다
+        out_of_sync = None if in_sync else 'plan'
     else:
         # 표준은 특정 플랜이 정답이 아니다. 성능 모드가 남긴 변경이 없으면 맞는 상태다.
+        # 이때 어긋남은 전원 플랜이 아니라 되돌리지 못한 성능 모드 설정이다.
         expected_plan = None
-        in_sync = not any(e.get('group') == MODE_GROUP for e in ss.pending_changes().values())
+        in_sync = left_over == 0
+        out_of_sync = None if in_sync else 'leftover'
 
     return {
         'mode': saved,
         'label': MODES[saved]['label'],
         'userSet': user_set,
         'activePlan': active,
-        'activePlanName': ss.KNOWN_PLANS.get(active or '', '알 수 없음'),
+        'activePlanName': plan_name(active),
         'expectedPlan': expected_plan,
+        'expectedPlanName': plan_name(expected_plan) if expected_plan else None,
         # 앱 밖에서 전원 플랜이 바뀌었을 때 UI 가 사용자에게 알릴 수 있게 한다
         'inSync': in_sync,
+        'outOfSync': out_of_sync,              # None | 'plan' | 'leftover'
+        'leftoverModeChanges': left_over,
         # 게임 부스트가 게임 동안만 게이밍 모드를 적용 중이면, 불일치 경고 대신 그 사실을 알린다
         'boostOverride': _boost_override(),
-        'pendingChanges': len(ss.pending_changes()),
+        'pendingChanges': len(pending),
     }
 
 
@@ -366,15 +410,15 @@ def list_modes():
         changes += [label for *_, label in spec['registry']]
         if spec['plan']:
             target, note = _plan_fallback(spec['plan'])
-            plan_name = plans.get(target, ss.KNOWN_PLANS.get(spec['plan'], '?'))
+            pname = plan_name(target, plans) if target else '사용 가능한 플랜 없음'
             plan_available = spec['plan'] in plans
         else:
-            note, plan_name, plan_available = None, '원래 플랜 유지', True
+            note, pname, plan_available = None, '원래 플랜 유지', True
         out.append({
             'id': key,
             'label': spec['label'],
             'summary': spec['summary'],
-            'planName': plan_name,
+            'planName': pname,
             'planAvailable': plan_available,
             'note': note,
             'changes': changes,

@@ -194,3 +194,49 @@ def test_unreadable_setting_is_a_failure_not_a_skip():
     step = next(s for s in r['steps'] if s['name'].startswith('CPU 부스트'))
     assert step['ok'] is False and not step.get('skipped')
     assert r['partial'] is True and r['failedCount'] == 1
+
+
+# ── 화면에 보이는 전원 플랜 이름과 어긋남 이유 ─────────────────
+VENDOR_PLAN = '11111111-2222-3333-4444-555555555555'
+
+
+def test_custom_plan_shows_its_real_name_not_unknown():
+    # 제조사·사용자 플랜도 이 PC 에 등록된 이름 그대로 보인다(예전에는 '알 수 없음')
+    POWER.plans[VENDOR_PLAN] = 'ASUS 터보'
+    POWER.active = VENDOR_PLAN
+    config_manager.set_optimization_mode('gaming', user_set=True)
+
+    info = perf_modes.get_mode()
+
+    assert info['activePlanName'] == 'ASUS 터보'
+    assert info['expectedPlanName'] == '고성능'
+    assert info['inSync'] is False and info['outOfSync'] == 'plan'
+
+
+def test_standard_out_of_sync_is_leftover_settings_not_power_plan():
+    _seed_plans()
+    assert perf_modes.apply_mode('gaming')['success']
+    # 표준으로 되돌리다 한 값이 실패했다고 치자: 성능 모드 설정이 남는다
+    POWER.fail_write.add((fakewin.PLAN_HIGH_PERF, ss.PROCTHROTTLEMIN, 'ac'))
+    perf_modes.apply_mode('standard')
+
+    info = perf_modes.get_mode()
+
+    assert info['mode'] == 'standard'
+    assert info['outOfSync'] == 'leftover' and info['leftoverModeChanges'] >= 1
+    assert info['expectedPlanName'] is None
+
+
+def test_in_sync_has_no_reason():
+    _seed_plans()
+    assert perf_modes.apply_mode('eco')['success']
+    info = perf_modes.get_mode()
+    assert info['inSync'] is True and info['outOfSync'] is None
+    assert info['activePlanName'] == '절전'
+
+
+def test_mode_cards_use_registered_plan_names():
+    POWER.plans[fakewin.PLAN_HIGH_PERF] = '고성능 (사용자 지정)'
+    cards = {m['id']: m for m in perf_modes.list_modes()}
+    assert cards['gaming']['planName'] == '고성능 (사용자 지정)'
+    assert cards['standard']['planName'] == '원래 플랜 유지'

@@ -68,13 +68,14 @@ export default function Sidebar({ activeTab, setActiveTab }) {
             return (
               <button
                 key={item.id}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => {
                   setActiveTab(item.id);
                 }}
                 className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl transition-all duration-300 text-sm font-medium ${
                   isActive
                     ? 'bg-black dark:bg-white text-white dark:text-black shadow-md'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-black dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 border border-transparent'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 border border-transparent'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">

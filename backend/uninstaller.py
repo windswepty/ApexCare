@@ -231,7 +231,15 @@ def _normalize(s):
     return s
 
 
-def _folder_size(path, cap_bytes=40 * 1024 ** 3):
+FOLDER_SIZE_CAP = 40 * 1024 ** 3
+
+
+def _folder_size(path, cap_bytes=FOLDER_SIZE_CAP):
+    """폴더 크기(바이트)와 끝까지 세지 않고 멈췄는지.
+
+    너무 큰 폴더는 cap_bytes 를 넘으면 세기를 멈춘다. 그때의 합계는 실제 크기가 아니라
+    '이 이상' 이므로 capped=True 로 알린다. 예전에는 멈춘 값을 정확한 크기처럼 보여 줬다.
+    """
     total = 0
     try:
         for dp, _, fs in os.walk(path):
@@ -243,10 +251,10 @@ def _folder_size(path, cap_bytes=40 * 1024 ** 3):
                 except Exception:
                     pass
             if total > cap_bytes:
-                break
+                return total, True
     except Exception:
         pass
-    return total
+    return total, False
 
 
 def find_leftovers(app_name, install_location='', publisher=''):
@@ -285,9 +293,11 @@ def find_leftovers(app_name, install_location='', publisher=''):
             log.info(f"잔여물 후보에서 제외(설치된 다른 프로그램이 이 안에 있음): {path}")
             return
         seen.add(p)
+        size, capped = _folder_size(path)
         out.append({
             "path": path,
-            "sizeMB": round(_folder_size(path) / (1024 ** 2), 2),
+            "sizeMB": round(size / (1024 ** 2), 2),
+            "sizeCapped": capped,       # True 면 sizeMB 는 '이 이상' 이다
             "confidence": confidence,   # 'certain' | 'likely'
             "reason": why,
         })

@@ -357,6 +357,25 @@ def test_leftovers_use_the_install_location_read_before_uninstall(program_files)
         [(os.path.normcase(str(folder)), 'certain')]
 
 
+def test_huge_leftover_size_is_a_lower_bound_not_exact(program_files, monkeypatch):
+    folder = program_files / 'Vendor' / 'FooSuite'
+    (folder / 'a').mkdir(parents=True)
+    (folder / 'b').mkdir()
+    (folder / 'a' / 'big.bin').write_bytes(b'x' * 3000)
+    (folder / 'b' / 'more.bin').write_bytes(b'x' * 3000)
+    _register_app('FooApp', 'Foo App', 'uninst.exe', str(folder))
+    uninstaller.get_installed_apps()
+    _unregister_app('FooApp')
+    monkeypatch.setattr(uninstaller._folder_size, '__defaults__', (1000,))
+
+    item = uninstaller.scan_leftovers('Foo App')['items'][0]
+
+    # 세기를 멈춘 값은 '이 이상' 이다. 예전에는 멈춘 값을 정확한 크기처럼 보여 줬다.
+    assert item['sizeCapped'] is True
+    assert uninstaller._folder_size(str(folder), cap_bytes=10 ** 9) == (6000, False)
+    ui = _code('src/components/Uninstaller.jsx')
+    assert 'sizeCapped' in ui and "' 이상'" in ui
+
 def test_leftover_folder_holding_another_installed_program_is_not_offered(program_files):
     shared = program_files / 'Foo App'
     other = shared / 'Other Tool'
