@@ -518,6 +518,45 @@ def leftover_guard():
     return verdict(problems, [])
 
 
+@check('삭제 안전: 정션은 휴지통으로 보내지 않고, 가리키는 원래 폴더도 그대로')
+def link_guard():
+    import _winapi
+    import shutil
+    from backend import safe_delete, uninstaller
+    base = os.path.join(os.environ['LOCALAPPDATA'], 'ApexSbxLinkCheck')
+    real = os.path.join(base, 'RealData')
+    link = os.path.join(base, 'LinkToData')
+    holder = os.path.join(base, 'Holder')
+    os.makedirs(real, exist_ok=True)
+    os.makedirs(holder, exist_ok=True)
+    with open(os.path.join(real, 'save.dat'), 'wb') as f:
+        f.write(b'x' * 4096)
+    _winapi.CreateJunction(real, link)
+    _winapi.CreateJunction(real, os.path.join(holder, 'inner'))
+    problems = []
+    try:
+        r = safe_delete.to_recycle_bin([link])
+        if r.get('ok') or not os.path.lexists(link) or not os.path.exists(os.path.join(real, 'save.dat')):
+            problems.append(f'정션을 지우려 했습니다: {r}')
+        c = uninstaller.clean_leftovers([link])
+        if c.get('deleted') or not os.path.exists(os.path.join(real, 'save.dat')):
+            problems.append(f'잔여물 정리가 정션 너머를 지웠습니다: {c}')
+        # 정션을 품은 폴더는 휴지통으로 보내도 된다. 정션은 링크째 옮겨지고 원래 폴더는 남아야 한다.
+        size = safe_delete.walk_size(holder)
+        if size != 0:
+            problems.append(f'정션 너머 크기를 셌습니다: {size} 바이트')
+        r = safe_delete.to_recycle_bin([holder])
+        if not r.get('ok') or os.path.exists(holder):
+            problems.append(f'정션을 품은 폴더를 휴지통으로 보내지 못했습니다: {r}')
+        if not os.path.exists(os.path.join(real, 'save.dat')):
+            problems.append('폴더를 휴지통으로 보냈더니 안의 정션이 가리키던 파일이 사라졌습니다')
+    finally:
+        if os.path.lexists(link):
+            os.rmdir(link)                                     # 정션만 지운다(가리키는 폴더는 그대로)
+        shutil.rmtree(base, ignore_errors=True)                # 이 점검이 만든 폴더만 지운다
+    return verdict(problems, [])
+
+
 @check('프로세스 우선순위: 바꾸고 원래대로, 시스템 프로세스는 거부')
 def priority():
     import psutil

@@ -331,11 +331,15 @@ def restore_network_tweaks():
             remaining.pop("interfaces", None)
 
     retryable = bool(set(remaining) & {"autotuning", "throttling_index", "interfaces"})
-    if retryable:
-        cfg["network_tweak_backup"] = remaining
-    else:
-        cfg.pop("network_tweak_backup", None)
-    config_manager.save_config(cfg)
+
+    def keep_remaining(c):
+        # 처음에 읽은 설정을 통째로 저장하지 않는다. 그 사이 바뀐 다른 값이 사라진다.
+        if retryable:
+            c["network_tweak_backup"] = remaining
+        else:
+            c.pop("network_tweak_backup", None)
+    if not config_manager.update_config(keep_remaining):
+        log.warning("구버전 네트워크 튜닝 백업 기록을 갱신하지 못했습니다")
 
     msg = f"구버전 네트워크 튜닝 복구: {', '.join(restored) if restored else '없음'}"
     if failed:

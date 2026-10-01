@@ -80,9 +80,8 @@ def run(seconds=BENCH_SECONDS):
         results[mode] = result
         try:
             from backend import config_manager
-            cfg = config_manager.load_config()
-            cfg[_SETTINGS_KEY] = results
-            config_manager.save_config(cfg)
+            if not config_manager.update_config(lambda cfg: cfg.__setitem__(_SETTINGS_KEY, results)):
+                log.warning('측정 결과를 저장하지 못했습니다')
         except Exception as e:
             log.warning(f'측정 결과를 저장하지 못했습니다: {e}')
         return {'success': True, 'mode': mode, 'result': result, 'results': results,

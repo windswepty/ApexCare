@@ -239,22 +239,12 @@ def _folder_size(path, cap_bytes=FOLDER_SIZE_CAP):
 
     너무 큰 폴더는 cap_bytes 를 넘으면 세기를 멈춘다. 그때의 합계는 실제 크기가 아니라
     '이 이상' 이므로 capped=True 로 알린다. 예전에는 멈춘 값을 정확한 크기처럼 보여 줬다.
+    링크·정션 너머는 세지 않는다(휴지통으로 보내도 그쪽 파일은 지워지지 않는다).
     """
-    total = 0
     try:
-        for dp, _, fs in os.walk(path):
-            for f in fs:
-                fp = os.path.join(dp, f)
-                try:
-                    if not os.path.islink(fp):
-                        total += os.path.getsize(fp)
-                except Exception:
-                    pass
-            if total > cap_bytes:
-                return total, True
+        return safe_delete.walk_size(path, cap_bytes=cap_bytes)
     except Exception:
-        pass
-    return total, False
+        return 0, False
 
 
 def find_leftovers(app_name, install_location='', publisher=''):
@@ -282,6 +272,9 @@ def find_leftovers(app_name, install_location='', publisher=''):
     def add(path, confidence, why):
         p = safe_delete.norm(path)
         if p in seen or not os.path.isdir(path):
+            return
+        if safe_delete.is_link_like(path):
+            log.info(f"잔여물 후보에서 제외(다른 위치로 이어진 링크): {path}")
             return
         if safe_delete.is_protected(path):
             log.info(f"잔여물 후보에서 제외(보호 경로): {path}")

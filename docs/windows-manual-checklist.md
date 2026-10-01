@@ -77,9 +77,9 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 
 ---
 
-## 2. 복구 센터가 비어 있는 상태
+## 2. '변경 내역 · 되돌리기' 가 비어 있는 상태
 
-- [ ] 2-1. 복구 센터에 "되돌릴 변경 없음" 으로 나온다
+- [ ] 2-1. '변경 내역 · 되돌리기'에 "되돌릴 변경 없음" 으로 나온다
 - [ ] 2-2. "전부 원래대로" 를 눌러도 **스냅숏** `02` 가 `base` 와 같다(바꾼 적 없는 것을 추측해 쓰지 않는다)
 
 ---
@@ -102,12 +102,13 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
       활성 플랜 `a1841308-…`(절전), 절전 플랜의 최소 `0x00000005`·최대 `0x00000046`(70)·코어 `0x00000032`(50),
       부스트 모드 `0x00000000`(끔)·EPP `0x00000050`(80)·PCIe 절전 `0x00000002`, 헤더의 **CPU 실제 속도** 가 기본 클럭보다 낮다,
       `SystemResponsiveness`·`NetworkThrottlingIndex` 는 `base` 값. 그다음 **표준** → 3-2 와 같은 결과
-- [ ] 3-4. **게이밍** 적용 → 가상 머신 **재부팅** → 앱 실행 → 여전히 게이밍(값 유지), 복구 센터에 항목이 보인다 →
+- [ ] 3-4. **게이밍** 적용 → 가상 머신 **재부팅** → 앱 실행 → 여전히 게이밍(값 유지), '변경 내역 · 되돌리기'에 항목이 보인다 →
       **표준** → `base` 와 같다(3-2 기준)
 - [ ] 3-5. (고성능 플랜이 없는 경우) 게이밍 적용 시 "균형 조정 위에 세부 설정만 적용" 안내가 뜨고, 표준으로 되돌리면 `base` 와 같다
 - [ ] 3-6. **게이밍** 상태에서 앱 밖으로 전원 플랜을 바꾼 뒤(`powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e`)
       성능 모드 화면을 다시 열면 모드가 실제 상태와 다르다는 안내가 나온다. 앱에서 **표준** → `base` 와 같다
       (표준은 특정 플랜이 정답이 아니라서, 표준 상태에서 플랜을 바꾸면 안내가 나오지 않는 것이 맞다)
+- [ ] 3-7. 제조사·직접 만든 전원 플랜을 쓰는 PC 에서 3-6 처럼 플랜을 바꾸면, 안내에 그 플랜의 **실제 이름** 이 나온다('알 수 없음' 이 아니다)
 
 ---
 
@@ -118,7 +119,7 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 - [ ] 4-1. 미리보기만 하고 닫기 → **스냅숏** 이 `base` 와 같다
 - [ ] 4-2. **저사양** 적용 → 기대 차이: `SysMain: Start=4` 와 저널(group=hw_tuning)만. **WSearch·전원 플랜은 그대로**
 - [ ] 4-3. **고사양** 적용 → SysMain·WSearch 가 자동 시작(이미 "자동(지연된 시작)" 이면 그대로). 전원 플랜은 그대로
-- [ ] 4-4. 복구 센터 "전부 원래대로" → `base` 와 같다
+- [ ] 4-4. '변경 내역 · 되돌리기' "전부 원래대로" → `base` 와 같다
 - [ ] 4-5. 서비스 시작 유형 변경은 **다음 부팅부터** 라는 안내가 나오고, 실행 중인 SysMain 을 즉시 멈추지 않는다
       (`Get-Service SysMain` 의 Status 가 그대로)
 
@@ -129,7 +130,7 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 - [ ] 5-1. **원격 분석 줄이기** 만 선택해 실행 → 기대 차이: `AllowTelemetry = 0`, `DiagTrack: Start=4`, 저널(group=debloat).
       DiagTrack 이 **지금 멈추지는 않는다**(`Get-Service DiagTrack`)
 - [ ] 5-2. **Cortana 끄기** → `AllowCortana = 0`
-- [ ] 5-3. 복구 센터 "전부 원래대로" → `base` 와 같다(원래 없던 정책 값은 **지워져야** 함)
+- [ ] 5-3. '변경 내역 · 되돌리기' "전부 원래대로" → `base` 와 같다(원래 없던 정책 값은 **지워져야** 함)
 - [ ] 5-4. 앱 제거 항목에 "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기" 표시가 있고, 실행 전에 패키지 이름과 함께 확인을 받는다
 - [ ] 5-5. **Bing 앱**·**영화 및 TV** 제거 → `[Appx]` 에서 `Microsoft.BingNews`·`BingWeather`·`ZuneVideo` 만 사라지고
       `Microsoft.ZuneMusic`(미디어 플레이어)·`XboxGamingOverlay`(게임 바)·`GamingApp`(새 Xbox 앱)은 남는다.
@@ -265,6 +266,11 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 11-2. 다시 제거를 끝까지 마친 뒤 "남은 폴더 찾기" → 후보는 그 프로그램의 설치 경로·정확히 같은 이름의 폴더뿐이다.
       `Microsoft`·`Common Files`·다른 회사 폴더, 다른 프로그램이 설치된 폴더가 **나오지 않는다**. 폴더마다 잡힌 이유가 보인다
 - [ ] 11-3. 잔여물 정리 → 고른 폴더만 **휴지통** 으로 간다(선택을 해제한 폴더는 그대로)
+- [ ] 11-4. 정션 잔여물: 명령 프롬프트에서 `mkdir %LOCALAPPDATA%\RealData`, 그 안에 아무 파일 하나,
+      `mklink /J %LOCALAPPDATA%\FooLeft %LOCALAPPDATA%\RealData` → `reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\FooLeft`
+      에 `DisplayName=FooLeft`, `UninstallString=notepad.exe`, `InstallLocation=%LOCALAPPDATA%\FooLeft` 를 넣고 앱의 프로그램 목록을 연 뒤
+      그 키를 지운다 → "남은 폴더 찾기" 에 `FooLeft` 가 **나오지 않고**, `RealData` 의 파일이 그대로다
+      (자동 점검 '삭제 안전: 정션은 휴지통으로 보내지 않고…' 가 같은 것을 확인한다)
 
 ---
 
@@ -279,7 +285,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 ## 13. APEX CARE 제거 — 지우기 전에 바꾼 것을 되돌린다
 
 제거 프로그램(`tools/uninstall.py`)은 설치 폴더를 지우기 전에 `APEX CARE.exe --revert-for-uninstall` 로
-앱을 창 없이 불러(`backend/uninstall_prep.py`) 복구 센터의 "전부 원래대로" 와 꺼 둔 시작 프로그램 되켜기를 한다.
+앱을 창 없이 불러(`backend/uninstall_prep.py`) '변경 내역 · 되돌리기'의 "전부 원래대로" 와 꺼 둔 시작 프로그램 되켜기를 한다.
 결과는 `%APPDATA%\APEX_CARE_DATA\uninstall_revert.json` 에 남는다.
 
 준비: 게이밍 모드 + 원격 분석 줄이기 적용, 9번의 테스트 시작 프로그램 두 개(HKCU·HKLM)를 앱에서 꺼 둔 상태.
@@ -295,7 +301,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 13-4. `uninstall_revert.json` 의 `success` 가 `true`, `failed` 가 빈 목록이다
 - [ ] 13-5. 되돌리기 실패 경로: 재설치 → 게이밍 적용 → 앱을 닫고 `%LOCALAPPDATA%\APEX CARE\APEX CARE.exe` 이름을
       잠깐 `APEX CARE.exe.bak` 으로 바꾼다 → 제거 → "설정을 되돌리지 못했습니다" 와 함께 **기본 선택이 '아니요'** 인 질문이 뜬다 →
-      Enter('아니요') → 설치 폴더가 그대로다 → 이름을 되돌리고 앱을 열면 복구 센터에 게이밍 모드 항목이 남아 있다
+      Enter('아니요') → 설치 폴더가 그대로다 → 이름을 되돌리고 앱을 열면 '변경 내역 · 되돌리기'에 게이밍 모드 항목이 남아 있다
 - [ ] 13-6. 서비스 `DelayedAutostart` 가 `<없음>` 에서 `0` 으로 바뀐 것만 보이면 같은 뜻(지연 시작 아님)이다. 4·5절도 같다
 
 ---
@@ -305,7 +311,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 | 절 | 통과 | 실패·메모 |
 |---|---|---|
 | 1 설치·첫 실행 | | |
-| 2 빈 복구 센터 | | |
+| 2 빈 '변경 내역 · 되돌리기' | | |
 | 3 성능 모드 | | |
 | 4 맞춤 튜닝 | | |
 | 5 디블로터 | | |

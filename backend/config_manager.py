@@ -1,6 +1,9 @@
 import json
 import os
 import re
+import tempfile
+import threading
+import time
 
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'APEX_CARE_DATA')
 os.makedirs(APPDATA_DIR, exist_ok=True)
@@ -37,24 +40,71 @@ DEFAULT_CONFIG = {
 
 UI_THEMES = ('cyan', 'graphite', 'stone', 'midnight', 'violet')
 
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return DEFAULT_CONFIG.copy()
+# pywebview 는 JS 호출마다 새 스레드를 쓰고, 게임 부스터 감시도 따로 돈다. 읽고-고치고-쓰기를
+# 한 번에 하나만 하게 한다. 예전에는 두 스레드가 같은 임시 파일에 동시에 써서 파일이 깨질 수 있었고,
+# 깨진 파일은 기본값으로 바뀌며 구버전 복구 백업까지 사라졌다. 늦게 저장한 쪽이 먼저 저장한 값을
+# 덮어쓰는 일(예: 색 설정을 바꾸는 사이 부스트가 저장한 값이 사라짐)도 있었다.
+_lock = threading.RLock()
+
+_READ_RETRIES = 3          # 백신 검사 등으로 잠깐 잠긴 파일을 다시 읽어 볼 횟수
+_RETRY_WAIT = 0.15
+
+
+class _ReadError(Exception):
+    """파일은 있는데 읽지 못했다(잠김·권한). 내용이 깨진 것과 다르다."""
+
+
+class _Unreadable(dict):
+    """읽지 못해 기본값으로 대신한 설정. 이것을 저장하면 멀쩡한 파일을 기본값으로 덮어쓰게 된다."""
+
+
+def _move_aside():
+    stamp = time.strftime('%Y%m%d-%H%M%S')
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # Merge defaults for any missing keys
-            cfg = DEFAULT_CONFIG.copy()
-            cfg.update(data)
-            return cfg
+        os.replace(CONFIG_FILE, f"{CONFIG_FILE}.corrupt-{stamp}")
     except Exception:
-        # 깨진 파일을 다음 저장이 덮어쓰면 그 안의 복구 백업도 함께 사라진다.
-        # 옆으로 옮겨 두고 기본값으로 계속한다.
-        try:
-            os.replace(CONFIG_FILE, CONFIG_FILE + ".corrupt")
-        except Exception:
-            pass
+        pass
+
+
+def _read_once():
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
         return DEFAULT_CONFIG.copy()
+    except OSError as e:
+        raise _ReadError(e)
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+        if not isinstance(data, dict):
+            raise ValueError("설정 파일의 최상위가 객체가 아닙니다")
+    except ValueError:
+        # 내용이 깨졌다. 다음 저장이 덮어쓰면 그 안의 복구 백업도 사라지므로 옆으로 옮겨 둔다.
+        _move_aside()
+        return DEFAULT_CONFIG.copy()
+    cfg = DEFAULT_CONFIG.copy()
+    cfg.update(data)
+    return cfg
+
+
+def _read_strict():
+    for attempt in range(_READ_RETRIES):
+        try:
+            return _read_once()
+        except _ReadError:
+            if attempt == _READ_RETRIES - 1:
+                raise
+            time.sleep(_RETRY_WAIT)
+
+
+def load_config():
+    """설정을 읽는다. 파일이 잠겨 읽지 못하면 기본값을 돌려주되, 그 값은 저장되지 않는다."""
+    with _lock:
+        try:
+            return _read_strict()
+        except _ReadError:
+            return _Unreadable(DEFAULT_CONFIG)
+
 
 def save_config(config):
     """원자적으로 저장한다. 성공하면 True.
@@ -62,26 +112,60 @@ def save_config(config):
     예전에는 파일을 그 자리에서 덮어쓰고 실패를 삼켰다. 쓰는 도중 죽으면 설정이
     반쯤 쓰인 채 깨지고, load_config 가 조용히 기본값으로 돌아가 구버전 복구 백업
     (network_tweak_backup, service_start_backup)까지 사라졌다.
+    읽지 못해 대신 쓴 기본값(_Unreadable)은 저장하지 않는다.
     """
-    tmp = CONFIG_FILE + ".tmp"
-    try:
-        os.makedirs(APPDATA_DIR, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, CONFIG_FILE)
-        return True
-    except Exception:
+    if isinstance(config, _Unreadable):
         return False
+    with _lock:
+        tmp = None
+        try:
+            os.makedirs(APPDATA_DIR, exist_ok=True)
+            # 쓸 때마다 다른 임시 파일. 같은 이름을 함께 쓰면 서로의 내용을 잘라 먹는다.
+            fd, tmp = tempfile.mkstemp(prefix="settings.", suffix=".tmp", dir=APPDATA_DIR)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            for attempt in range(_READ_RETRIES):
+                try:
+                    os.replace(tmp, CONFIG_FILE)
+                    tmp = None
+                    return True
+                except PermissionError:
+                    # 백신이 잠깐 잡고 있으면 바꿔 넣기가 거부된다
+                    if attempt == _READ_RETRIES - 1:
+                        raise
+                    time.sleep(_RETRY_WAIT)
+        except Exception:
+            return False
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
+def update_config(change):
+    """읽고 → change(cfg) 로 고치고 → 저장을 한 번에 한다. 저장했으면 True.
+
+    오래 걸리는 작업 전에 읽어 둔 설정을 통째로 다시 저장하면, 그 사이 다른 곳이 바꾼 값이 사라진다.
+    바꾸는 쪽은 자기 키만 고치도록 이 함수를 쓴다. 파일을 읽지 못하면 아무것도 쓰지 않는다.
+    """
+    with _lock:
+        try:
+            cfg = _read_strict()
+        except _ReadError:
+            return False
+        change(cfg)
+        return save_config(cfg)
+
 
 def get_booster_state():
     return load_config().get("booster_enabled", True)
 
 def set_booster_state(state):
-    config = load_config()
-    config["booster_enabled"] = bool(state)
-    return save_config(config)
+    return update_config(lambda c: c.__setitem__("booster_enabled", bool(state)))
 
 
 def get_boost_restore_mode():
@@ -93,31 +177,30 @@ def get_boost_restore_mode():
 
 
 def set_boost_restore_mode(mode):
-    config = load_config()
-    if mode is None:
-        config.pop("boost_restore_mode", None)
-    else:
-        config["boost_restore_mode"] = str(mode)
-    return save_config(config)
+    def change(c):
+        if mode is None:
+            c.pop("boost_restore_mode", None)
+        else:
+            c["boost_restore_mode"] = str(mode)
+    return update_config(change)
 
 def get_eula_accepted():
     return load_config().get("eula_accepted", False)
 
 def set_eula_accepted(state):
-    config = load_config()
-    config["eula_accepted"] = bool(state)
-    save_config(config)
+    return update_config(lambda c: c.__setitem__("eula_accepted", bool(state)))
 
 def get_optimization_mode():
     return load_config().get("optimization_mode", "standard")
 
 def set_optimization_mode(mode, user_set=True):
-    config = load_config()
-    config["optimization_mode"] = str(mode)
-    # 게임 자동감지 등 내부 호출(user_set=False)은 '사용자가 고른 모드'로 기록하지 않는다
-    if user_set:
-        config["optimization_mode_user_set"] = True
-    save_config(config)
+    """저장했으면 True."""
+    def change(c):
+        c["optimization_mode"] = str(mode)
+        # 게임 자동감지 등 내부 호출(user_set=False)은 '사용자가 고른 모드'로 기록하지 않는다
+        if user_set:
+            c["optimization_mode_user_set"] = True
+    return update_config(change)
 
 def get_optimization_mode_user_set():
     return load_config().get("optimization_mode_user_set", False)
@@ -126,9 +209,7 @@ def get_wu_recovery_done():
     return load_config().get("wu_recovery_done", False)
 
 def set_wu_recovery_done(state):
-    config = load_config()
-    config["wu_recovery_done"] = bool(state)
-    save_config(config)
+    return update_config(lambda c: c.__setitem__("wu_recovery_done", bool(state)))
 
 
 def get_boost_settings():
@@ -145,9 +226,7 @@ def set_boost_setting(key, value):
                'boost_auto_power_mode', 'boost_tame_background'}
     if key not in allowed:
         return {"success": False, "message": f"알 수 없는 설정입니다: {key}"}
-    c = load_config()
-    c[key] = bool(value)
-    if not save_config(c):
+    if not update_config(lambda c: c.__setitem__(key, bool(value))):
         return {"success": False, "message": "설정을 저장하지 못했습니다."}
     return {"success": True, "key": key, "value": bool(value)}
 
@@ -162,9 +241,7 @@ def set_ui_theme(theme):
     """UI 색 조합을 저장하고, 다시 읽어 저장됐는지 확인한다."""
     if theme not in UI_THEMES:
         return {"success": False, "message": f"알 수 없는 색 조합입니다: {theme}"}
-    c = load_config()
-    c["ui_theme"] = theme
-    if not save_config(c) or load_config().get("ui_theme") != theme:
+    if not update_config(lambda c: c.__setitem__("ui_theme", theme)) or load_config().get("ui_theme") != theme:
         return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색 조합으로 열립니다."}
     return {"success": True, "theme": theme}
 
@@ -185,9 +262,7 @@ def set_ui_accent(value):
     elif not (isinstance(value, str) and _HEX_RE.match(value)):
         return {"success": False, "message": f"색 형식이 올바르지 않습니다: {value}"}
     value = value.lower()
-    c = load_config()
-    c["ui_accent"] = value
-    if not save_config(c) or load_config().get("ui_accent") != value:
+    if not update_config(lambda c: c.__setitem__("ui_accent", value)) or load_config().get("ui_accent") != value:
         return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색으로 열립니다."}
     return {"success": True, "accent": value or None}
 
@@ -198,8 +273,7 @@ def get_setup_wizard_done():
 
 def set_setup_wizard_done():
     """마법사를 닫았다고 기록한다. 다시 읽어 저장됐는지 확인한다."""
-    c = load_config()
-    c["setup_wizard_done"] = True
-    if not save_config(c) or load_config().get("setup_wizard_done") is not True:
+    if (not update_config(lambda c: c.__setitem__("setup_wizard_done", True))
+            or load_config().get("setup_wizard_done") is not True):
         return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때 마법사가 다시 뜰 수 있습니다."}
     return {"success": True}

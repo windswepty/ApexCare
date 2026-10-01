@@ -241,9 +241,13 @@ def apply_mode(mode, user_set=True, persist=True):
     if persist and (success or plan_ok or not spec['plan']):
         try:
             from backend import config_manager
-            config_manager.set_optimization_mode(mode, user_set=user_set)
+            saved_ok = config_manager.set_optimization_mode(mode, user_set=user_set)
         except Exception as e:
             log.warning(f'모드 저장 실패: {e}')
+            saved_ok = False
+        if not saved_ok:
+            # 설정은 바뀌었지만 '어느 모드인지' 기록을 못 했다. 다음 실행 때 화면이 다른 모드로 보일 수 있다.
+            notes.append('설정 파일에 고른 모드를 저장하지 못했습니다. 다음 실행 때 다른 모드로 표시될 수 있습니다.')
 
     if not spec['plan']:
         n_ok, n_fail = reverted['restored'], len(reverted['failed'])

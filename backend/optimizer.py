@@ -920,15 +920,17 @@ def restore_tailored_service_config():
                     done.append(svc)
             if done:
                 # 되돌린 항목만 지운다. 실패한 것은 남겨야 다시 시도할 수 있다.
-                cfg = config_manager.load_config()
-                b = cfg.get("service_start_backup") or {}
-                for svc in done:
-                    b.pop(svc, None)
-                if b:
-                    cfg["service_start_backup"] = b
-                else:
-                    cfg.pop("service_start_backup", None)
-                config_manager.save_config(cfg)
+                def drop_done(cfg):
+                    b = cfg.get("service_start_backup") or {}
+                    for svc in done:
+                        b.pop(svc, None)
+                    if b:
+                        cfg["service_start_backup"] = b
+                    else:
+                        cfg.pop("service_start_backup", None)
+                if not config_manager.update_config(drop_done):
+                    # 복구는 됐지만 기록을 못 지웠다. 다음에 다시 시도해도 같은 값을 쓰므로 해가 없다.
+                    log.warning("구버전 서비스 백업에서 복구한 항목을 지우지 못했습니다")
 
         failed = [s for s in steps if not s["ok"]]
         if not steps:

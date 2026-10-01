@@ -18,6 +18,7 @@ import ctypes
 import ctypes.wintypes
 import logging
 import os
+import stat
 
 log = logging.getLogger('SafeDelete')
 
@@ -110,6 +111,26 @@ def is_protected(path):
     return False
 
 
+_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+
+
+def is_link_like(path):
+    """심볼릭 링크·디렉터리 정션·기타 재분석 지점이면 True. 판정하지 못하면 True(안전 쪽).
+
+    norm() 은 링크를 실제 위치로 푼다. 링크를 그대로 지우려 하면 링크가 아니라
+    링크가 가리키는 원래 폴더가 휴지통으로 간다(다른 프로그램·사용자의 데이터일 수 있다).
+    """
+    try:
+        if os.path.islink(path):
+            return True
+        isjunction = getattr(os.path, 'isjunction', None)       # Python 3.12+
+        if isjunction and isjunction(path):
+            return True
+        return bool(getattr(os.lstat(path), 'st_file_attributes', 0) & _REPARSE_POINT)
+    except OSError:
+        return True
+
+
 def is_inside(path, root):
     """path 가 root 안에 있는가. 문자열 startswith 만 쓰면
     C:\\ProgramData2 가 C:\\ProgramData 안에 있다고 잘못 판정한다."""
@@ -135,6 +156,11 @@ def to_recycle_bin(paths):
         try:
             if not p or not os.path.exists(p):
                 failed.append({"path": p, "reason": "존재하지 않음"})
+                continue
+            if is_link_like(p):
+                # 링크 경로를 풀면 원래 폴더를 지우게 된다. 링크도, 원래 폴더도 건드리지 않는다.
+                failed.append({"path": p, "reason": "다른 위치로 이어진 링크(정션)라 지우지 않았습니다"})
+                log.warning(f"링크 삭제 거부: {p}")
                 continue
             if is_protected(p):
                 failed.append({"path": p, "reason": "보호된 시스템/사용자 폴더"})
@@ -184,18 +210,38 @@ def to_recycle_bin(paths):
 
 
 def _size_of(path):
+    """실제로 지워질 파일 크기의 합. 링크·정션 너머는 세지 않는다.
+
+    휴지통으로 폴더를 보내면 안의 정션은 링크째 옮겨지고, 가리키는 곳의 파일은 그대로다.
+    예전에는 os.walk 가 정션을 따라 들어가 그 너머까지 '확보한 용량' 에 더했다.
+    """
+    if is_link_like(path):
+        return 0
     if os.path.isfile(path):
         return os.path.getsize(path)
-    total = 0
-    for dp, _, fs in os.walk(path):
+    return walk_size(path)
+
+
+def walk_size(path, cap_bytes=None):
+    """폴더 크기(바이트). 링크·정션인 하위 폴더·파일은 건너뛴다.
+
+    cap_bytes 를 넘으면 세기를 멈추고 (합계, True) 를, 아니면 (합계, False) 를 돌려준다.
+    cap_bytes 가 None 이면 합계만 돌려준다.
+    """
+    total, capped = 0, False
+    for dp, dirs, fs in os.walk(path, topdown=True, followlinks=False):
+        dirs[:] = [d for d in dirs if not is_link_like(os.path.join(dp, d))]
         for f in fs:
             fp = os.path.join(dp, f)
             try:
-                if not os.path.islink(fp):
+                if not is_link_like(fp):
                     total += os.path.getsize(fp)
             except Exception:
                 pass
-    return total
+        if cap_bytes is not None and total > cap_bytes:
+            capped = True
+            break
+    return (total, capped) if cap_bytes is not None else total
 
 
 def permanent_delete(paths, reason):
@@ -211,6 +257,9 @@ def permanent_delete(paths, reason):
     for p in paths:
         try:
             if not os.path.exists(p):
+                continue
+            if is_link_like(p):
+                failed.append({"path": p, "reason": "링크(정션)"})
                 continue
             if is_protected(p):
                 failed.append({"path": p, "reason": "보호된 경로"})
