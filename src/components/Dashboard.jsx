@@ -8,6 +8,7 @@ import {
   HardDrive,
   MemoryStick,
   XCircle,
+  MinusCircle,
   Loader2,
   Monitor
 } from 'lucide-react';
@@ -23,10 +24,14 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const pctText = (v, state) => (isNum(v) ? `${v}%` : state === 'unavailable' ? '측정 불가' : '측정 중');
 const barWidth = (v) => `${isNum(v) ? Math.max(0, Math.min(100, v)) : 0}%`;
 
-const renderLineGraph = (history) => {
+const renderLineGraph = (history, state) => {
   const height = 64; // h-16
   const width = 200;
 
+  // 이 PC 에서 잴 수 없는 값이면 기록이 모일 일도 없다. 예전에는 '기록을 모으는 중…' 이 끝나지 않았다.
+  if (state === 'unavailable') {
+    return <p className="text-[11px] text-gray-500 font-mono">이 PC 에서는 잴 수 없습니다</p>;
+  }
   // 잰 칸만 잇는다. 재지 않은 칸(null)은 그리지 않는다.
   const measured = history.map((val, i) => ({ val, i })).filter((p) => isNum(p.val));
   if (measured.length < 2) {
@@ -74,12 +79,13 @@ const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기
 
 // 설치 용량과 Windows 가 쓸 수 있는 용량이 다르면(내장 그래픽 예약 등) 둘 다 보여 준다.
 // 예전에는 쓸 수 있는 용량만 'Total' 로 보여 16GB PC 가 15.4GB 로 보였다.
+// 차이는 작업 관리자 용어로 '하드웨어 예약' 이다. '사용 가능' 은 지금 비어 있는 메모리(아래 줄)를 가리키므로 쓰지 않는다.
 function ramTotalLabel(info) {
   const usable = Number(info.ramTotalGB);
   const installed = Number(info.ramInstalledGB);
   if (!(usable > 0)) return '…';
   if (installed > 0 && installed - usable >= 0.1) {
-    return `설치 ${installed.toFixed(1)} GB · 사용 가능 ${usable.toFixed(1)} GB`;
+    return `설치 ${installed.toFixed(1)} GB · 하드웨어 예약 ${(installed - usable).toFixed(1)} GB`;
   }
   return `${usable.toFixed(1)} GB`;
 }
@@ -137,6 +143,30 @@ export default function Dashboard({ addToast, active = true }) {
 
   const optPollInterval = useRef(null);
 
+  // 원클릭이 끝날 때 아직 돌던 디스크 최적화(pending)의 최종 결과. 예전에는 끝나거나 실패해도 '진행 중' 으로 남았다.
+  const followPendingStep = useCallback(async () => {
+    const a = window.pywebview?.api;
+    if (!a?.getTrimStatus) return;
+    try {
+      const st = await a.getTrimStatus();
+      if (!st || st.status === 'running' || st.status === 'idle') return;
+      const ok = st.status === 'success';
+      setLastRun((run) => {
+        if (!run || !run.pendingCount) return run;
+        const steps = run.steps.map((x) => (x.pending
+          ? { ...x, pending: false, ok, detail: ok ? (st.summary || '끝났습니다') : (st.error || '실패했습니다') }
+          : x));
+        return { ...run, steps, pendingCount: 0, failedCount: steps.filter((x) => !x.ok && !x.pending && !x.cancelled).length };
+      });
+      if (addToast) {
+        addToast(ok ? '백그라운드에서 돌던 디스크 최적화가 끝났습니다.'
+          : `백그라운드에서 돌던 디스크 최적화가 실패했습니다${st.error ? `: ${st.error}` : '.'}`, ok ? 'success' : 'error');
+      }
+    } catch {
+      // 다음 주기에 다시 묻는다
+    }
+  }, [addToast]);
+
   const fetchRealStats = useCallback(async () => {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
@@ -189,6 +219,7 @@ export default function Dashboard({ addToast, active = true }) {
   // 대시보드가 보일 때만 3초마다 갱신한다. 원클릭 최적화 중에도 갱신한다. 예전에는 멈춘 채 시작 직전 값을
   // 실시간 값처럼 보여 주어, 정크를 지우고 조각 모음이 CPU 를 쓰는 동안에도 숫자가 그대로였다.
   usePolling(fetchRealStats, 3000, active);
+  usePolling(followPendingStep, 5000, active && !!lastRun?.pendingCount);
   useEffect(() => () => {
     if (optPollInterval.current) clearInterval(optPollInterval.current);
   }, []);
@@ -249,6 +280,7 @@ export default function Dashboard({ addToast, active = true }) {
       : '';
     if (!window.confirm(`원클릭 최적화를 시작합니다.\n\n${body}${excluded}\n\n계속할까요?`)) return;
 
+    setOptStatus({ running: true, progress_pct: 0, eta_seconds: 0, current_task: '', freed_mb: 0, error: null });
     setIsScanning(true);
     
     try {
@@ -281,7 +313,7 @@ export default function Dashboard({ addToast, active = true }) {
   const finishOptimization = (status) => {
     const steps = Array.isArray(status.steps) ? status.steps : [];
     // 백그라운드에서 아직 도는 단계(pending, 예: 오래 걸리는 HDD 조각 모음)는 실패가 아니다
-    const failedCount = steps.filter(st => !st.ok && !st.pending).length;
+    const failedCount = steps.filter(st => !st.ok && !st.pending && !st.cancelled).length;
     const pendingCount = steps.filter(st => st.pending).length;
     const cancelled = !!status.cancelled;
     const error = status.error || null;
@@ -424,16 +456,18 @@ export default function Dashboard({ addToast, active = true }) {
             <div className="w-full md:w-72 space-y-2">
               <div className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400">
                 최근 실행 결과{lastRun.cancelled ? ' (중지함)' : lastRun.error ? ' (오류로 멈춤)' : ''} —{' '}
-                {lastRun.steps.length - lastRun.failedCount - (lastRun.pendingCount || 0)}/{lastRun.steps.length} 단계 성공
+                {lastRun.steps.filter((x) => x.ok).length}/{lastRun.steps.length} 단계 성공
                 {lastRun.pendingCount > 0 && `, ${lastRun.pendingCount}단계 진행 중`}
               </div>
               {lastRun.steps.map((st, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   {st.ok
-                    ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                    ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" role="img" aria-label="성공" />
                     : st.pending
-                      ? <Loader2 className="w-4 h-4 text-amber-500 flex-shrink-0" aria-label="진행 중" />
-                      : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />}
+                      ? <Loader2 className="w-4 h-4 text-amber-500 flex-shrink-0" role="img" aria-label="진행 중" />
+                      : st.cancelled
+                        ? <MinusCircle className="w-4 h-4 text-gray-400 flex-shrink-0" role="img" aria-label="중지됨" />
+                        : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" role="img" aria-label="실패" />}
                   <div className="min-w-0">
                     <div className="font-semibold text-black dark:text-white">{st.name}</div>
                     {st.detail && <div className="text-gray-500 dark:text-gray-400 break-words">{st.detail}</div>}
@@ -574,7 +608,7 @@ export default function Dashboard({ addToast, active = true }) {
 
         {/* Sparkline Canvas Simulation */}
         <div className="h-16 flex items-end justify-between gap-1 pt-2 relative">
-          {renderLineGraph(gpuHistory)}
+          {renderLineGraph(gpuHistory, gpuState)}
         </div>
       </div>
 

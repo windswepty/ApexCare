@@ -59,7 +59,8 @@ def test_dashboard_free_space_comes_from_backend_not_rounded_subtraction():
 
 def test_process_list_can_return_everything_for_game_tab(monkeypatch):
     fake = [types.SimpleNamespace(info={'pid': p, 'name': f'p{p}.exe', 'memory_info': types.SimpleNamespace(rss=(20 + p) * MB),
-                                        'cpu_percent': 0.0, 'nice': NORMAL_PRIORITY_CLASS}) for p in range(1, 13)]
+                                        'cpu_percent': 0.0, 'nice': NORMAL_PRIORITY_CLASS},
+                                  is_running=lambda: True) for p in range(1, 13)]
     monkeypatch.setattr(system_monitor.psutil, 'process_iter', lambda attrs=None: iter(fake))
     monkeypatch.setattr(system_monitor.process_guard, 'get_own_pid_family', lambda: set())
     assert len(system_monitor.get_processes()) == 8          # RAM 화면: 상위 8개
@@ -625,7 +626,10 @@ def test_failed_system_stats_are_not_shown_as_zero():
     for rel in ('src/App.jsx', 'src/components/RamBooster.jsx', 'src/components/Dashboard.jsx'):
         src = _code(rel)
         assert "cpuModel !== 'Error'" not in src, rel
-        assert '!stats.error' in src, rel
+        assert 'stats.error' in src, rel
+    # 앱은 통계를 못 읽어도(error) 준비된 것으로 본다(로딩 화면에 영원히 멈추지 않게). 그 통계는 쓰지 않는다
+    app = _code('src/App.jsx')
+    assert 'setSystemStats(stats.error ? {} : stats)' in app and 'if (stats && !stats.error)' not in app
 
 
 # ── 설치 마법사 ────────────────────────────────────────

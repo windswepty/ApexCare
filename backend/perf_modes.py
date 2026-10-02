@@ -205,6 +205,8 @@ def _apply_mode_locked(mode, user_set, persist):
     # 이게 빠지면 모드가 겹쳐 쌓인다. 기존 구현의 핵심 결함이었다.
     # 이 단계는 '적용한 항목' 개수에 넣지 않는다(revert). 되돌리기 실패는 성공을 막는다.
     reverted = ss.restore_group(MODE_GROUP)
+    # 개수는 설정 단위로 센다(전원 연결·배터리 값을 따로 세지 않는다). 적용 결과의 '항목' 과 같은 단위다.
+    reverted['restored'] = reverted.get('restored_settings', reverted['restored'])
     steps.append({
         'name': '이전 모드 설정 되돌리기',
         'ok': reverted['ok'],
@@ -364,7 +366,7 @@ def get_mode():
     journal_unreadable = pending is None
     if journal_unreadable:
         pending = {}
-    left_over = sum(1 for e in pending.values() if e.get('group') == MODE_GROUP)
+    left_over = ss.count_settings(k for k, e in pending.items() if e.get('group') == MODE_GROUP)
     if MODES[saved]['plan']:
         expected_plan, _ = _plan_fallback(MODES[saved]['plan'])
         in_sync = (active == expected_plan) if (active and expected_plan) else False
@@ -395,7 +397,7 @@ def get_mode():
         'leftoverModeChanges': left_over,
         # 게임 부스트가 게임 동안만 게이밍 모드를 적용 중이면, 불일치 경고 대신 그 사실을 알린다
         'boostOverride': _boost_override(),
-        'pendingChanges': len(pending),
+        'pendingChanges': ss.count_settings(pending),
     }
 
 
@@ -429,6 +431,7 @@ def _revert_everything_locked():
     parts = []
     # 저널이 먼저다. 구버전 백업은 저널보다 오래된 원본이므로 뒤에서 덮어쓰는 게 맞다.
     r = ss.restore_all()
+    r['restored'] = r.get('restored_settings', r['restored'])        # 설정 단위(전원 연결·배터리 값을 하나로)
     parts.append({'name': '시스템 설정 (성능 모드·튜닝·부스트)', 'ok': r['ok'],
                   'detail': f"{r['restored']}개 복구"
                             + (f", {len(r['failed'])}개 실패" if r['failed'] else ''),
@@ -450,6 +453,16 @@ def _revert_everything_locked():
                           'detail': s.get('message', '')})
         except Exception as e:
             parts.append({'name': '구버전 서비스 시작 설정', 'ok': False, 'detail': str(e)})
+
+    # 예전 버전이 Run 에서 지우고 HKCU\Software\APEXCARE 에 숨겨 둔 시작 프로그램. 예전에는 제거할 때만 되살려,
+    # 복구 센터는 '모두 원래 값' 이라 하고 '전부 원래대로' 도 되살리지 않았다.
+    from backend import uninstall_prep
+    if uninstall_prep._disabled_startup_names():
+        steps = uninstall_prep._restore_disabled_startup()
+        bad = [s for s in steps if not s['ok']]
+        parts.append({'name': '구버전 시작 프로그램', 'ok': not bad,
+                      'detail': (f"{len(steps)}개를 원래 자리에 되살렸습니다" if not bad else
+                                 '; '.join(f"{s['name']}: {s['detail']}" for s in bad[:3]))})
 
     # 성능 모드 기록을 '표준' 으로. 저널을 비웠으니 실제 상태도 모드가 없는 상태다.
     # 저장하지 못하면 앱을 다시 켤 때 이전 모드(게이밍·에코)가 다시 적용되므로 실패로 알린다.

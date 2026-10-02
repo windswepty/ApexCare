@@ -161,6 +161,40 @@ def test_legacy_hidden_startup_apps_come_back_before_uninstall():
 
 
 @pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_legacy_hidden_startup_apps_are_listed_and_revived_by_revert_all():
+    # 예전에는 제거할 때만 되살려, 복구 센터는 '모두 원래 값' 이라 하고 '전부 원래대로' 도 되살리지 않았다
+    from backend.api import Api
+    _seed_pc()
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup', 'OldTool', r'C:\apps\old.exe', fakewin.REG_SZ)
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup\_origin', 'OldTool', 'HKLM|' + RUN_MACHINE,
+                  fakewin.REG_SZ)
+
+    p = Api.getPendingSystemChanges(object.__new__(Api))
+    assert p['count'] == 1 and 'OldTool' in p['groups']['legacy_startup'][0]['what']
+
+    r = perf_modes.revert_everything()
+    assert r['success'] and any(x['name'] == '구버전 시작 프로그램' and x['ok'] for x in r['parts'])
+    assert REGISTRY.value('HKLM', RUN_MACHINE, 'OldTool') == r'C:\apps\old.exe'
+    assert Api.getPendingSystemChanges(object.__new__(Api))['count'] == 0
+
+
+@pytest.mark.usefixtures('as_admin')
+def test_applied_and_reverted_counts_use_the_same_unit():
+    # 전원 세부값은 전원 연결·배터리 값을 따로 기록한다. 예전에는 적용 10개 ↔ 되돌릴 변경 17건·되돌림 17개로 셌고,
+    # 복구 센터에 같은 문구가 두 줄씩 나왔다
+    from backend.api import Api
+    _seed_pc()
+    g = perf_modes.apply_mode('gaming')
+    assert g['success']
+    p = Api.getPendingSystemChanges(object.__new__(Api))
+    whats = [i['what'] for i in p['groups']['perf_mode']]
+    assert p['count'] == g['appliedCount'] == len(whats) == len(set(whats))
+    assert perf_modes.get_mode()['pendingChanges'] == g['appliedCount']
+    s = perf_modes.apply_mode('standard')
+    assert s['restoredCount'] == g['appliedCount'] and f"{g['appliedCount']}개를 원래대로" in s['message']
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
 def test_reregistered_legacy_item_turned_off_by_user_stays_off():
     # 프로그램이 HKLM Run 에 스스로 다시 등록했고, 사용자가 작업 관리자에서 껐다. 원래 위치 기록은 없다(아주 옛 버전).
     _seed_pc()

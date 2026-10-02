@@ -428,3 +428,13 @@ def test_plan_already_back_is_not_switched_again():
     POWER.active = fakewin.PLAN_BALANCED                        # 사용자가 Windows 에서 직접 되돌림
     POWER.fail_set_active = True
     assert ss.restore_group('t')['ok'] and _journal() == {}
+
+
+def test_values_written_to_the_active_plan_take_effect_and_are_undone():
+    # Windows 는 활성 플랜에 쓴 세부값을 그 플랜을 다시 켜야 적용한다. 다시 켜지 않으면 화면은 '적용·검증됨' 인데
+    # 실제로는 걸리지 않고, 되돌린 뒤에도 바뀐 값이 계속 걸려 있다
+    POWER.seed_value(fakewin.PLAN_BALANCED, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 5)
+    assert ss.set_power_value(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 100, group='t')['ok']
+    assert POWER.effective(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN) == 100
+    assert ss.restore_group('t')['ok']
+    assert POWER.effective(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN) == 5

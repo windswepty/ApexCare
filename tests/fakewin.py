@@ -461,6 +461,9 @@ class FakePower:
 
     fail_read / fail_write 에 (plan, setting, 'ac'|'dc') 를 넣으면 그 값의 읽기·쓰기가 실패한다.
     ignore_writes 에 넣으면 쓰기가 성공을 돌려주지만 값은 그대로다.
+
+    진짜 Windows 처럼 '활성 플랜' 에 쓴 세부값은 PowerSetActiveScheme 으로 그 플랜을 다시 켜기 전까지 적용되지
+    않는다. effective() 가 지금 실제로 걸려 있는 값이다(저장된 값은 get()).
     """
 
     def __init__(self):
@@ -476,6 +479,7 @@ class FakePower:
         self.ignore_writes = set()
         self.fail_set_active = False
         self.activations = []              # PowerSetActiveScheme 로 켠 플랜 순서
+        self.pending = {}                  # 활성 플랜에 썼지만 아직 적용되지 않은 값의 '적용 중인 값'
 
     def seed_value(self, plan, sub, setting, value, dc_value=None):
         self.values[(plan, sub, setting, 'ac')] = value
@@ -483,6 +487,15 @@ class FakePower:
 
     def get(self, plan, sub, setting, side='ac'):
         return self.values.get((plan, sub, setting, side))
+
+    def effective(self, sub, setting, side='ac'):
+        """활성 플랜에서 지금 실제로 적용돼 있는 값."""
+        key = (self.active, sub, setting, side)
+        return self.pending[key] if key in self.pending else self.values.get(key)
+
+    def activated(self, plan):
+        for key in [k for k in self.pending if k[0] == plan]:
+            del self.pending[key]
 
     def _read(self, side, pg, sg, stg, out):
         plan, sub, setting = guid_str(pg), guid_str(sg), guid_str(stg)
@@ -502,7 +515,10 @@ class FakePower:
             return _ERROR_FILE_NOT_FOUND
         if (plan, setting, side) in self.ignore_writes:
             return 0
-        self.values[(plan, sub, setting, side)] = int(getattr(value, 'value', value))
+        key = (plan, sub, setting, side)
+        if plan == self.active and key not in self.pending:
+            self.pending[key] = self.values.get(key)        # 다시 켜기 전까지는 이 값이 걸려 있다
+        self.values[key] = int(getattr(value, 'value', value))
         return 0
 
 
@@ -520,6 +536,7 @@ class FakePowrprof:
             return _ERROR_FILE_NOT_FOUND
         POWER.active = g
         POWER.activations.append(g)
+        POWER.activated(g)
         return 0
 
     def PowerReadACValueIndex(self, root, pg, sg, stg, out):
@@ -631,10 +648,17 @@ class FakeProcessTable:
     install(monkeypatch) 로 psutil 에 끼운다. process_boost·process_guard·game_booster 가
     모두 psutil 모듈 속성을 통해 부르므로 한 번에 바뀐다.
     CPU 는 진짜처럼 '누적 CPU 시간' 으로 흉내 낸다. tick(초) 가 시계를 움직이고 프로세스마다 cpu % 만큼 쌓는다.
+
+    psutil 7 처럼 process_iter 는 Process 객체를 PID 별로 캐시하고, PID 가 재사용됐는지 확인하지 않는다
+    (is_running() 이 재사용을 알아챈 PID 만 다음 호출에서 새로 만든다). 그 객체의 name·create_time·exe 는
+    처음 읽은 값(끝난 프로세스의 것)이 남고, 나머지 값은 지금 그 PID 를 가진 프로세스의 것이다.
+    바꾸는 메서드(nice 설정·kill)는 재사용된 PID 에 대해 NoSuchProcess 를 낸다(psutil 6+).
     """
 
     def __init__(self):
         self.procs = {}
+        self._pmap = {}                    # process_iter 캐시 (PID → Process)
+        self._reused = set()               # is_running() 이 재사용을 알아챈 PID
         self.nice_calls = []               # (pid, 설정한 값)
         self.killed = []                   # (pid, 이름) — 끝낸 프로세스
         self.cpus = 8                      # 논리 프로세서 수
@@ -663,6 +687,9 @@ class FakeProcessTable:
                     raise psutil.NoSuchProcess(pid)
                 self.pid = pid
                 self._p = table.procs[pid]
+                # 처음 읽은 name·exe 와 만들 때의 create_time(psutil 이 객체에 캐시하는 값. create_time 은 프로세스를
+                # 알아보는 기준이라 객체를 만들 때 정해진다)
+                self._ident = {'created': self._p.created}
 
             def _live(self):
                 p = table.procs.get(self.pid)
@@ -670,19 +697,31 @@ class FakeProcessTable:
                     raise psutil.NoSuchProcess(self.pid)
                 return p
 
+            def _now(self):
+                # 읽기 메서드: 지금 그 PID 를 가진 프로세스의 값(재사용됐으면 새 프로세스). PID 가 없으면 NoSuchProcess
+                p = table.procs.get(self.pid)
+                if p is None:
+                    raise psutil.NoSuchProcess(self.pid)
+                return p
+
+            def _cached(self, key, attr):
+                if key not in self._ident:
+                    self._ident[key] = getattr(self._now(), attr)
+                return self._ident[key]
+
             def name(self):
-                return self._live().name
+                return self._cached('name', 'name')
 
             def create_time(self):
-                return self._live().created
+                return self._cached('created', 'created')
 
             def username(self):
-                return self._live().username
+                return self._now().username
 
             def nice(self, value=None):
-                p = self._live()
                 if value is None:
-                    return p.nice
+                    return self._now().nice
+                p = self._live()
                 if p.deny:
                     raise psutil.AccessDenied(self.pid)
                 table.nice_calls.append((self.pid, value))
@@ -690,10 +729,10 @@ class FakeProcessTable:
                 return None
 
             def cpu_percent(self, interval=None):
-                return self._live().cpu
+                return self._now().cpu
 
             def parent(self):
-                pp = self._live().ppid
+                pp = self._now().ppid
                 return Process(pp) if pp in table.procs else None
 
             def parents(self):
@@ -712,13 +751,17 @@ class FakeProcessTable:
                 return kids
 
             def exe(self):
-                return self._live().exe
+                return self._cached('exe', 'exe')
 
             def cpu_times(self):
-                return types.SimpleNamespace(user=self._live().cpu_seconds, system=0.0)
+                return types.SimpleNamespace(user=self._now().cpu_seconds, system=0.0)
 
             def is_running(self):
-                return table.procs.get(self.pid) is self._p
+                if table.procs.get(self.pid) is self._p:
+                    return True
+                if self.pid in table.procs:
+                    table._reused.add(self.pid)          # 다음 process_iter 가 새 객체를 만든다
+                return False
 
             def kill(self):
                 self._live()
@@ -729,14 +772,23 @@ class FakeProcessTable:
                 _blocked(f'가짜 psutil.Process.{name}')
 
         def process_iter(attrs=None, ad_value=None):
-            for pid in list(table.procs):
-                try:
-                    p = Process(pid)
-                except psutil.NoSuchProcess:
-                    continue
+            for pid in [k for k in table._pmap if k not in table.procs or k in table._reused]:
+                table._pmap.pop(pid, None)
+            table._reused.clear()
+            for pid in sorted(table.procs):
+                p = table._pmap.get(pid)
+                if p is None:
+                    try:
+                        p = table._pmap[pid] = Process(pid)
+                    except psutil.NoSuchProcess:
+                        continue
                 info = {}
-                for a in (attrs or ()):
-                    info[a] = pid if a == 'pid' else getattr(p, a)()
+                try:
+                    for a in (attrs or ()):
+                        info[a] = pid if a == 'pid' else getattr(p, a)()
+                except psutil.NoSuchProcess:
+                    table._pmap.pop(pid, None)
+                    continue
                 p.info = info
                 yield p
 

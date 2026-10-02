@@ -238,3 +238,30 @@ def test_priority_change_is_refused_when_listed_process_was_replaced(procs):
 
     assert r['ok'] is False and '같은 번호' in r['reason'] and procs.nice_calls == []
     assert process_boost.set_priority(910, 'idle', owner='user', created=2000.0)['ok']
+
+
+def test_fake_process_iter_keeps_stale_objects_like_psutil_7(procs):
+    # psutil 7 은 process_iter 의 객체를 PID 별로 캐시하고 재사용을 확인하지 않는다. 가짜도 그렇게 해야
+    # '끝난 프로세스의 이름' 으로 판단하는 코드가 테스트에서 드러난다
+    import psutil
+    procs.add(700, 'helper.exe', created=1000.0)
+    assert [p.info['name'] for p in psutil.process_iter(['name'])] == ['helper.exe']
+    procs.remove(700)
+    procs.add(700, 'obs64.exe', created=2000.0)
+    stale = next(psutil.process_iter(['name']))
+    assert stale.info['name'] == 'helper.exe'                 # 진짜 psutil 7 과 같다
+    assert stale.is_running() is False                        # 재사용을 알아채면
+    assert next(psutil.process_iter(['name'])).info['name'] == 'obs64.exe'   # 다음 호출부터 새 객체
+
+
+def test_reused_pid_is_judged_by_the_new_program_not_the_cached_name(procs):
+    import psutil
+    procs.add(5120, 'helper.exe', cpu=0.0, created=1000.0)
+    list(psutil.process_iter(['pid', 'name']))                # RAM 화면이 목록을 읽어 객체와 이름이 캐시됐다
+    process_boost.prime_cpu_measurement()
+    procs.remove(5120)
+    procs.add(5120, 'obs64.exe', cpu=20.0, created=2000.0)    # 그 번호를 OBS 가 받아 방송 중
+    for _ in range(3):
+        procs.tick(2.0)
+        found = {c['pid'] for c in process_boost.find_throttle_candidates(None, cpu_threshold=3.0)}
+        assert 5120 not in found                              # 예전에는 옛 이름 helper.exe 로 판정해 OBS 를 낮췄다

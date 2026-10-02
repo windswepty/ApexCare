@@ -115,8 +115,8 @@ def main():
                     if removed_apps else "")
     if _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
                 "APEX CARE 프로그램을 삭제하시겠습니까?\n\n"
-                "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석 정책, "
-                "맞춤 튜닝, 꺼 둔 시작 프로그램)을 원래대로 되돌립니다." + removed_note,
+                "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석·Cortana 정책, "
+                "맞춤 튜닝, 이 앱으로 켜거나 끈 시작 프로그램)을 바꾸기 전 상태로 되돌립니다." + removed_note,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
         sys.exit(0)

@@ -18,6 +18,7 @@ const GROUP_META = {
   startup: { label: '시작 프로그램 켜기·끄기', icon: Rocket, desc: '작업 관리자와 같은 켜짐/꺼짐 표시(StartupApproved). 되돌리면 바꾸기 전 상태로 돌아갑니다' },
   legacy_network: { label: '이전 버전의 네트워크 튜닝', icon: Network, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
   legacy_service: { label: '이전 버전의 서비스 설정', icon: Server, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
+  legacy_startup: { label: '이전 버전이 끈 시작 프로그램', icon: Rocket, desc: '이전 버전은 Run 에서 지우고 따로 보관했습니다. 되돌리면 원래 자리에 되살려 켭니다' },
   기타: { label: '기타 변경', icon: HardDrive, desc: '' },
 };
 

@@ -39,8 +39,10 @@ const BOOST_OPTIONS = [
   {
     key: 'boost_disable_nagle',
     title: 'Nagle 알고리즘 끄기',
-    desc: '네트워크 어댑터의 패킷 묶음 전송을 꺼서 온라인 게임 반응을 빠르게 합니다. 대신 패킷 수가 늘어납니다.',
-    scope: '레지스트리 영구 변경 · 되돌리기 가능',
+    desc: '게임이 감지되면 네트워크 어댑터의 패킷 묶음 전송(Nagle)을 끄는 값(TcpAckFrequency·TCPNoDelay)을 써 두고, '
+      + '게임이 끝나면 지웁니다. Windows 는 이 값을 재부팅하거나 네트워크를 다시 연결할 때 읽으므로 게임 도중에는 '
+      + '반영되지 않을 수 있습니다. 반영되면 패킷 수가 늘어납니다.',
+    scope: '게임 동안만 레지스트리에 기록 · 게임이 끝나면 원래대로',
     risk: 'high',
   },
 ];
@@ -250,6 +252,8 @@ export default function GameBooster({ addToast, active = true }) {
             return (
               <button
                 key={opt.key}
+                role="switch"
+                aria-checked={on}
                 onClick={() => toggleOption(opt.key)}
                 disabled={!settings}
                 className={`w-full text-left p-4 rounded-xl border transition-colors disabled:opacity-50 ${

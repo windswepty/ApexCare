@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   HardDrive, Trash2, SearchCode, Gauge, Loader2, AlertTriangle,
   CheckCircle2, RotateCcw, Play, XCircle, Info, Copy
@@ -19,7 +19,18 @@ const SECTIONS = [
   { id: 'disk', label: '디스크 최적화', icon: Gauge },
 ];
 
-export default function StorageCenter({ addToast }) {
+// 숨겨 둔 화면이 다시 보일 때 true 가 된다(처음 보일 때는 아니다). 그동안 다른 화면이 상태를 바꿨을 수 있다.
+function useShownAgain(visible) {
+  const was = useRef(visible);
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (visible && !was.current) setCount((c) => c + 1);
+    was.current = visible;
+  }, [visible]);
+  return count;
+}
+
+export default function StorageCenter({ addToast, active = true }) {
   const [tab, setTab] = useState('junk');
   // 한 번 연 하위 화면은 숨기기만 하고 없애지 않는다. 예전에는 탭을 옮기면 화면이 사라져, 진행 중인 검색·정리 결과가
   // 버려지고 돌아오면 '검색 버튼을 눌러 시작하세요' 가 떠 같은 검색을 두 번 돌리게 됐다.
@@ -42,6 +53,9 @@ export default function StorageCenter({ addToast }) {
     window.addEventListener('pywebviewready', onReady);
     return () => window.removeEventListener('pywebviewready', onReady);
   }, [loadOverview]);
+  // 탭을 다시 열면 드라이브 현황도 다시 읽는다(원클릭 정리 뒤 남은 용량이 바뀌었다)
+  const shownAgain = useShownAgain(active);
+  useEffect(() => { if (shownAgain) loadOverview(); }, [shownAgain, loadOverview]);
 
   return (
     <div className="space-y-6">
@@ -105,15 +119,15 @@ export default function StorageCenter({ addToast }) {
         ))}
       </div>
 
-      {opened.has('junk') && <div hidden={tab !== 'junk'}><JunkSection addToast={addToast} onDone={loadOverview} /></div>}
+      {opened.has('junk') && <div hidden={tab !== 'junk'}><JunkSection addToast={addToast} onDone={loadOverview} visible={active && tab === 'junk'} /></div>}
       {opened.has('files') && <div hidden={tab !== 'files'}><FileSection addToast={addToast} onDone={loadOverview} /></div>}
-      {opened.has('disk') && <div hidden={tab !== 'disk'}><DiskSection addToast={addToast} overview={overview} /></div>}
+      {opened.has('disk') && <div hidden={tab !== 'disk'}><DiskSection addToast={addToast} overview={overview} visible={active && tab === 'disk'} /></div>}
     </div>
   );
 }
 
 /* ───────────────────────── 정크 정리 ───────────────────────── */
-function JunkSection({ addToast, onDone }) {
+function JunkSection({ addToast, onDone, visible = true }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [scanning, setScanning] = useState(false);
@@ -158,6 +172,11 @@ function JunkSection({ addToast, onDone }) {
   }, []);
 
   useEffect(() => { scan(); }, [scan]);
+  // 다시 보이면 다시 검사한다. 예전에는 처음 검사한 크기가 계속 남아, 원클릭이 지운 뒤에도 '약 1.5 GB' 로 보였다.
+  const shownAgain = useShownAgain(visible);
+  const busyRef = useRef(false);
+  busyRef.current = scanning || cleaning;
+  useEffect(() => { if (shownAgain && !busyRef.current) scan(); }, [shownAgain, scan]);
 
   const toggle = (id) => setSelected((s) => {
     const n = new Set(s);
@@ -247,6 +266,7 @@ function JunkSection({ addToast, onDone }) {
             <button
               key={it.id}
               onClick={() => toggle(it.id)}
+              aria-pressed={selected.has(it.id)}
               disabled={cleaning}
               className={`w-full text-left p-3.5 rounded-xl border transition-colors disabled:opacity-50 ${
                 selected.has(it.id)
@@ -413,7 +433,7 @@ function FileSection({ addToast, onDone }) {
   };
 
   const fileRow = (f) => (
-    <button key={f.path} onClick={() => toggle(f.path)}
+    <button key={f.path} onClick={() => toggle(f.path)} aria-pressed={selected.has(f.path)}
       className={`w-full text-left flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${
         selected.has(f.path) ? 'border-cyan-500/50 bg-cyan-500/5' : 'border-black/5 dark:border-slate-800'}`}>
       <div className={`w-4 h-4 rounded shrink-0 border ${
@@ -430,7 +450,7 @@ function FileSection({ addToast, onDone }) {
       <div className="flex flex-wrap items-center gap-2">
         {[['large', '대용량 파일'], ['dup', '중복 파일']].map(([k, label]) => (
           <button key={k} onClick={() => { setMode(k); setRows([]); setSelected(new Set()); setSearched(false); setFailures([]); }}
-            disabled={busy}
+            disabled={busy} aria-pressed={mode === k}
             className={`px-3.5 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 ${
               mode === k ? 'bg-cyan-500 text-black' : 'border border-black/10 dark:border-slate-700 text-gray-500'}`}>
             {label}
@@ -506,9 +526,27 @@ function FileSection({ addToast, onDone }) {
 }
 
 /* ───────────────────── 디스크 최적화 ───────────────────── */
-function DiskSection({ addToast, overview }) {
+function DiskSection({ addToast, overview, visible = true }) {
   const [status, setStatus] = useState(null);
   const [running, setRunning] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const a = api();
+    if (!a?.getTrimStatus) return;
+    try { setStatus(await a.getTrimStatus()); } catch { /* 이전 표시를 둔다 */ }
+  }, []);
+
+  // 다시 보이면 다시 읽는다. 원클릭이 '저장공간 → 디스크 최적화에서 결과를 확인' 하라고 안내하는데,
+  // 예전에는 이 화면을 한 번 연 적이 있으면 지난 결과가 그대로 보였다.
+  const shownAgain = useShownAgain(visible);
+  useEffect(() => { if (shownAgain) refresh(); }, [shownAgain, refresh]);
+  // 다른 곳(원클릭)이 시작한 최적화가 돌고 있으면, 보이는 동안 끝날 때까지 따라간다
+  const followElsewhere = visible && !running && status?.status === 'running';
+  useEffect(() => {
+    if (!followElsewhere) return undefined;
+    const t = setInterval(refresh, 3000);
+    return () => clearInterval(t);
+  }, [followElsewhere, refresh]);
 
   // 탭을 열 때 진행 중인 최적화가 있으면(원클릭 최적화가 시작한 것 포함) 그 상태를 보여 준다
   useEffect(() => {
@@ -526,6 +564,7 @@ function DiskSection({ addToast, overview }) {
       if (!res?.success) {
         addToast?.(res?.message || '디스크 최적화를 시작하지 못했습니다.', 'error');
         setRunning(false);
+        refresh();          // '이미 실행 중' 이면 그 상태를 보여 준다
         return;
       }
       let st = null;
@@ -543,12 +582,6 @@ function DiskSection({ addToast, overview }) {
       addToast?.(`실행 실패: ${e}`, 'error');
     }
     setRunning(false);
-  };
-
-  const refresh = async () => {
-    const a = api();
-    if (!a?.getTrimStatus) return;
-    try { setStatus(await a.getTrimStatus()); } catch { /* 이전 표시를 둔다 */ }
   };
 
   const drives = overview?.drives || [];
@@ -589,7 +622,7 @@ function DiskSection({ addToast, overview }) {
         <div className="text-sm space-y-1">
           <p className="text-gray-500 flex items-center gap-2">
             상태: <span className="font-bold text-black dark:text-white">{TRIM_STATUS_LABEL[status.status] || status.status}</span>
-            {busyElsewhere && (
+            {!running && (
               <button onClick={refresh} className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-1">
                 <RotateCcw className="w-3 h-3" /> 새로 고침
               </button>

@@ -6,7 +6,7 @@ const api = () => (typeof window !== 'undefined' && window.pywebview && window.p
 // 잔여물로 잡힌 이유. 백엔드 uninstaller.find_leftovers 의 confidence 값.
 const CONFIDENCE_LABEL = {
   certain: '프로그램이 등록한 설치 폴더',
-  likely: '프로그램 이름과 같은 폴더',
+  likely: '프로그램 이름과 같은 폴더 — 설정·저장 데이터일 수 있습니다(다시 설치해 쓸 거면 그대로 두세요)',
 };
 
 // 1024 MB 이상은 GB 로
@@ -115,7 +115,9 @@ export default function Uninstaller({ addToast }) {
       }
       const items = Array.isArray(res.items) ? res.items : [];
       setLeftovers(items);
-      setChosen(new Set(items.map((l) => l.path)));
+      // 프로그램이 등록한 설치 폴더만 미리 고른다. 이름만 같은 AppData·ProgramData 폴더는 설정·저장 데이터일 수 있어
+      // (예: OBS 의 장면·프로필) 사용자가 직접 고르게 한다. 예전에는 전부 골라 둔 채 '설치 폴더 잔여물' 처럼 보였다.
+      setChosen(new Set(items.filter((l) => l.confidence === 'certain').map((l) => l.path)));
       setStep('leftovers');
     } catch (e) {
       console.error('IPC Error scanning leftovers:', e);
@@ -143,8 +145,9 @@ export default function Uninstaller({ addToast }) {
     const a = api();
     if (!a?.cleanAppLeftovers || !chosen.size) return;
     setIsCleaning(true);
+    let res = null;
     try {
-      const res = await a.cleanAppLeftovers([...chosen]);
+      res = await a.cleanAppLeftovers([...chosen]);
       // 결과 그대로 알린다. 일부를 건너뛰었는데 '완벽 삭제' 라고 하지 않는다.
       const failedCount = Array.isArray(res?.failed) ? res.failed.length : 0;
       if (!res || res.success === false) {
@@ -160,7 +163,20 @@ export default function Uninstaller({ addToast }) {
       addToast?.('남은 폴더를 정리하는 중 오류가 발생했습니다.', 'error');
     } finally {
       setIsCleaning(false);
+    }
+    const failed = Array.isArray(res?.failed) ? res.failed : null;
+    if (res && res.success !== false && failed && failed.length === 0) {
       backToList();
+      return;
+    }
+    // 실패·일부 실패면 이 화면에 머문다. 제거가 끝난 프로그램은 목록에서 사라져, 돌아가면 다시 찾을 길이 없었다.
+    // 휴지통으로 보낸 것만 빼고, 남은 것에는 이유를 붙여 다시 시도할 수 있게 한다.
+    if (failed) {
+      const why = new Map(failed.filter((f) => f && f.path).map((f) => [f.path, f.reason || '']));
+      const left = leftovers.filter((l) => !chosen.has(l.path) || why.has(l.path))
+        .map((l) => (why.has(l.path) ? { ...l, failReason: why.get(l.path) } : l));
+      setLeftovers(left);
+      setChosen(new Set(left.filter((l) => why.has(l.path)).map((l) => l.path)));
     }
   };
 
@@ -182,7 +198,7 @@ export default function Uninstaller({ addToast }) {
             프로그램 삭제
           </h2>
           <p className="text-gray-500 dark:text-slate-400 mt-1">
-            프로그램의 제거 프로그램을 실행한 뒤, 설치 폴더에 남은 폴더를 찾아 휴지통으로 보냅니다(휴지통에서 되살릴 수 있습니다).
+            프로그램의 제거 프로그램을 실행한 뒤, 설치 폴더와 AppData·ProgramData 의 같은 이름 폴더(설정·저장 데이터일 수 있음)를 찾아 보여 줍니다. 고른 폴더만 휴지통으로 보냅니다(휴지통에서 되살릴 수 있습니다).
             레지스트리는 건드리지 않습니다.
           </p>
         </div>
@@ -327,7 +343,8 @@ export default function Uninstaller({ addToast }) {
                           <span className={`w-4 h-4 rounded shrink-0 border ${chosen.has(l.path) ? 'bg-rose-500 border-rose-500' : 'border-gray-400'}`} />
                           <span className="min-w-0 flex-1">
                             <span className="block font-mono text-gray-700 dark:text-slate-300 truncate" title={l.path}>{l.path}</span>
-                            <span className="block text-[11px] text-gray-500">{CONFIDENCE_LABEL[l.confidence] || l.reason}</span>
+                            <span className={`block text-[11px] ${l.confidence === 'likely' ? 'text-amber-500' : 'text-gray-500'}`}>{CONFIDENCE_LABEL[l.confidence] || l.reason}</span>
+                            {l.failReason && <span className="block text-[11px] text-rose-400">보내지 못함: {l.failReason}</span>}
                           </span>
                           <span className="text-rose-400 flex-shrink-0 font-mono">{leftoverSize(l)}</span>
                         </button>

@@ -97,7 +97,10 @@ def revert_for_uninstall():
                 detail = f"{detail} — {'; '.join(reasons[:5])}"
             steps.append({'name': p['name'], 'ok': bool(p['ok']), 'detail': detail})
 
-    steps.extend(_restore_disabled_startup())
+    # 예전 버전이 숨겨 둔 시작 프로그램은 revert_everything 이 되살린다('구버전 시작 프로그램'). 관리자 권한이 없어
+    # 그쪽이 돌지 않았을 때만 여기서 한다(HKCU 만 쓴다).
+    if r.get('error') == 'UAC_REQUIRED':
+        steps.extend(_restore_disabled_startup())
 
     # 앱이 비정상 종료돼 남은 프로세스 우선순위·효율 모드(게임 부스트·에코). 앱이 지워지면 되돌릴 주체가 없다.
     try:

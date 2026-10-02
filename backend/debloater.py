@@ -259,7 +259,7 @@ def _desktop_accounts():
     try:
         import psutil
         for p in psutil.process_iter(['pid', 'name', 'username']):
-            if (p.info.get('name') or '').lower() != 'explorer.exe':
+            if (p.info.get('name') or '').lower() != 'explorer.exe' or not p.is_running():
                 continue
             if my_session is not None:
                 try:

@@ -470,7 +470,8 @@ def _enter_boost_mode():
         r = _disable_nagle()
         if r['changed']:
             _applied['nagle'] = True
-            labels.append('Nagle 끄기' + ('' if r['ok'] else ' (일부 실패)'))
+            # Windows 는 이 어댑터 값을 재부팅·네트워크 재연결 때 읽는다. '적용' 이라고 하지 않고 기록했다고 알린다.
+            labels.append('Nagle 끄기 기록(네트워크 재연결 뒤 반영)' + ('' if r['ok'] else ' (일부 실패)'))
 
     # 게이밍 전원 모드: 게임 동안만. 끝나면 사용자가 쓰던 모드로 돌아간다.
     if cfg.get('boost_auto_power_mode', False):
@@ -616,6 +617,10 @@ def _booster_loop():
             current_game_pids = []
             for proc in psutil.process_iter(['name']):
                 try:
+                    # 재사용된 PID 의 캐시 객체는 끝난 프로세스의 이름을 준다(psutil 7). 그대로 쓰면 그 번호를 받은 게임을
+                    # 세션 내내 알아보지 못했다.
+                    if not proc.is_running():
+                        continue
                     name = (proc.info.get('name') or '').lower()
                     if _is_game_process(proc, name):
                         found_games.append(name)

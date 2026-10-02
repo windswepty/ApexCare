@@ -83,7 +83,9 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 ## 2. '변경 내역 · 되돌리기' 가 비어 있는 상태
 
 - [ ] 2-1. '변경 내역 · 되돌리기'에 "되돌릴 변경 없음" 으로 나온다
-- [ ] 2-2. "전부 원래대로" 를 눌러도 **스냅숏** `02` 가 `base` 와 같다(바꾼 적 없는 것을 추측해 쓰지 않는다)
+- [ ] 2-2. "전부 원래대로" 를 눌러도 **스냅숏** `02` 가 `base` 와 같다(바꾼 적 없는 것을 추측해 쓰지 않는다).
+      `[APEX CARE] PC 설정` 의 `optimization_mode` 가 `<없음>` 에서 `standard` 로 바뀌는 것만 다를 수 있다(전부 원래대로는
+      모드를 표준으로 기록한다). 전원·레지스트리·서비스·시작 프로그램은 같아야 한다
 
 ---
 
@@ -101,7 +103,8 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
         계정 저널(`%APPDATA%\APEX_CARE_DATA\system_state.json`)에는 시작 프로그램 표시 기록만 있다
       - **HwSchMode 는 바뀌지 않는다**
 - [ ] 3-2. **표준** 적용 → **스냅숏** `03-standard` → **비교** `base` `03-standard`
-      기대: `[APEX CARE]` 의 `optimization_mode`·`user_set` 줄만 다르다. 전원 플랜·레지스트리는 `base` 와 같다
+      기대: `[APEX CARE]` 의 `optimization_mode`·`user_set` 줄만 다르다. 전원 플랜·레지스트리는 `base` 와 같다.
+      `[APEX CARE] PC 저널` 이 `<없음>` 에서 `항목 0개` 로 바뀌는 것도 같은 뜻이다(되돌린 뒤 빈 기록이 남는다)
 - [ ] 3-3. **게이밍 → 에코**(표준을 거치지 않고) → 에코 기대값만 있어야 하고 게이밍이 남긴 값이 없어야 한다:
       활성 플랜 `a1841308-…`(절전), 절전 플랜의 최소 `0x00000005`·최대 `0x00000046`(70)·코어 `0x00000032`(50),
       부스트 모드 `0x00000000`(끔)·EPP `0x00000050`(80)·PCIe 절전 `0x00000002`, 헤더의 **CPU 실제 속도** 가 기본 클럭보다 낮다,
@@ -297,7 +300,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 ## 13. APEX CARE 제거 — 지우기 전에 바꾼 것을 되돌린다
 
 제거 프로그램(`tools/uninstall.py`)은 설치 폴더를 지우기 전에 `APEX CARE.exe --revert-for-uninstall` 로
-앱을 창 없이 불러(`backend/uninstall_prep.py`) '변경 내역 · 되돌리기'의 "전부 원래대로" 와 꺼 둔 시작 프로그램 되켜기를 한다.
+앱을 창 없이 불러(`backend/uninstall_prep.py`) '변경 내역 · 되돌리기'의 "전부 원래대로"(이 앱으로 켜거나 끈 시작 프로그램을 바꾸기 전 상태로, 예전 버전이 숨긴 항목 되살리기 포함)를 한다.
 결과는 `%APPDATA%\APEX_CARE_DATA\uninstall_revert.json` 에 남는다.
 
 준비: 게이밍 모드 + 원격 분석 줄이기 적용, 9번의 테스트 시작 프로그램 두 개(HKCU·HKLM)를 앱에서 꺼 둔 상태.
@@ -314,7 +317,9 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
 - [ ] 13-5. 되돌리기 실패 경로: 재설치 → 게이밍 적용 → 앱을 닫고 `C:\Program Files\APEX CARE\APEX CARE.exe` 이름을
       잠깐 `APEX CARE.exe.bak` 으로 바꾼다 → 제거 → "설정을 되돌리지 못했습니다" 와 함께 **기본 선택이 '아니요'** 인 질문이 뜬다 →
       Enter('아니요') → 설치 폴더가 그대로다 → 이름을 되돌리고 앱을 열면 '변경 내역 · 되돌리기'에 게이밍 모드 항목이 남아 있다
-- [ ] 13-6. 서비스 `DelayedAutostart` 가 `<없음>` 에서 `0` 으로 바뀐 것만 보이면 같은 뜻(지연 시작 아님)이다. 4·5절도 같다
+- [ ] 13-6. 서비스 `DelayedAutostart` 가 `<값 없음>` 에서 `0` 으로 바뀐 것만 보이면 같은 뜻(지연 시작 아님)이다. 4·5절도 같다.
+      레지스트리 줄의 `<키 없음>` 과 `<값 없음>` 은 다르다. 처음에 `<키 없음>` 이던 정책·MMCSS 키가 되돌린 뒤 `<값 없음>` 이면
+      이 앱이 만든 빈 키가 남은 것이다(실패)
 
 ---
 

@@ -16,11 +16,25 @@ export default class ErrorBoundary extends React.Component {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
   }
 
+  closeApp = async () => {
+    // 창 테두리가 없어(frameless) 이 화면에서는 창을 닫을 방법이 없었다. 진행 중인 작업이 있으면 알리고 묻는다.
+    const api = window.pywebview && window.pywebview.api;
+    if (!api || typeof api.closeWindow !== 'function') return;
+    try {
+      const r = await api.closeWindow();
+      if (r && r.busy && window.confirm(`${r.message}\n\n그래도 닫을까요?`)) await api.closeWindow(true);
+    } catch (e) {
+      console.error('창을 닫지 못했습니다:', e);
+    }
+  };
+
   render() {
     if (this.state.hasError) {
       // 예전에는 'F12 로 개발자 도구를 열어 보라' 고 안내했다. 설치된 앱에서는 개발자 도구가 꺼져 있어 할 수 없는 일이다.
       return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-white dark:bg-slate-950 text-black dark:text-white p-6 relative">
+          {/* 창을 옮길 수 있게 맨 위에 끌기 영역을 둔다 */}
+          <div className="pywebview-drag-region absolute top-0 left-0 right-0 h-9" style={{ WebkitAppRegion: 'drag' }} />
           <AlertTriangle className="w-16 h-16 text-red-500 mb-4" />
           <h1 className="text-2xl font-bold mb-2">화면을 표시하는 중 오류가 발생했습니다</h1>
           <p className="text-gray-600 dark:text-slate-400 mb-6 text-center">
@@ -38,6 +52,12 @@ export default class ErrorBoundary extends React.Component {
               className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black rounded font-bold transition-colors shadow-lg"
             >
               다시 불러오기
+            </button>
+            <button
+              onClick={this.closeApp}
+              className="px-6 py-3 border border-gray-300 dark:border-slate-700 hover:border-red-500 rounded font-bold transition-colors"
+            >
+              앱 닫기
             </button>
           </div>
         </div>

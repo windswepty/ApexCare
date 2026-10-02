@@ -447,6 +447,8 @@ def foreground_group(fg_pid):
     if exe:
         for p in psutil.process_iter(['pid', 'exe']):
             try:
+                if not p.is_running():          # 재사용된 PID 의 캐시 객체는 끝난 프로세스의 경로를 준다
+                    continue
                 if (p.info.get('exe') or '').lower() == exe:
                     group.add(p.info['pid'])
             except Exception:
@@ -468,6 +470,11 @@ def find_throttle_candidates(foreground_pid, cpu_threshold=3.0, limit=40):
         try:
             pid = p.info['pid']
             alive.add(pid)
+            # psutil 7 의 process_iter 는 PID 별 객체를 캐시하고 PID 재사용을 확인하지 않는다. 그 객체의 이름은
+            # 끝난 프로세스의 것이라, 그대로 쓰면 그 번호를 받은 OBS·통화 앱·게임을 낮출 수 있었다.
+            # is_running() 이 재사용을 알아채면 다음 호출에서 새 객체가 된다.
+            if not p.is_running():
+                continue
             name = (p.info['name'] or '').lower()
             if pid in fg or not name:
                 continue
@@ -504,6 +511,7 @@ def prime_cpu_measurement():
     """CPU 표본의 기준점을 잡는다. 첫 표본은 판정하지 않으므로(None) 미리 한 번 재 둔다."""
     for p in psutil.process_iter(['pid']):
         try:
-            sample_cpu(p)
+            if p.is_running():
+                sample_cpu(p)
         except Exception:
             pass

@@ -375,6 +375,18 @@ def pending_changes_or_none():
         return None
 
 
+def setting_of(key):
+    """저널 키가 가리키는 '설정 하나'. 전원 세부값은 전원 연결(ac)·배터리(dc) 값을 따로 기록하지만 화면에는 설정 하나다.
+    예전에는 같은 변경을 적용 결과는 10개, 되돌릴 변경·되돌린 수는 17개로 셌다."""
+    if key.startswith('power:') and key.endswith((':ac', ':dc')):
+        return key[:-3]
+    return key
+
+
+def count_settings(keys):
+    return len({setting_of(k) for k in keys})
+
+
 def has_pending():
     return bool(pending_changes())
 
@@ -1048,5 +1060,5 @@ def _restore(predicate):
     if done:
         _forget_and_hand_over(done, kept)
 
-    return {'ok': not failed, 'restored': len(done), 'failed': failed,
+    return {'ok': not failed, 'restored': len(done), 'restored_settings': count_settings(done), 'failed': failed,
             'remaining': len(pending_changes())}

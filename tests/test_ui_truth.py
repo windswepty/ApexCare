@@ -44,7 +44,7 @@ def test_result_toasts_follow_the_result():
 
 
 def test_descriptions_do_not_promise_what_the_code_does_not_do():
-    # 잔여물 정리는 설치 폴더에 남은 폴더만 휴지통으로 보낸다(레지스트리는 건드리지 않는다).
+    # 잔여물 정리는 고른 폴더만 휴지통으로 보낸다(레지스트리는 건드리지 않는다).
     # SFC·DISM 은 시스템 파일 손상만 고친다. 블루스크린을 '원천 방지' 하지 않는다.
     assert '레지스트리 및 찌꺼기 파일까지 완벽하게' not in _read('src/components/Uninstaller.jsx')
     assert '원천 방지' not in _read('src/components/DriverUpdater.jsx')
@@ -76,3 +76,53 @@ def test_tabs_reread_state_when_opened_again():
     assert "<StartupManager active={activeTab === 'startup'}" in app
     assert 'if (active) refresh();' in _read('src/components/PerformanceModes.jsx')
     assert 'wasActive.current' in _read('src/components/StartupManager.jsx')
+
+
+def test_same_name_data_folders_are_not_preselected_and_failures_stay_on_screen():
+    # AppData·ProgramData 의 같은 이름 폴더는 설정·저장 데이터일 수 있다(OBS 장면·프로필). 미리 고르지 않는다.
+    src = _read('src/components/Uninstaller.jsx')
+    assert "items.filter((l) => l.confidence === 'certain')" in src
+    assert 'AppData·ProgramData 의 같은 이름 폴더' in src and '설정·저장 데이터일 수 있습니다' in src
+    # 정리에 실패하면 화면에 남아 다시 시도할 수 있다(제거가 끝난 프로그램은 목록에서 사라져 돌아갈 길이 없었다)
+    body = src[src.index('const handleCleanLeftovers'):]
+    body = body[:body.index('\n  };\n')]
+    assert 'failed.length === 0' in body and 'failReason' in body
+
+
+def test_nested_lists_scroll_with_the_mouse_wheel():
+    # Lenis 가 휠을 막아 프로그램 목록·남은 폴더 확인 목록·대용량 파일 결과를 휠로 내려 볼 수 없었다
+    assert 'allowNestedScroll: true' in _read('src/smoothScroll.js')
+
+
+def test_results_and_dialogs_reach_screen_readers_and_keyboard():
+    app = _read('src/App.jsx')
+    assert 'aria-live="polite"' in app and "role={toast.type === 'error' ? 'alert' : undefined}" in app
+    assert 'aria-label="알림 닫기"' in app
+    modal = _read('src/components/SettingsModal.jsx')
+    assert 'role="dialog" aria-modal="true"' in modal and "e.key === 'Escape'" in modal
+    assert 'role="switch"' in _read('src/components/GameBooster.jsx')
+    storage = _read('src/components/StorageCenter.jsx')
+    assert storage.count('aria-pressed=') >= 4
+    dash = _read('src/components/Dashboard.jsx')
+    assert 'aria-label="성공"' in dash and 'aria-label="실패"' in dash and 'aria-label="중지됨"' in dash
+
+
+def test_window_can_always_be_closed():
+    # 창 테두리가 없다. 제목 표시줄이 로딩·설정 화면에 가려지거나 오류 화면에 없으면 닫을 방법이 없었다
+    assert 'relative z-[60] flex-shrink-0' in _read('src/App.jsx')
+    eb = _read('src/components/ErrorBoundary.jsx')
+    assert '앱 닫기' in eb and 'closeWindow' in eb and 'pywebview-drag-region' in eb
+
+
+def test_dashboard_says_what_it_knows():
+    dash = _read('src/components/Dashboard.jsx')
+    assert "state === 'unavailable'" in dash and 'renderLineGraph(gpuHistory, gpuState)' in dash
+    assert '하드웨어 예약' in dash and '· 사용 가능 ${usable' not in dash
+    assert "current_task: ''" in dash                      # 새 실행이 지난 실행의 '완료 100%' 로 시작하지 않는다
+    assert 'followPendingStep' in dash and 'getTrimStatus' in dash
+
+
+def test_nagle_option_says_when_it_applies():
+    gb = _read('src/components/GameBooster.jsx')
+    assert '레지스트리 영구 변경' not in gb and '게임 동안만 레지스트리에 기록' in gb
+    assert '재부팅하거나 네트워크를 다시 연결할 때' in gb

@@ -50,6 +50,14 @@ if (Test-Path -LiteralPath $Dist) {
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+# 지난 실행의 결과가 남아 있으면 -Wait 가 샌드박스가 뜨기도 전에 그것을 이번 결과로 돌려준다. 띄우기 전에 지운다.
+foreach ($name in 'DONE.txt', 'report.md', 'report.json', 'console.txt', 'snap') {
+    $p = Join-Path $Out $name
+    if (Test-Path -LiteralPath $p) {
+        try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop }
+        catch { Write-Host "지난 결과($p)를 지우지 못했습니다. 다른 결과 폴더를 쓰세요."; exit 2 }
+    }
+}
 $esc = { param($s) [System.Security.SecurityElement]::Escape($s) }
 $wsb = Join-Path $Out 'apexcare-check.wsb'
 $xml = @"

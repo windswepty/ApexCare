@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw } from 'lucide-react';
 import {
   THEMES, HEX_RE, applyTheme, swatch, findTheme, composeTheme,
@@ -12,6 +12,23 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
   const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent'
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
+
+  // 대화상자: 열면 닫기 버튼으로 초점을 옮기고 Esc 로 닫는다. 닫으면 열었던 곳으로 초점을 돌려준다.
+  // 예전에는 초점이 오버레이 뒤에 남아 Tab 이 가려진 창 닫기 버튼으로 갔다.
+  const closeRef = useRef(null);
+  const onCloseRef = useRef(onClose);          // App 이 렌더마다 새 함수를 넘겨도 초점을 다시 옮기지 않게
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const before = document.activeElement;
+    closeRef.current?.focus();
+    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (before && typeof before.focus === 'function') before.focus();
+    };
+  }, [isOpen]);
 
   // 창을 열 때 현재 강조색으로 초기화한다
   useEffect(() => {
@@ -64,21 +81,24 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
   const problems = draftValid ? accentProblems(themeId, draft) : [];
   const preview = composeTheme(themeId, draftValid ? draft : null);
   const fixed = draftValid && problems.length ? readableAccent(themeId, draft) : null;
-  const isSaved = draftValid && accent === draft.toLowerCase();
   // 저장된 강조색이 지금 색 조합에서는 읽기 어려워 쓰이지 않는 경우
   const savedButUnused = accent && accentProblems(themeId, accent).length > 0;
+  const isStored = draftValid && accent === draft.toLowerCase();
+  // '적용됨' 은 지금 화면에 실제로 쓰이고 있을 때만. 저장은 됐지만 이 색 조합에서는 쓰이지 않으면 그렇게 말한다.
+  const isSaved = isStored && problems.length === 0;
 
   const setBoth = (hex) => { setDraft(hex); setHexText(hex); };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-[90%] max-w-lg max-h-[90vh] flex flex-col border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50 dark:bg-slate-800/30 flex-shrink-0">
           <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
             <Settings className="w-5 h-5" />
-            <h2 className="font-bold">환경 설정</h2>
+            <h2 id="settings-title" className="font-bold">환경 설정</h2>
           </div>
-          <button onClick={onClose} aria-label="닫기" className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+          <button ref={closeRef} onClick={onClose} aria-label="닫기" className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
@@ -225,7 +245,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                 onClick={() => saveAccent(draft.toLowerCase())}
                 className="flex-1 px-4 py-2 rounded-lg font-bold text-sm bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                {saving === 'accent' ? '저장 중…' : isSaved ? '적용됨' : '이 강조색 적용'}
+                {saving === 'accent' ? '저장 중…' : isSaved ? '적용됨' : isStored ? '저장됨 (이 색 조합에서는 쓰지 않음)' : '이 강조색 적용'}
               </button>
               {accent && (
                 <button

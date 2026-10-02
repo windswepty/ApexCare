@@ -509,6 +509,9 @@ def get_processes(limit=8):
         own_family = process_guard.get_own_pid_family()
         for p in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent', 'nice']):
             try:
+                # 재사용된 PID 의 캐시 객체는 끝난 프로세스의 이름·생성 시각을 준다(psutil 7). 새로 고쳐도 옛 이름이 보였다
+                if not p.is_running():
+                    continue
                 mem_info = p.info.get('memory_info')
                 if mem_info is None:
                     continue

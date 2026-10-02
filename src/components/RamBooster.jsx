@@ -157,12 +157,12 @@ export default function RamBooster({ addToast, active = true }) {
         >
           {isPurging ? (
             <>
-              <RotateCcw className="w-5 h-5 animate-spin text-black dark:text-white" />
+              <RotateCcw className="w-5 h-5 animate-spin" />
               <span>대기 메모리 비우는 중...</span>
             </>
           ) : (
             <>
-              <Zap className="w-5 h-5 text-black dark:text-white fill-current" />
+              <Zap className="w-5 h-5 fill-current" />
               <span>
                 {noStandby ? '비울 대기 메모리가 없습니다'
                   : typeof ram?.standbyGB === 'number' ? `대기 메모리 (${ram.standbyGB.toFixed(1)} GB) 비우기`

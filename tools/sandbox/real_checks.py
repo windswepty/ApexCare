@@ -244,6 +244,20 @@ def mode_stack():
 @check('디블로터 정책: 원격 분석·Cortana → 복구')
 def debloat_policy():
     from backend import debloater, system_state as ss
+    search = r'SOFTWARE\Policies\Microsoft\Windows\Windows Search'
+    # 샌드박스에는 처음부터 AllowCortana=0 이 있어, 그대로 두면 같은 값을 다시 쓰고 지우는 경로가 돌지 않는다.
+    # 이 점검 동안만 지웠다가 끝에 원래대로 둔다.
+    cortana_orig = reg_get('HKLM', search, 'AllowCortana')
+    if cortana_orig is not None:
+        reg_del('HKLM', search, 'AllowCortana')
+    try:
+        return _debloat_policy_round_trip(debloater, ss, search)
+    finally:
+        if cortana_orig is not None:
+            reg_set('HKLM', search, 'AllowCortana', cortana_orig, winreg.REG_DWORD)
+
+
+def _debloat_policy_round_trip(debloater, ss, search):
     before = snapshot('policy_before')
     problems = []
     ok, why = debloater._apply_telemetry_policy()
@@ -254,11 +268,15 @@ def debloat_policy():
         problems.append(f'Cortana 적용 실패: {why}')
     if reg_get('HKLM', r'SOFTWARE\Policies\Microsoft\Windows\DataCollection', 'AllowTelemetry') != 0:
         problems.append('AllowTelemetry 가 0 이 아닙니다')
+    if reg_get('HKLM', search, 'AllowCortana') != 0:
+        problems.append('AllowCortana 가 0 이 아닙니다')
     if ss.service_start_type('DiagTrack') not in (None, 'disabled'):
         problems.append(f"DiagTrack 이 사용 안 함이 아닙니다 ({ss.service_start_type('DiagTrack')})")
     r = ss.restore_group(debloater.DEBLOAT_GROUP)
     if not r['ok']:
         problems.append(f"복구 실패: {r['failed']}")
+    if reg_get('HKLM', search, 'AllowCortana') is not None:
+        problems.append('원래 없던 AllowCortana 가 복구 뒤에도 남았습니다')
     return verdict(problems, diff(before, snapshot('policy_after')))
 
 
@@ -402,9 +420,20 @@ def boost_nagle():
         game_booster._enter_boost_mode()
         ifaces = game_booster._nagle_interfaces()
         base = game_booster._NAGLE_BASE
-        if not any(reg_get('HKLM', f'{base}\\{i}', 'TCPNoDelay') == 1 for i in ifaces):
-            problems.append('어느 어댑터에도 TCPNoDelay=1 이 쓰이지 않았습니다')
+        if not ifaces:
+            problems.append('Nagle 을 바꿀 네트워크 어댑터를 찾지 못했습니다(점검하지 못함)')
+        # 모든 어댑터에 두 값이 다 써져야 한다. 예전에는 '어느 어댑터든 TCPNoDelay' 만 봐서 일부 실패도 통과했다
+        bad = [(i, n) for i in ifaces for n in ('TcpAckFrequency', 'TCPNoDelay')
+               if reg_get('HKLM', f'{base}\\{i}', n) != 1]
+        if bad:
+            problems.append(f'Nagle 값이 1 이 아닌 어댑터: {bad[:4]}')
+        applied = game_booster._booster_state.get('appliedBoosts', [])
+        if any('일부 실패' in str(x) for x in applied):
+            problems.append(f'부스트가 일부 실패를 표시했습니다: {applied}')
         game_booster._exit_boost_mode()
+        from backend import system_state as ss
+        if any(e.get('group') == game_booster.BOOST_GROUP for e in ss.pending_changes().values()):
+            problems.append('게임이 끝난 뒤에도 부스트 기록이 남았습니다')
     finally:
         config_manager.save_config(saved)
     return verdict(problems, diff(before, snapshot('nagle_after')))
@@ -640,11 +669,17 @@ def priority():
                 problems.append('자기 자식 프로세스의 우선순위를 바꿨습니다')
         finally:
             child.kill()
+        # 이름마다 한 번씩 시험한다. 예전에는 처음 찾은 하나(PID 가 작은 csrss)만 보고 끝내 explorer 는 시험하지 않았다
+        protected = ('csrss.exe', 'explorer.exe', 'svchost.exe')
+        tested = set()
         for proc in psutil.process_iter(['name']):
-            if (proc.info['name'] or '').lower() in ('csrss.exe', 'explorer.exe'):
+            name = (proc.info['name'] or '').lower()
+            if name in protected and name not in tested:
+                tested.add(name)
                 if process_boost.set_priority(proc.pid, 'idle').get('ok'):
                     problems.append(f"{proc.info['name']} 의 우선순위를 바꿨습니다")
-                break
+        if set(protected) - tested:
+            problems.append(f"시스템 프로세스 거부를 시험하지 못했습니다: {sorted(set(protected) - tested)}")
     finally:
         try:
             psutil.Process(pid).kill()             # 이 점검이 띄운 ping 만 끝낸다

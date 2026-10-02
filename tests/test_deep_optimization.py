@@ -97,3 +97,20 @@ def test_dashboard_shows_steps_even_when_stopped():
     # 중지·오류도 finishOptimization 으로 단계 결과를 보여 주고, 진행 중 단계는 실패로 세지 않는다
     assert "status.error.includes" not in src
     assert '!st.ok && !st.pending' in src
+
+
+def test_junk_step_that_stopped_or_skipped_is_not_shown_as_success(recorded, monkeypatch):
+    def stopped(categories, cancel_event=None):
+        optimizer._junk_clean_state.update(status='cancelled', freed_mb=35.2, warnings=[])
+    monkeypatch.setattr(optimizer, 'clean_junk_background', stopped)
+    optimizer._run_deep_optimization()
+    junk = optimizer.get_deep_optimization_status()['steps'][0]
+    assert junk['ok'] is False and junk['cancelled'] is True and '중지됨' in junk['detail']
+
+    def skipped(categories, cancel_event=None):
+        optimizer._junk_clean_state.update(status='success', freed_mb=12.0,
+                                           warnings=['임시 폴더 위치가 안전하지 않아 정리하지 않았습니다: R:\\ (드라이브 루트)'])
+    monkeypatch.setattr(optimizer, 'clean_junk_background', skipped)
+    optimizer._run_deep_optimization()
+    junk = optimizer.get_deep_optimization_status()['steps'][0]
+    assert junk['ok'] is False and junk['partial'] is True and '건너뜀' in junk['detail']

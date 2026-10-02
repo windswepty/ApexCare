@@ -24,11 +24,13 @@ $lines = New-Object System.Collections.Generic.List[string]
 function Line([string]$s) { $lines.Add($s) }
 
 function RegValue([string]$path, [string]$name) {
+    # 키가 없는 것과 키만 남고 값이 없는 것을 나눈다. 되돌린 뒤 이 앱이 만든 빈 키가 남는 것도 드러나게.
+    if (-not (Test-Path -LiteralPath $path)) { return '<키 없음>' }
     try {
         $v = (Get-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop).$name
         if ($v -is [array]) { return ($v -join ',') }
         return "$v"
-    } catch { return '<없음>' }
+    } catch { return '<값 없음>' }
 }
 
 function RegAllValues([string]$path) {

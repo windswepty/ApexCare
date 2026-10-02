@@ -41,6 +41,18 @@ def test_backend_import_without_fakewin_is_blocked():
         assert rc != 0 and 'BackendImportBlocked' in err, mod
 
 
+def test_test_modules_are_blocked_without_conftest():
+    # conftest 를 거치지 않고 테스트 모듈을 바로 import 해도(pytest --noconftest 등) backend 가 진짜로 import 되지 않는다
+    code = (
+        "import sys\n"
+        f"sys.path.insert(0, {ROOT!r})\n"
+        "import tests.test_system_state\n"
+        "print('IMPORTED')\n"
+    )
+    rc, out, err = _run_python(code)
+    assert rc != 0 and 'IMPORTED' not in out and 'BackendImportBlocked' in err
+
+
 def test_win32_calls_are_blocked():
     with pytest.raises(fakewin.BlockedCall):
         ctypes.WinDLL('powrprof')

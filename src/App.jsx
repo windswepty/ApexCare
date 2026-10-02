@@ -81,7 +81,10 @@ export default function App() {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
         try {
           const stats = await window.pywebview.api.getSystemStats();
-          if (stats && !stats.error) {
+          // 백엔드가 답했으면(통계를 못 읽어 error 여도) 준비된 것이다. 예전에는 error 면 영원히 다시 묻기만 해서,
+          // 통계 하나를 못 읽는 PC 에서는 로딩 화면이 걷히지 않아 '되돌리기' 를 포함한 앱 전체를 쓸 수 없었다.
+          // 각 화면은 값이 없으면 '측정 중·모름' 으로 보여 준다.
+          if (stats) {
             // 대시보드가 잠깐 보였다 마법사로 바뀌지 않도록 준비 완료 전에 먼저 확인한다.
             // 읽지 못하면 띄우지 않는다(마법사의 튜닝은 선택 사항이고, 설정 창에서 다시 열 수 있다).
             if (typeof window.pywebview.api.getSetupWizardDone === 'function') {
@@ -92,7 +95,7 @@ export default function App() {
                 console.error('Error reading setup wizard state:', e);
               }
             }
-            setSystemStats(stats);
+            setSystemStats(stats.error ? {} : stats);
             setIsBackendReady(true);
             // 저장된 색 설정을 기준으로 다시 맞춘다(캐시와 다를 수 있다).
             if (typeof window.pywebview.api.getUiTheme === 'function') {
@@ -161,8 +164,9 @@ export default function App() {
             />
           ) : null}
 
-          {/* Desktop Native TitleBar */}
-          <div className="relative z-20 flex-shrink-0">
+          {/* Desktop Native TitleBar — 로딩 화면·초기 설정·오버레이 위에 둔다. 창 테두리가 없어(frameless) 이것이 가려지면
+              창을 닫거나 옮길 방법이 없다. */}
+          <div className="relative z-[60] flex-shrink-0">
             <TitleBar onOpenSettings={() => setIsSettingsOpen(true)} />
           </div>
 
@@ -201,7 +205,7 @@ export default function App() {
               </div>
 
               <div style={{ display: activeTab === 'storage' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('storage') && <StorageCenter addToast={addToast} />}
+                {isMounted('storage') && <StorageCenter active={activeTab === 'storage'} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'ram' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('ram') && <RamBooster active={activeTab === 'ram'} addToast={addToast} />}
@@ -230,9 +234,10 @@ export default function App() {
       </div>
 
       {/* Global Toast Container */}
-      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80">
+      {/* 결과 알림을 스크린 리더도 읽는다. 실패는 바로 알린다(alert). */}
+      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 pointer-events-none w-80" role="status" aria-live="polite">
         {toasts.map((toast) => (
-          <div key={toast.id} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
+          <div key={toast.id} role={toast.type === 'error' ? 'alert' : undefined} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
             {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
             {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
             {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
@@ -241,7 +246,7 @@ export default function App() {
                 {toast.message}
               </p>
             </div>
-            <button onClick={() => removeToast(toast.id)} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
+            <button onClick={() => removeToast(toast.id)} aria-label="알림 닫기" className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
               <X className="w-3 h-3" />
             </button>
           </div>

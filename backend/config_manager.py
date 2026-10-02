@@ -22,7 +22,7 @@ DEFAULT_CONFIG = {
     # 영구 변경(레지스트리)과 OS 설정 변경은 사용자가 직접 켜야 한다.
     # 예전에는 게임이 감지되면 이 셋을 고지 없이 한꺼번에 적용했다.
     "boost_timer_resolution": True,    # 0.5ms 타이머. 세션 한정, 종료 시 자동 복귀
-    "boost_disable_nagle": False,      # 레지스트리 영구 변경. 복구 함수는 있음
+    "boost_disable_nagle": False,      # 게임 동안만 레지스트리에 기록, 끝나면 원래대로(재연결 뒤 반영)
     "boost_auto_power_mode": False,    # 게임 감지 시 게이밍 전원 모드로 자동 전환
     "boost_tame_background": True,     # 바쁜 백그라운드 앱 우선순위 낮춤(복구됨)
 

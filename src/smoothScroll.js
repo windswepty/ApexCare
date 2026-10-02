@@ -12,6 +12,9 @@ export function attachSmoothScroll(wrapper, content) {
     lerp: 0.05,
     smoothWheel: true,
     wheelMultiplier: 1.0,
+    // 안쪽에 따로 스크롤되는 목록(프로그램 목록, 남은 폴더 확인 목록, 대용량 파일 결과, 기본 앱 목록 등)이 휠을 받게 한다.
+    // 없으면 Lenis 가 휠 이벤트를 막아, 지울 대상 목록을 휠로 내려 볼 수 없었다.
+    allowNestedScroll: true,
   });
 
   let frameId = null;

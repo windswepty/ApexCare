@@ -188,7 +188,12 @@ class Api:
             return {'error': '변경 기록을 읽지 못했습니다(다른 프로그램이 잠시 잡고 있을 수 있습니다).',
                     'count': None, 'groups': {}}
         by_group = {}
+        seen = set()
         for key, e in changes.items():
+            # 전원 세부값은 전원 연결·배터리 값을 따로 기록하지만 설정 하나로 보여 주고 센다(같은 문구가 두 줄씩 나왔다)
+            if system_state.setting_of(key) in seen:
+                continue
+            seen.add(system_state.setting_of(key))
             group = e.get('group') or '기타'
             # 시작 프로그램은 항목마다 그룹(startup:위치:이름)을 따로 쓴다. 화면에는 한 묶음으로 보여 준다.
             # 예전에는 'startup:HKCU:Discord' 같은 내부 키가 그대로 제목으로 보였다.
@@ -198,7 +203,7 @@ class Api:
                 'what': e.get('why') or key,
                 'kind': e.get('kind'),
             })
-        count = len(changes)
+        count = len(seen)
         if system_repair.has_legacy_network_backup():
             by_group.setdefault('legacy_network', []).append({
                 'what': '이전 버전이 바꾼 TCP 자동 튜닝·Nagle·네트워크 스로틀링', 'kind': 'legacy'})
@@ -206,6 +211,11 @@ class Api:
         if optimizer.has_legacy_service_backup():
             by_group.setdefault('legacy_service', []).append({
                 'what': '이전 버전이 바꾼 SysMain·Windows Search 시작 설정', 'kind': 'legacy'})
+            count += 1
+        # 예전 버전이 Run 에서 지우고 숨겨 둔 시작 프로그램. 빠지면 복구 센터가 '모두 원래 값' 이라고 말한다.
+        from backend import uninstall_prep
+        for name in uninstall_prep._disabled_startup_names():
+            by_group.setdefault('legacy_startup', []).append({'what': f"'{name}' (Run 에서 지워 숨김)", 'kind': 'legacy'})
             count += 1
         return {'count': count, 'groups': by_group}
         
