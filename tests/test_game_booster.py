@@ -133,3 +133,13 @@ def test_crash_recovery_with_nothing_left_changes_nothing():
     _adapters()
     game_booster._recover_after_crash()
     assert REGISTRY.writes == [] and POWER.activations == []
+
+
+def test_uwp_app_in_front_is_recognised_as_the_app_in_use():
+    # UWP 앱의 바깥 창은 ApplicationFrameHost 가 가진다. 앱은 그 안의 자식 창을 가진 별도 프로세스다.
+    names = {10: 'ApplicationFrameHost.exe', 20: 'Microsoft.Media.Player.exe', 30: 'chrome.exe'}
+    pid = game_booster._foreground_app_pid(
+        'frame', window_pid=lambda h: 10, child_pids=lambda h: [10, 20], name_of=names.get)
+    assert pid == 20                       # 예전에는 10(틀) 이라 보고 있는 앱이 '바쁜 백그라운드 앱' 이 됐다
+    assert game_booster._foreground_app_pid(
+        'win', window_pid=lambda h: 30, child_pids=lambda h: [31], name_of=names.get) == 30

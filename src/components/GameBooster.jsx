@@ -133,12 +133,13 @@ export default function GameBooster({ addToast, active = true }) {
     }
   };
 
-  const changePriority = async (pid, priority, name) => {
+  const changePriority = async (pid, priority, name, created) => {
     const a = api();
     if (!a?.boostProcess) return;
     setBusyPid(pid);
     try {
-      const res = await a.boostProcess(pid, priority);
+      // 생성 시각을 함께 보낸다. 목록을 본 뒤 그 프로세스가 끝나 같은 번호를 다른 프로그램이 받았으면 백엔드가 거절한다.
+      const res = await a.boostProcess(pid, priority, created ?? null);
       if (res?.ok) {
         addToast?.(`${res.name}: 우선순위를 '${PRIORITY_LABEL[priority] || priority}' 로 바꿨습니다.`, 'success');
       } else {
@@ -324,7 +325,7 @@ export default function GameBooster({ addToast, active = true }) {
                 ].map(({ k, Icon, label, cls }) => (
                   <button
                     key={k}
-                    onClick={() => changePriority(p.pid, k, p.name)}
+                    onClick={() => changePriority(p.pid, k, p.name, p.created)}
                     disabled={busyPid === p.pid}
                     title={`${label}으로 변경`}
                     className={`w-8 h-8 grid place-items-center rounded-lg border border-black/10 dark:border-slate-700 text-gray-500 transition-colors disabled:opacity-40 ${cls}`}

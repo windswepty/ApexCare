@@ -224,11 +224,22 @@ export default function RestoreCenter({ addToast, active = true }) {
                   ))}
                 </ul>
               )}
+              {/* 항목별 실패 이유를 그대로 보여 준다. 예전에는 이유 없이 '관리자 권한으로 실행하면 대부분 풀린다' 고
+                  안내했는데, 이 앱은 늘 관리자 권한으로 돌아 사실이 아니었다. */}
               {result.failed?.length > 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  실패한 항목은 기록에 남아 있어 다시 시도할 수 있습니다.
-                  대부분 관리자 권한으로 실행하면 해결됩니다.
-                </p>
+                <div className="mt-2">
+                  <ul className="space-y-1">
+                    {result.failed.slice(0, 6).map((f, i) => (
+                      <li key={i} className="text-xs text-rose-400 break-words">· {f.reason || f.key}</li>
+                    ))}
+                    {result.failed.length > 6 && (
+                      <li className="text-xs text-gray-500">· 외 {result.failed.length - 6}건</li>
+                    )}
+                  </ul>
+                  <p className="text-xs text-gray-500 mt-2">
+                    실패한 항목은 기록에 남아 있어 다시 시도할 수 있습니다.
+                  </p>
+                </div>
               )}
             </div>
           </div>

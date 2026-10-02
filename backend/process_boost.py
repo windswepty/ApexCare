@@ -135,6 +135,10 @@ def recover_after_crash():
                 continue
             if not isinstance(entry, dict) or pid in _original:
                 continue
+            bad = _invalid_recovery_entry(pid, entry)
+            if bad:
+                failed.append(f"{entry.get('name', pid) if isinstance(entry.get('name'), str) else pid}: {bad}")
+                continue
             _original[pid] = entry
             r = restore(pid)
             if r['ok'] and not r.get('reason'):
@@ -143,6 +147,32 @@ def recover_after_crash():
                 failed.append(f"{entry.get('name', pid)}: {r.get('reason', '실패')}")
         _persist()
     return restored, failed
+
+
+def _invalid_recovery_entry(pid, entry):
+    """복구 파일의 기록이 이 앱이 남긴 모양이 아니면 그 이유. 맞으면 None.
+
+    그 파일은 같은 계정의 일반 권한 프로그램도 쓸 수 있다. 검증 없이 쓰면 관리자 권한으로 실시간(REALTIME)
+    우선순위를 걸거나, 관문이 막는 시스템 프로세스(dwm·audiodg 등)를 IDLE 로 낮출 수 있었다.
+    """
+    if entry.get('owner') not in ('boost', 'eco'):
+        return '기록 형식이 올바르지 않아 건너뛰었습니다'
+    prio = entry.get('priority')
+    if isinstance(prio, bool) or prio not in PRIORITY_BY_NAME.values():
+        return '기록 형식이 올바르지 않아 건너뛰었습니다'
+    created = entry.get('created')
+    if isinstance(created, bool) or not isinstance(created, (int, float)):
+        return '기록 형식이 올바르지 않아 건너뛰었습니다'
+    ok, _, _, err = process_guard.check_controllable(pid, action='priority')
+    if ok:
+        return None
+    try:
+        psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return None         # 이미 끝났다. restore 가 '종료됨' 으로 정리한다
+    except psutil.Error:
+        pass
+    return err or '건드릴 수 없는 프로세스라 건너뛰었습니다'
 
 
 def _never_throttle(name):
@@ -189,10 +219,11 @@ def owner_of(pid):
     return entry.get('owner') if entry else None
 
 
-def set_priority(pid, priority_name, reason='', owner='user'):
+def set_priority(pid, priority_name, reason='', owner='user', created=None):
     """우선순위를 바꾼다. process_guard 를 반드시 통과해야 한다.
 
     원래 값을 기록하지 못하면 바꾸지 않는다. 되돌릴 수 없는 변경이 된다.
+    created: 화면이 목록에서 본 프로세스의 생성 시각. 주면 지금 그 PID 가 같은 프로세스일 때만 바꾼다.
     """
     if priority_name not in PRIORITY_BY_NAME:
         return {'ok': False, 'reason': f'알 수 없는 우선순위: {priority_name}'}
@@ -200,6 +231,15 @@ def set_priority(pid, priority_name, reason='', owner='user'):
     ok, safe_pid, proc_name, err = process_guard.check_controllable(pid, action='priority')
     if not ok:
         return {'ok': False, 'reason': err, 'name': proc_name}
+    if created is not None:
+        # 목록을 본 뒤 그 프로세스가 끝나고 다른 프로그램이 같은 PID 를 받았으면 그 프로그램을 바꾸게 된다
+        try:
+            same = abs(psutil.Process(safe_pid).create_time() - float(created)) < 0.01
+        except (TypeError, ValueError, psutil.Error):
+            same = False
+        if not same:
+            return {'ok': False, 'name': proc_name,
+                    'reason': '목록을 본 뒤 그 프로세스가 끝나 다른 프로그램이 같은 번호를 받았습니다. 목록을 새로 고쳐 주세요.'}
 
     with _state_lock:
         existing = _original.get(safe_pid)
@@ -245,6 +285,12 @@ def set_priority(pid, priority_name, reason='', owner='user'):
                 _original.pop(safe_pid, None)        # 아무것도 바뀌지 않았다
             return {'ok': False, 'name': proc_name,
                     'reason': f'설정 후 확인에 실패했습니다 (현재 {NAME_BY_PRIORITY.get(after, after)})'}
+        entry = _original.get(safe_pid)
+        if owner == 'user' and entry and entry.get('ecoqos'):
+            # 부스트·에코가 낮추며 건 효율 모드(EcoQoS). 사용자가 직접 우선순위를 고르면 기록이 사용자 것이 되어
+            # 게임이 끝나도 되돌리지 않으므로, 여기서 풀지 않으면 '높음' 을 골라도 효율 모드에 묶인 채 남았다.
+            _release_ecoqos(safe_pid)
+            entry.pop('ecoqos', None)
         _persist()
 
     log.info(f"우선순위 변경: {proc_name}({safe_pid}) -> {priority_name} {reason}")
@@ -433,12 +479,14 @@ def find_throttle_candidates(foreground_pid, cpu_threshold=3.0, limit=40):
             user = p.info['username'] or ''
             if 'system' in user.lower() or 'service' in user.lower():
                 continue
-            # process_guard 가 막는 것은 애초에 후보가 아니다
-            ok, _, _, _ = process_guard.check_controllable(pid, action='priority')
-            if not ok:
-                continue
+            # CPU 를 먼저 본다. 관문(process_guard)은 부모 프로세스를 거슬러 올라가며 프로세스 목록 전체를 여러 번
+            # 다시 읽어서, 예전처럼 모든 앱에 먼저 부르면 게임 중 5초마다 몇 초씩 CPU 를 썼다. 기준점은 모든 앱에 갱신된다.
             cpu = sample_cpu(p)
             if cpu is None or cpu < cpu_threshold:
+                continue
+            # process_guard 가 막는 것은 애초에 후보가 아니다(바꾸기 직전 set_priority 가 다시 확인한다)
+            ok, _, _, _ = process_guard.check_controllable(pid, action='priority')
+            if not ok:
                 continue
             out.append({'pid': pid, 'name': p.info['name'], 'cpu': round(cpu, 1)})
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):

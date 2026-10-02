@@ -84,3 +84,14 @@ def test_no_result_is_recorded_when_the_real_mode_is_unknown(quick, monkeypatch)
     r = perf_bench.run(0.05)
     assert r['success'] is False and '모드' in r['message']
     assert perf_bench.get_results() == {}
+
+
+def test_unsaved_result_is_shown_and_said_not_saved(quick, monkeypatch):
+    _mode_is(monkeypatch, 'eco')
+    config_manager.update_config(lambda c: c.__setitem__(perf_bench._SETTINGS_KEY, {'eco': {'score': 999, 'at': 'old'}}))
+    monkeypatch.setattr(config_manager, 'update_config', lambda change: False)   # 백신이 설정 파일을 잠갔다
+
+    r = perf_bench.run(0.05)
+
+    assert r['success'] and r['saved'] is False and '저장하지 못해' in r['message']
+    assert r['results']['eco'] == r['result']        # 예전에는 표에 예전 점수 999 가 그대로 보였다

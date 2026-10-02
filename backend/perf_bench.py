@@ -99,14 +99,19 @@ def run(seconds=BENCH_SECONDS):
             cfg[_SETTINGS_KEY] = data
         try:
             from backend import config_manager
-            if not config_manager.update_config(put):
-                log.warning('측정 결과를 저장하지 못했습니다')
+            saved = bool(config_manager.update_config(put))
         except Exception as e:
             log.warning(f'측정 결과를 저장하지 못했습니다: {e}')
+            saved = False
         results = get_results()
-        results.setdefault(mode, result)
-        return {'success': True, 'mode': mode, 'result': result, 'results': results,
-                'message': f"{result['score']} MB/s"}
+        # 이번 결과가 표에 보여야 한다. 예전에는 setdefault 라서 저장에 실패하면 같은 모드의 예전 점수가 그대로 보였다.
+        results[mode] = result
+        out = {'success': True, 'mode': mode, 'result': result, 'results': results, 'saved': saved,
+               'message': f"{result['score']} MB/s"}
+        if not saved:
+            log.warning('측정 결과를 저장하지 못했습니다')
+            out['message'] += ' (결과를 저장하지 못해 앱을 다시 켜면 사라집니다)'
+        return out
     except Exception as e:
         log.warning(f'CPU 측정 실패: {e}')
         return {'success': False, 'message': f'측정하지 못했습니다: {e}'}

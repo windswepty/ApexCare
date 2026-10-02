@@ -2,22 +2,28 @@
 
 import json
 
-from backend import system_state as ss
+from backend import machine_store, system_state as ss
 from tests import fakewin
 from tests.fakewin import POWER, REGISTRY, SERVICES
 
 KEY = r'SOFTWARE\ApexCareTest'
+APPROVED = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 
 
 def _journal():
     return ss.pending_changes()
 
 
+def _machine_journal():
+    raw = REGISTRY.value('HKLM', machine_store.KEY, 'Journal')
+    return json.loads(raw) if raw else None
+
+
 # ── 저널을 읽지 못할 때 ─────────────────────────────────────
 
-def test_locked_journal_is_not_treated_as_corrupt_and_nothing_changes(monkeypatch):
+def test_locked_account_journal_is_not_treated_as_corrupt_and_nothing_changes(monkeypatch):
     import os
-    assert ss.set_registry('HKLM', KEY, 'First', 1, group='t')['ok']
+    assert ss.set_registry('HKCU', APPROVED, 'First', b'\x02' * 12, group='t', vtype=fakewin.REG_BINARY)['ok']
     with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
         before = f.read()
     real_open = open
@@ -35,10 +41,111 @@ def test_locked_journal_is_not_treated_as_corrupt_and_nothing_changes(monkeypatc
 
     # 예전에는 '깨짐' 으로 보고 옆으로 치운 뒤 새 기록만 남겨 First 의 원래 값 기록을 잃었다
     assert r['ok'] is False and REGISTRY.get('HKLM', KEY, 'Second') is None
-    assert restored['ok'] is False and REGISTRY.value('HKLM', KEY, 'First') == 1
+    assert restored['ok'] is False and REGISTRY.value('HKCU', APPROVED, 'First') == b'\x02' * 12
     with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
         assert f.read() == before
     assert not [n for n in os.listdir(ss.APPDATA_DIR) if '.corrupt' in n or n.endswith('.tmp')]
+
+
+def test_unreadable_machine_journal_changes_nothing():
+    assert ss.set_registry('HKLM', KEY, 'First', 1, group='t')['ok']
+    before = REGISTRY.value('HKLM', machine_store.KEY, 'Journal')
+    REGISTRY.deny_read_value('HKLM', machine_store.KEY, 'Journal')
+
+    r = ss.set_registry('HKLM', KEY, 'Second', 2, group='t')
+    restored = ss.restore_group('t')
+
+    assert r['ok'] is False and REGISTRY.get('HKLM', KEY, 'Second') is None
+    assert restored['ok'] is False and REGISTRY.value('HKLM', KEY, 'First') == 1
+    assert REGISTRY.value('HKLM', machine_store.KEY, 'Journal') == before
+
+
+# ── 저널 위치: PC 전체는 관리자만 쓰는 곳, 이 계정의 시작 프로그램 표시는 계정 파일 ──
+
+def test_pc_wide_changes_are_journaled_where_only_admins_can_write():
+    POWER.seed_value(fakewin.PLAN_BALANCED, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 5)
+    SERVICES.add('SysMain', 2)
+    assert ss.set_registry('HKLM', KEY, 'V', 1, group='t')['ok']
+    assert ss.set_active_plan(fakewin.PLAN_HIGH_PERF, group='t')['ok']
+    assert ss.set_service_start('SysMain', 'disabled', 't')['ok']
+    assert ss.set_registry('HKCU', APPROVED, 'App', b'\x03' * 12, group='u', vtype=fakewin.REG_BINARY)['ok']
+
+    machine = _machine_journal()['entries']
+    assert f'reg:HKLM\\{KEY}\\V' in machine and 'power:active_plan' in machine and 'svc:sysmain' in machine
+    assert not [k for k in machine if k.startswith('reg:HKCU')]
+    with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
+        assert list(json.load(f)['entries']) == [f'reg:HKCU\\{APPROVED}\\App']
+    assert len(ss.pending_changes()) == 4
+    assert ss.restore_all()['ok'] and ss.pending_changes() == {}
+
+
+def _as_other_account(monkeypatch, tmp_path, sid):
+    """다른 Windows 계정으로 앱을 켠 것처럼: 계정 파일 위치와 SID 만 다르고 PC(레지스트리·전원)는 같다."""
+    d = tmp_path / sid
+    d.mkdir()
+    monkeypatch.setattr(ss, 'APPDATA_DIR', str(d))
+    monkeypatch.setattr(ss, 'JOURNAL_PATH', str(d / 'system_state.json'))
+    monkeypatch.setattr(ss, '_account_sid', lambda: sid)
+
+
+def test_second_account_does_not_record_first_accounts_values_as_original(monkeypatch, tmp_path):
+    REGISTRY.seed('HKLM', KEY, 'SystemResponsiveness', 20)
+    assert ss.set_registry('HKLM', KEY, 'SystemResponsiveness', 10, group='perf_mode')['ok']   # 계정 A: 게이밍
+
+    _as_other_account(monkeypatch, tmp_path, 'S-1-5-21-9-9-9-1002')                           # 계정 B
+    assert ss.pending_changes()                     # B 도 A 가 바꾼 것을 본다
+    assert ss.set_registry('HKLM', KEY, 'SystemResponsiveness', 10, group='perf_mode')['ok']
+    assert ss.restore_group('perf_mode')['ok']      # B 가 표준으로
+
+    # 예전에는 B 가 A 의 게이밍 값 10 을 원래 값으로 기록해, B 의 되돌리기가 10 을 다시 썼다
+    assert REGISTRY.value('HKLM', KEY, 'SystemResponsiveness') == 20
+
+
+def _write_account_journal(entries):
+    import os
+    os.makedirs(ss.APPDATA_DIR, exist_ok=True)
+    with open(ss.JOURNAL_PATH, 'w', encoding='utf-8') as f:
+        json.dump({'version': 1, 'entries': entries}, f)
+
+
+def _reg_entry(hive, path, name, value, vtype=fakewin.REG_DWORD):
+    return {'kind': 'registry', 'group': 't', 'hive': hive, 'path': path, 'name': name,
+            'existed': True, 'value': value, 'type': vtype, 'created_keys': []}
+
+
+def test_old_journal_is_moved_to_the_pc_once_and_later_writes_to_the_account_file_are_ignored():
+    REGISTRY.seed('HKLM', KEY, 'Tuned', 1)
+    _write_account_journal({f'reg:HKLM\\{KEY}\\Tuned': _reg_entry('HKLM', KEY, 'Tuned', 7)})
+
+    assert f'reg:HKLM\\{KEY}\\Tuned' in ss.pending_changes()                 # 예전 기록을 옮겨 이어 쓴다
+    assert f'reg:HKLM\\{KEY}\\Tuned' in _machine_journal()['entries']
+    with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
+        assert json.load(f)['entries'] == {}
+
+    # 옮긴 뒤 같은 계정의 일반 권한 프로그램이 계정 파일에 PC 쪽 기록을 써 넣는다
+    evil = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+    _write_account_journal({f'reg:HKLM\\{evil}\\x': _reg_entry('HKLM', evil, 'x', r'C:\evil.exe', fakewin.REG_SZ)})
+    assert f'reg:HKLM\\{evil}\\x' not in ss.pending_changes()
+    assert ss.restore_all()['ok']
+    assert REGISTRY.get('HKLM', evil, 'x') is None                    # 관리자 권한으로 쓰지 않는다
+    assert REGISTRY.value('HKLM', KEY, 'Tuned') == 7                  # 진짜 예전 기록은 되돌렸다
+
+
+def test_account_file_entries_outside_startup_approval_are_not_used():
+    policies = r'Software\Policies\Microsoft\Windows\System'
+    _write_account_journal({f'reg:HKCU\\{policies}\\DisableCMD': _reg_entry('HKCU', policies, 'DisableCMD', 0)})
+    REGISTRY.seed('HKCU', policies, 'DisableCMD', 1)
+
+    assert ss.pending_changes() == {}
+    assert ss.restore_all()['ok']
+    assert REGISTRY.value('HKCU', policies, 'DisableCMD') == 1
+
+
+def test_corrupt_machine_journal_is_kept_aside():
+    REGISTRY.seed('HKLM', machine_store.KEY, 'Journal', '{깨짐', fakewin.REG_SZ)
+    assert ss.pending_changes() == {}
+    values = REGISTRY._find(fakewin.HKEY_LOCAL_MACHINE, ['SOFTWARE', 'APEX CARE']).values
+    assert len([n for n in values if n.startswith('journal.corrupt-')]) == 1 and 'journal' not in values
 
 
 # ── 레지스트리 ────────────────────────────────────────────
@@ -282,3 +389,42 @@ def test_created_key_goes_away_when_values_are_restored_one_group_at_a_time():
     assert ss.restore_group('startup:B')['ok']
     assert not REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')
     assert ss.pending_changes() == {}
+
+
+# ── 전원 플랜이 지워졌거나 전환이 막혔을 때 ─────────────────────
+
+def test_deleted_original_plan_asks_once_then_lets_go_when_user_picks_a_plan():
+    custom = '11111111-2222-3333-4444-555555555555'
+    POWER.plans[custom] = '내 플랜'
+    POWER.active = custom
+    assert ss.set_active_plan(fakewin.PLAN_HIGH_PERF, group='t')['ok']
+    del POWER.plans[custom]                                     # 제어판에서 지움
+
+    r = ss.restore_group('t')
+    assert r['ok'] is False and '삭제' in r['failed'][0]['reason']   # 이 앱이 켠 고성능이 그대로라 안내한다
+    POWER.active = fakewin.PLAN_POWER_SAVER                       # 안내대로 사용자가 고름
+    assert ss.restore_group('t')['ok'] and _journal() == {}     # 예전에는 영원히 실패로 남았다
+    assert POWER.active == fakewin.PLAN_POWER_SAVER
+
+
+def test_values_written_to_a_plan_that_was_later_deleted_are_let_go():
+    POWER.seed_value(fakewin.PLAN_HIGH_PERF, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 5)
+    assert ss.set_power_value(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, 100, group='t',
+                              plan=fakewin.PLAN_HIGH_PERF)['ok']
+    del POWER.plans[fakewin.PLAN_HIGH_PERF]
+    assert ss.restore_group('t')['ok'] and _journal() == {}
+
+
+def test_failed_plan_switch_leaves_no_record():
+    POWER.fail_set_active = True                                # 정책·제조사 도구가 플랜 전환을 막는다
+    assert ss.set_active_plan(fakewin.PLAN_HIGH_PERF, group='perf_mode')['ok'] is False
+    assert _journal() == {}                                     # 예전에는 '되돌리지 못한 설정 1개' 가 남았다
+    assert ss.set_active_plan('99999999-9999-9999-9999-999999999999', group='perf_mode')['ok'] is False
+    assert _journal() == {}
+
+
+def test_plan_already_back_is_not_switched_again():
+    assert ss.set_active_plan(fakewin.PLAN_HIGH_PERF, group='t')['ok']
+    POWER.active = fakewin.PLAN_BALANCED                        # 사용자가 Windows 에서 직접 되돌림
+    POWER.fail_set_active = True
+    assert ss.restore_group('t')['ok'] and _journal() == {}

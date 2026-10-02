@@ -370,10 +370,21 @@ def _run_deep_optimization():
         # 실제 상태 키는 'freed_mb'. 예전엔 'freedMB' 를 읽어서 항상 0MB 로 보고됐다.
         freed = _junk_clean_state.get("freed_mb", 0)
         _optimization_state["freed_mb"] += freed
-        junk_ok = _junk_clean_state.get("status") in ("success", "cancelled")
-        steps.append({"name": "임시 파일·브라우저 캐시 정리", "ok": junk_ok,
-                      "detail": f"{freed}MB 확보" if junk_ok
-                                else _junk_clean_state.get("error", "실패")})
+        status = _junk_clean_state.get("status")
+        warns = [w for w in (_junk_clean_state.get("warnings") or []) if w]
+        if status == "cancelled":
+            # 중지로 일부 폴더를 돌지 않았다. 성공이 아니다(그때까지 지운 것은 확보했다).
+            steps.append({"name": "임시 파일·브라우저 캐시 정리", "ok": False, "cancelled": True,
+                          "detail": f"중지됨 — 그때까지 {freed}MB 확보"})
+        elif status == "success" and warns:
+            # 일부를 건너뛰었다(위치가 안전하지 않은 %TEMP% 등). 부분 실패는 성공이 아니다.
+            steps.append({"name": "임시 파일·브라우저 캐시 정리", "ok": False, "partial": True,
+                          "detail": f"{freed}MB 확보, 일부 건너뜀 — " + "; ".join(warns[:2])})
+        else:
+            junk_ok = status == "success"
+            steps.append({"name": "임시 파일·브라우저 캐시 정리", "ok": junk_ok,
+                          "detail": f"{freed}MB 확보" if junk_ok
+                                    else _junk_clean_state.get("error", "실패")})
         _optimization_state["progress_pct"] = 40
         if _cancel_event.is_set(): raise _Cancelled()
 
@@ -462,7 +473,7 @@ def _run_deep_optimization():
 
 def start_deep_optimization():
     if _optimization_state["running"]:
-        return {"success": False, "message": "이미 최적화가 실행 중입니다."}
+        return {"success": False, "busy": True, "message": "이미 최적화가 실행 중입니다."}
     # 저장공간 화면의 정리와 같은 상태·같은 폴더를 쓴다. 겹쳐 돌면 서로의 결과를 덮어쓴다.
     if _junk_clean_state.get("status") == "running":
         return {"success": False,
@@ -827,9 +838,11 @@ def clean_junk_background(category_ids, cancel_event, recycle_bytes_seen=None):
                     now = _recycle_bin_bytes()
                     if recycle_baseline is None or now is None:
                         why = "휴지통 크기를 확인하지 못해 휴지통을 비우지 않았습니다(되돌릴 수 없는 작업이라 확인 없이 하지 않습니다)"
-                    elif now > recycle_baseline:
-                        # 확인한 뒤 다른 화면에서 휴지통으로 보낸 파일이 있다. 그것까지 영구 삭제하지 않는다.
-                        why = ("확인한 뒤 휴지통에 새로 들어온 파일이 있어 휴지통을 비우지 않았습니다. "
+                    elif now != recycle_baseline:
+                        # 확인한 뒤 휴지통 내용이 바뀌었다(다른 화면·탐색기에서 넣거나 비우거나 복원). 커졌을 때만 막으면,
+                        # 줄었다가 다시 찬 경우(탐색기에서 비운 뒤 '프로그램 삭제' 가 남은 폴더를 넣음) 확인 창에 없던
+                        # 파일이 영구 삭제됐다.
+                        why = ("확인한 뒤 휴지통 내용이 바뀌어 휴지통을 비우지 않았습니다. "
                                "다시 검사한 뒤 정리해 주세요")
                     else:
                         recycle_freed, why = _empty_recycle_bin()

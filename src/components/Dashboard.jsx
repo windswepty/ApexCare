@@ -122,7 +122,8 @@ export default function Dashboard({ addToast, active = true }) {
     ramAvailableGB: null,
     diskTotalGB: null,
     diskUsedGB: null,
-    diskFreeGB: null
+    diskFreeGB: null,
+    systemDrive: null
   });
   const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : '…');
   // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않은 값은 '?' (0 으로 지어내지 않는다)
@@ -175,7 +176,9 @@ export default function Dashboard({ addToast, active = true }) {
               diskTotalGB: stats.diskTotalGB ?? null,
               diskUsedGB: stats.diskUsedGB ?? null,
               // 백엔드가 직접 잰 남은 용량. 반올림한 전체 − 반올림한 사용량으로 계산하면 1GB 씩 어긋났다.
-              diskFreeGB: stats.diskFreeGB ?? null
+              diskFreeGB: stats.diskFreeGB ?? null,
+              // Windows 가 설치된 드라이브(C: 가 아닐 수 있다)
+              systemDrive: stats.systemDrive || null
             });
           }
         } catch {
@@ -183,14 +186,54 @@ export default function Dashboard({ addToast, active = true }) {
         }
       }
   }, []);
-  // 대시보드가 보일 때만 3초마다 갱신한다. 원클릭 최적화 중에는 멈춘다(예전 동작과 같다).
-  usePolling(fetchRealStats, 3000, active && !isScanning);
+  // 대시보드가 보일 때만 3초마다 갱신한다. 원클릭 최적화 중에도 갱신한다. 예전에는 멈춘 채 시작 직전 값을
+  // 실시간 값처럼 보여 주어, 정크를 지우고 조각 모음이 CPU 를 쓰는 동안에도 숫자가 그대로였다.
+  usePolling(fetchRealStats, 3000, active);
   useEffect(() => () => {
     if (optPollInterval.current) clearInterval(optPollInterval.current);
   }, []);
 
+  // 확인 창·계획 조회를 기다리는 동안 두 번째 클릭이 들어오지 않게 한다(더블클릭하면 확인 창이 두 번 떴고, 두 번째의
+  // '이미 실행 중' 응답이 진행 화면과 중지 버튼을 지웠다)
+  const startingRef = useRef(false);
+
+  const pollOptimization = () => {
+    if (optPollInterval.current) clearInterval(optPollInterval.current);
+    optPollInterval.current = setInterval(async () => {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDeepOptimizationStatus === 'function') {
+        try {
+          const status = await window.pywebview.api.getDeepOptimizationStatus();
+          if (status) {
+            setOptStatus(status);
+
+            if (!status.running) {
+              clearInterval(optPollInterval.current);
+              // 중지·오류여도 그때까지 끝낸 단계(이미 지운 파일, 계속 도는 디스크 최적화)를 그대로 보여 준다.
+              // 예전에는 '중단되었습니다' 만 띄워, 지운 용량과 이전 실행 결과가 섞여 보였다.
+              finishOptimization(status);
+            }
+          }
+        } catch (err) {
+          console.error('Error polling optimization status:', err);
+          clearInterval(optPollInterval.current);
+          setIsScanning(false);
+          setModalMessage({ title: '오류 발생', text: '최적화 상태 확인 중 시스템 오류가 발생했습니다.', isError: true });
+        }
+      }
+    }, 1000);
+  };
+
   const runMasterOptimization = async () => {
-    if (isScanning) return;
+    if (isScanning || startingRef.current) return;
+    startingRef.current = true;
+    try {
+      await startMasterOptimization();
+    } finally {
+      startingRef.current = false;
+    }
+  };
+
+  const startMasterOptimization = async () => {
 
     // 되돌릴 수 없는 삭제(임시 파일·캐시)가 들어 있다. 무엇을 할지 먼저 보여 주고 확인을 받는다.
     let plan = null;
@@ -211,34 +254,18 @@ export default function Dashboard({ addToast, active = true }) {
     try {
       if (window.pywebview?.api && window.pywebview?.api.startDeepOptimization) {
         const res = await window.pywebview.api.startDeepOptimization();
+        if (res?.busy) {
+          // 이미 돌고 있다. 실패로 보이지 않고 그 진행 상황을 따라간다(중지 버튼도 그대로).
+          pollOptimization();
+          return;
+        }
         if (!res || !res.success) {
           setModalMessage({ title: '시작 실패', text: res?.message || '최적화 시작에 실패했습니다.', isError: true });
           setIsScanning(false);
           return;
         }
 
-        optPollInterval.current = setInterval(async () => {
-          if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getDeepOptimizationStatus === 'function') {
-            try {
-              const status = await window.pywebview.api.getDeepOptimizationStatus();
-              if (status) {
-                setOptStatus(status);
-                
-                if (!status.running) {
-                  clearInterval(optPollInterval.current);
-                  // 중지·오류여도 그때까지 끝낸 단계(이미 지운 파일, 계속 도는 디스크 최적화)를 그대로 보여 준다.
-                  // 예전에는 '중단되었습니다' 만 띄워, 지운 용량과 이전 실행 결과가 섞여 보였다.
-                  finishOptimization(status);
-                }
-              }
-            } catch (err) {
-              console.error('Error polling optimization status:', err);
-              clearInterval(optPollInterval.current);
-              setIsScanning(false);
-              setModalMessage({ title: '오류 발생', text: '최적화 상태 확인 중 시스템 오류가 발생했습니다.', isError: true });
-            }
-          }
-        }, 1000);
+        pollOptimization();
       } else {
         // Fallback or missing API
         setIsScanning(false);
@@ -482,8 +509,8 @@ export default function Dashboard({ addToast, active = true }) {
             <span className="text-black dark:text-white font-medium text-right">{ramTotalLabel(sysInfo)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            {/* C: 드라이브만 잰 값이다. 예전에는 'Storage' 라고 써서 전체 저장 장치 용량처럼 보였다. */}
-            <span className="text-gray-500 dark:text-gray-400">C: 드라이브</span>
+            {/* Windows 가 설치된 드라이브만 잰 값이다. 예전에는 'Storage' 라고 써서 전체 저장 장치 용량처럼 보였다. */}
+            <span className="text-gray-500 dark:text-gray-400">{sysInfo.systemDrive || '시스템'} 드라이브</span>
             <span className="text-black dark:text-white font-medium text-right">{gb(sysInfo.diskTotalGB)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
@@ -587,7 +614,7 @@ export default function Dashboard({ addToast, active = true }) {
               <HardDrive className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브 (C:\)</h3>
+              <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브{sysInfo.systemDrive ? ` (${sysInfo.systemDrive}\\)` : ''}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {gb(sysInfo.diskTotalGB)}</p>
             </div>
           </div>

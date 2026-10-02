@@ -14,6 +14,7 @@ APEX CARE — 제거하기 전에 이 앱이 바꾼 것을 되돌린다.
      이 앱으로 끈 시작 프로그램(StartupApproved 표시)도 저널에 있어 여기서 되켜진다
   2. 예전 버전이 Run 에서 지우고 HKCU\\Software\\APEXCARE 에 숨겨 둔 시작 프로그램을 원래 자리로 되살려 켠다
   3. 게임 부스트의 '게임 전 모드' 기록을 지운다. 남겨 두면 다시 설치했을 때 그 모드가 적용된다
+  4. 모두 되돌렸으면 PC 쪽 기록(HKLM\\SOFTWARE\\APEX CARE)을 지운다
 실패한 항목은 저널·백업에 그대로 남는다(다시 시도할 수 있게). 제거 여부는 제거 프로그램이 사용자에게 묻는다.
 """
 
@@ -114,9 +115,62 @@ def revert_for_uninstall():
         steps.append({'name': '게임 부스트 복귀 기록 지우기', 'ok': bool(saved),
                       'detail': '' if saved else '설정 파일에 저장하지 못했습니다'})
 
+    # 다른 Windows 계정에서 끈 시작 프로그램은 그 계정의 레지스트리(HKCU)라 여기서 되돌릴 수 없다. 숨기지 않고 알린다.
+    for account, n in _other_accounts_pending():
+        steps.append({'name': f"다른 계정({account})에서 끈 시작 프로그램 {n}개", 'ok': False,
+                      'detail': "그 계정으로 로그인해 APEX CARE 의 '전부 원래대로' 를 누른 뒤 제거하거나, "
+                                "제거 뒤 그 계정의 작업 관리자 → 시작 앱에서 다시 켜야 합니다"})
+
     failed = [s for s in steps if not s['ok']]
-    return {'success': not failed, 'steps': steps, 'failed': failed,
-            'remaining': len(system_state.pending_changes())}
+    remaining = len(system_state.pending_changes())
+    if not failed and remaining == 0:
+        # 되돌릴 것이 하나도 없으면 PC 쪽 기록(HKLM\SOFTWARE\APEX CARE)도 지운다. 남은 것이 있으면 다시 설치했을 때
+        # 이어서 되돌릴 수 있게 둔다.
+        from backend import machine_store
+        if not machine_store.remove():
+            failed.append({'name': 'APEX CARE 기록 지우기', 'ok': False,
+                           'detail': f'HKLM\\{machine_store.KEY} 를 지우지 못했습니다'})
+            steps.append(failed[-1])
+    return {'success': not failed, 'steps': steps, 'failed': failed, 'remaining': remaining}
+
+
+def _other_accounts_pending():
+    """다른 계정의 저널 파일에 남은 시작 프로그램 기록 수. [(계정 폴더 이름, 개수)]. 읽기만 한다."""
+    import winreg
+    from backend import system_state
+    out = []
+    mine = os.path.normcase(os.path.realpath(system_state.JOURNAL_PATH))
+    profiles = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, profiles, 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+            sids, i = [], 0
+            while True:
+                try:
+                    sids.append(winreg.EnumKey(k, i))
+                except OSError:
+                    break
+                i += 1
+            for sid in sids:
+                try:
+                    with winreg.OpenKey(k, sid) as pk:
+                        home = winreg.ExpandEnvironmentStrings(winreg.QueryValueEx(pk, 'ProfileImagePath')[0])
+                except OSError:
+                    continue
+                path = os.path.join(home, 'AppData', 'Roaming', 'APEX_CARE_DATA', 'system_state.json')
+                if os.path.normcase(os.path.realpath(path)) == mine:
+                    continue
+                try:
+                    with open(path, 'rb') as f:
+                        entries = json.loads(f.read().decode('utf-8-sig')).get('entries') or {}
+                except (OSError, ValueError, AttributeError):
+                    continue
+                n = sum(1 for e in entries.values() if system_state._trusted_user_entry(e))
+                if n:
+                    out.append((os.path.basename(home.rstrip('\\/')), n))
+    except OSError:
+        pass
+    return out
 
 
 def _write_result(res):

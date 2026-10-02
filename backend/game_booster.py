@@ -802,13 +802,50 @@ _eco_tamed_pids = set()
 ECO_OWNER = 'eco'
 
 
+def _window_pid(hwnd):
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _child_window_pids(hwnd):
+    """창 안의 자식 창들을 가진 프로세스 PID 목록."""
+    pids = []
+    proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+    def each(child, _):
+        pids.append(_window_pid(child))
+        return True
+    ctypes.windll.user32.EnumChildWindows(hwnd, proc(each), 0)
+    return pids
+
+
+def _process_name(pid):
+    try:
+        return psutil.Process(pid).name()
+    except Exception:
+        return ''
+
+
+def _foreground_app_pid(hwnd, window_pid=_window_pid, child_pids=_child_window_pids, name_of=_process_name):
+    """지금 쓰는 창의 앱 PID.
+
+    UWP 앱(미디어 플레이어, 넷플릭스 등)의 바깥 창은 ApplicationFrameHost.exe 가 가지고, 앱은 그 안의 자식 창
+    (CoreWindow)을 가진 별도 프로세스다. 바깥 창의 PID 만 보면 보고 있는 앱을 '바쁜 백그라운드 앱' 으로 낮췄다.
+    """
+    pid = window_pid(hwnd)
+    if pid and (name_of(pid) or '').lower() == 'applicationframehost.exe':
+        for child in child_pids(hwnd):
+            if child and child != pid:
+                return child
+    return pid
+
+
 def _get_foreground_pid():
     try:
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         if hwnd:
-            pid = ctypes.wintypes.DWORD()
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            return pid.value
+            return _foreground_app_pid(hwnd)
     except Exception as e:
         log.debug(f"Failed to get foreground PID: {e}")
     return None

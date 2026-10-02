@@ -34,10 +34,14 @@ if __name__ == '__main__':
         pass
 
     # 한 번에 하나만. 두 번째로 켜면 떠 있는 창을 앞으로 가져오고 끝낸다(Api 를 만들기 전에 —
-    # 생성자가 저장된 모드를 다시 적용하고 게임 부스트를 켠다).
+    # 생성자가 저장된 모드를 다시 적용하고 게임 부스트를 켠다). 다른 계정에서 떠 있으면 그 사실을 알리고 끝낸다.
     from backend import single_instance
-    if not single_instance.acquire():
+    running = single_instance.acquire_both()
+    if running == 'same':
         single_instance.focus_existing('APEX CARE')
+        sys.exit(0)
+    if running == 'other':
+        single_instance.tell_other_session()
         sys.exit(0)
 
     html_path = get_html_path()

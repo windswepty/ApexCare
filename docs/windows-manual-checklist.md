@@ -97,7 +97,8 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
         (원래 그 값이었으면 차이가 없다. 이 PC 에 없는 항목은 결과 화면에 '건너뜀' 으로 나온다)
       - 헤더의 **CPU 실제 속도** 가 기본 클럭보다 높게(부스트) 나온다
       - `SystemResponsiveness = 10`, `NetworkThrottlingIndex = 4294967295`
-      - 저널 항목(group=perf_mode), 설정 `optimization_mode = gaming`
+      - PC 저널(`HKLM\SOFTWARE\APEX CARE` 의 Journal) 항목(group=perf_mode), PC 설정(Settings) `optimization_mode = gaming`.
+        계정 저널(`%APPDATA%\APEX_CARE_DATA\system_state.json`)에는 시작 프로그램 표시 기록만 있다
       - **HwSchMode 는 바뀌지 않는다**
 - [ ] 3-2. **표준** 적용 → **스냅숏** `03-standard` → **비교** `base` `03-standard`
       기대: `[APEX CARE]` 의 `optimization_mode`·`user_set` 줄만 다르다. 전원 플랜·레지스트리는 `base` 와 같다
@@ -308,7 +309,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
       (5절에서 제거한 앱이 남아 있으면, 확인 창에 "디블로터로 제거한 앱 N개는 다시 설치하지 않습니다" 가 함께 나온다)
 - [ ] 13-3. **스냅숏** `13-after` → **비교** `13-base` `13-after` 가 같다. 게이밍 모드·원격 분석 정책이 되돌아가고,
       꺼 둔 두 시작 프로그램이 **원래 Run 키**(HKCU 는 HKCU, HKLM 은 HKLM)에 돌아오고, `HKCU\Software\APEXCARE` 키가 없다.
-      `[APEX CARE]` 부분은 달라도 된다(`optimization_mode = standard`, 저널 항목 0개)
+      `[APEX CARE]` 부분은 달라도 된다. PC 저널·PC 설정은 `<없음>`(제거 전 되돌리기가 `HKLM\SOFTWARE\APEX CARE` 를 지운다), 계정 저널 항목 0개
 - [ ] 13-4. `uninstall_revert.json` 의 `success` 가 `true`, `failed` 가 빈 목록이다
 - [ ] 13-5. 되돌리기 실패 경로: 재설치 → 게이밍 적용 → 앱을 닫고 `C:\Program Files\APEX CARE\APEX CARE.exe` 이름을
       잠깐 `APEX CARE.exe.bak` 으로 바꾼다 → 제거 → "설정을 되돌리지 못했습니다" 와 함께 **기본 선택이 '아니요'** 인 질문이 뜬다 →

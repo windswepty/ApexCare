@@ -19,21 +19,24 @@ MM = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
 NAGLE_IF = r'SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{aaaa}'
 
 
-def _dump_registry():
-    """가짜 레지스트리 전체를 {경로: {값 이름: (값, 타입)}} 으로. 키가 새로 생기거나 남아도 드러난다."""
+def _dump_registry(app=True):
+    """가짜 레지스트리 전체를 {경로: {값 이름: (값, 타입)}} 으로. 키가 새로 생기거나 남아도 드러난다.
+    app=False 면 앱 자신의 상태 키(HKLM\\SOFTWARE\\APEX CARE)는 뺀다."""
     out = {}
 
-    def walk(key, path):
+    def walk(hive, key, path, parts):
+        if not app and fakewin.is_app_key(hive, parts):
+            return
         out[path] = {n: (v, t) for n, (_, v, t) in key.values.items()}
         for name, sub in key.subkeys.items():
-            walk(sub, f'{path}\\{name}')
+            walk(hive, sub, f'{path}\\{name}', parts + [name])
     for hive, root in REGISTRY.roots.items():
-        walk(root, fakewin._HIVE_NAMES[hive])
+        walk(hive, root, fakewin._HIVE_NAMES[hive], [])
     return out
 
 
-def _state():
-    return _dump_registry(), POWER.active, copy.deepcopy(POWER.values)
+def _state(app=True):
+    return _dump_registry(app), POWER.active, copy.deepcopy(POWER.values)
 
 
 def _seed_pc():
@@ -81,7 +84,8 @@ def test_everything_is_back_to_original_before_uninstall():
     res = uninstall_prep.revert_for_uninstall()
 
     assert res['success'], res['failed']
-    assert _state() == before                       # 이 앱이 만든 키(Software\APEXCARE)까지 남지 않는다
+    # 이 앱이 만든 키(Software\APEXCARE, PC 쪽 기록 HKLM\SOFTWARE\APEX CARE)까지 남지 않는다
+    assert _state() == before
     assert ss.pending_changes() == {}
     assert config_manager.get_boost_restore_mode() is None
     assert res['remaining'] == 0
@@ -111,6 +115,31 @@ def test_failures_are_reported_and_kept_for_retry():
     # 실패한 것이 있어도 되돌릴 수 있는 것은 되돌린다
     assert REGISTRY.value('HKCU', RUN_USER, 'UserApp') is not None
     assert SERVICES.start_of('DiagTrack')[0] == 2
+    # PC 쪽 기록은 남는다(다시 설치하면 이어서 되돌릴 수 있다)
+    from backend import machine_store
+    assert REGISTRY.value('HKLM', machine_store.KEY, 'Journal')
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_startup_items_turned_off_in_another_account_are_reported(tmp_path):
+    # 다른 계정의 시작 프로그램 표시는 그 계정의 HKCU 라 여기서 되돌릴 수 없다. 숨기지 않고 알린다.
+    other = tmp_path / 'Users' / 'kid'
+    data = other / 'AppData' / 'Roaming' / 'APEX_CARE_DATA'
+    data.mkdir(parents=True)
+    approved = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    with open(data / 'system_state.json', 'w', encoding='utf-8') as f:
+        json.dump({'version': 1, 'entries': {f'reg:HKCU\\{approved}\\Game': {
+            'kind': 'registry', 'group': 'startup:HKCU:Game', 'hive': 'HKCU', 'path': approved,
+            'name': 'Game', 'existed': False, 'value': None, 'type': 3}}}, f)
+    profiles = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    REGISTRY.seed('HKLM', profiles + r'\S-1-5-21-9-9-9-1002', 'ProfileImagePath', str(other), fakewin.REG_EXPAND_SZ)
+    _seed_pc()
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    assert res['success'] is False
+    step = next(s for s in res['failed'] if 'kid' in s['name'])
+    assert '1개' in step['name'] and '작업 관리자' in step['detail']
 
 
 
@@ -166,11 +195,11 @@ def test_priorities_left_by_a_crash_are_restored_before_uninstall(procs, monkeyp
 
 def test_without_admin_nothing_is_changed_and_it_fails():
     _seed_pc()
-    before = _state()
+    before = _state(app=False)
     res = uninstall_prep.revert_for_uninstall()
     assert res['success'] is False
     assert res['failed'][0]['name'] == '시스템 설정 되돌리기'
-    assert _state() == before
+    assert _state(app=False) == before
 
 
 @pytest.mark.usefixtures('as_admin')

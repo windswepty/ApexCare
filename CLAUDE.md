@@ -78,7 +78,11 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 - 시작 프로그램은 Run 값을 지우지 않고 `Explorer\StartupApproved\Run(/Run32)` 표시만 `set_registry` 로 바꿉니다(작업 관리자와 같은 방식,
   group `startup:<위치>:<이름>`). 저널은 bytes 를 `{'__bytes__': 16진수}` 로 담습니다. 예전 버전이 `HKCU\Software\APEXCARE\DisabledStartup` 에
   숨긴 항목은 켤 때 기록된 원래 Run 위치(허용 목록으로 검증)로 되살립니다.
-- 저널 위치: `%APPDATA%\APEX_CARE_DATA\system_state.json`. 설정 파일: 같은 폴더의 `settings.json`.
+- 저널 위치: PC 전체 변경(HKLM·전원·서비스)은 `HKLM\SOFTWARE\APEX CARE` 의 `Journal`(`backend/machine_store.py`, 관리자만 씀),
+  이 계정의 시작 프로그램 표시(HKCU StartupApproved)만 `%APPDATA%\APEX_CARE_DATA\system_state.json`. 계정 폴더는 같은 계정의 일반 권한
+  프로그램도 쓸 수 있으므로, 거기 있는 기록으로 HKLM 을 쓰지 않습니다(예전 버전 저널은 계정마다 한 번만 옮김). 성능 모드·게임 전 모드도
+  PC 에 하나라 같은 키의 `Settings` 에 둡니다. 그래서 다른 Windows 계정에서 앱이 떠 있으면 실행을 막습니다(Global 뮤텍스).
+  나머지 설정은 같은 계정 폴더의 `settings.json`.
 
 ### 프로세스
 

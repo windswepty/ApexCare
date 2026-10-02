@@ -23,12 +23,14 @@ DISABLED_BY_TASKMGR = b'\x03\x00\x00\x00' + b'\x11' * 8
 def _dump():
     out = {}
 
-    def walk(key, path):
+    def walk(hive, key, path, parts):
+        if fakewin.is_app_key(hive, parts):
+            return                      # 앱 자신의 상태 키(저널·성능 모드)는 PC 설정이 아니다
         out[path] = {n: (v, t) for n, (_, v, t) in key.values.items()}
         for name, sub in key.subkeys.items():
-            walk(sub, f'{path}\\{name}')
+            walk(hive, sub, f'{path}\\{name}', parts + [name])
     for hive, root in REGISTRY.roots.items():
-        walk(root, fakewin._HIVE_NAMES[hive])
+        walk(hive, root, fakewin._HIVE_NAMES[hive], [])
     return copy.deepcopy(out)
 
 

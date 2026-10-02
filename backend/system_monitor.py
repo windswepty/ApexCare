@@ -404,14 +404,26 @@ def memory_lists():
         pdh.PdhCloseQuery(query)
 
 
+def system_drive():
+    """Windows 가 설치된 드라이브 문자('C:' 등)."""
+    d = (os.environ.get('SystemDrive') or '').strip().rstrip('\\/')
+    return d if re.fullmatch(r'[A-Za-z]:', d) else 'C:'
+
+
 def get_system_stats():
     """Get system stats using only psutil and WMI for GPU."""
     note_demand()
     try:
         cpu_usage = _fresh_cpu_usage()
         mem = psutil.virtual_memory()
-        disk = psutil.disk_usage('C:\\')
-        
+        # Windows 가 설치된 드라이브. C: 로 고정하면 C: 가 없는 PC 에서 이 함수 전체가 실패해 앱이 로딩 화면에서 멈췄다.
+        drive = system_drive()
+        try:
+            disk = psutil.disk_usage(drive + '\\')
+        except Exception as e:
+            log.debug(f"{drive} 사용량을 읽지 못했습니다: {e}")
+            disk = None
+
         cpu_model = _get_cpu_model()
         # 읽지 못하면(일부 가상 머신에서 None) None 으로 둔다. 0 은 '코어 0개' 라는 거짓이고,
         # 초기 설정 마법사가 그 0 으로 저사양을 판정해 SysMain 을 끄자고 제안했다.
@@ -448,11 +460,12 @@ def get_system_stats():
             'ramModifiedGB': modified_gb,
             'ramInUseGB': in_use_gb,
             'ramAvailableGB': round(mem.available / GB, 1),
-            'diskUsedGB': round(disk.used / (1024**3)),
-            'diskTotalGB': round(disk.total / (1024**3)),
+            'systemDrive': drive,
+            'diskUsedGB': round(disk.used / (1024**3)) if disk else None,
+            'diskTotalGB': round(disk.total / (1024**3)) if disk else None,
             # 반올림한 전체에서 반올림한 사용량을 빼면 1GB 씩 어긋난다. 남은 용량은 따로 잰다.
-            'diskFreeGB': round(disk.free / (1024**3)),
-            'diskPct': round(disk.percent),
+            'diskFreeGB': round(disk.free / (1024**3)) if disk else None,
+            'diskPct': round(disk.percent) if disk else None,
             'gpuUsage': _fresh_gpu_usage(),       # None = 측정 중 또는 측정 불가(gpuUsageState 로 구분)
             'gpuUsageState': _gpu_state,
             'gpuModel': _get_gpu_model(),

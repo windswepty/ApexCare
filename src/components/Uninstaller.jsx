@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Trash2, Search, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
@@ -23,6 +23,7 @@ export default function Uninstaller({ addToast }) {
   const [isCleaning, setIsCleaning] = useState(false);
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
+  const launchingRef = useRef(false);     // 제거 프로그램을 띄우는 중(두 번 눌러 두 개가 뜨지 않게)
 
   const [cleanElapsed, setCleanElapsed] = useState(0);
 
@@ -72,6 +73,14 @@ export default function Uninstaller({ addToast }) {
       addToast?.('제거 기능이 준비되지 않았습니다.', 'error');
       return;
     }
+    if (launchingRef.current) return;
+    // 일부 프로그램(Discord 처럼 Update.exe --uninstall 을 쓰는 것)은 확인 창 없이 바로 지워진다. 줄에 마우스를
+    // 올리면 나타나는 버튼이라 잘못 누르기 쉬워, 무엇을 지우는지 보여 주고 확인을 받는다.
+    if (!window.confirm(
+      `'${app.name}'${app.publisher ? ` (${app.publisher})` : ''} 의 제거 프로그램을 실행합니다.\n\n` +
+      '일부 프로그램은 확인 창 없이 바로 제거되며, 되돌리려면 다시 설치해야 합니다.\n\n계속할까요?'
+    )) return;
+    launchingRef.current = true;
     try {
       // 이름만 넘긴다. 실행할 제거 명령은 백엔드가 레지스트리에서 직접 찾는다.
       const res = await a.uninstallApp(app.name);
@@ -84,6 +93,8 @@ export default function Uninstaller({ addToast }) {
     } catch (e) {
       console.error('IPC Error launching uninstaller:', e);
       addToast?.('제거 프로그램을 실행하는 중 오류가 발생했습니다.', 'error');
+    } finally {
+      launchingRef.current = false;
     }
   };
 

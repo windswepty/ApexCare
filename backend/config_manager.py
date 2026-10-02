@@ -12,11 +12,8 @@ CONFIG_FILE = os.path.join(APPDATA_DIR, "settings.json")
 DEFAULT_CONFIG = {
     "booster_enabled": True,
     "eula_accepted": False,
-    # 신규 설치 기본값은 반드시 'standard'. 동의 없이 공격적 튜닝을 적용하지 않는다.
-    "optimization_mode": "standard",
-    # 사용자가 UI에서 직접 모드를 고른 적이 있는지 여부.
-    # False면 앱 시작 시 저장된 모드를 자동 적용하지 않는다.
-    "optimization_mode_user_set": False,
+    # 성능 모드(optimization_mode·optimization_mode_user_set)와 게임 전 모드(boost_restore_mode)는 PC 전체 설정이라
+    # 여기가 아니라 machine_store 에 둔다(아래 '_machine_settings').
     # 구버전이 중지시킨 Windows Update 서비스 1회 복구 완료 플래그
     "wu_recovery_done": False,
 
@@ -180,12 +177,60 @@ def set_booster_state(state):
     return update_config(lambda c: c.__setitem__("booster_enabled", bool(state)))
 
 
+# ── PC 전체에 하나뿐인 설정 ─────────────────────────────────
+# 성능 모드는 전원 플랜·HKLM 을 바꾸므로 PC 에 하나다. 계정마다 따로 두면 계정 B 의 화면이 계정 A 가 켠 게이밍을
+# '표준' 으로 보여 주고, 앱을 켤 때 서로 다른 모드를 다시 적용한다. machine_store(HKLM, 관리자만 씀)에 둔다.
+# 처음에는(예전 버전에서 올라옴) 이 계정의 settings.json 값을 한 번 가져오고 그 파일에서는 지운다. 남겨 두면
+# 제거할 때 PC 쪽 기록을 지운 뒤 다시 설치했을 때, 그 사이 바뀐 적 없는 옛 모드(예: 게이밍)를 다시 가져와 적용한다.
+# 신규 설치 기본값은 반드시 '표준', '사용자가 고른 적 없음'(앱을 켤 때 모드를 다시 적용하지 않음)이다.
+_MACHINE_VALUE = 'Settings'
+_MACHINE_KEYS = ('optimization_mode', 'optimization_mode_user_set', 'boost_restore_mode')
+
+
+def _machine_settings():
+    """PC 전체 설정 dict. 읽지 못하면 None."""
+    from backend import machine_store
+    with _lock:
+        try:
+            data = machine_store.read(_MACHINE_VALUE)
+        except machine_store.Unreadable:
+            return None
+        if isinstance(data, dict):
+            return data
+        cfg = load_config()
+        if is_unreadable(cfg):
+            return None
+        data = {k: cfg[k] for k in _MACHINE_KEYS if k in cfg}
+        if machine_store.write(_MACHINE_VALUE, data) and data:
+            update_config(lambda c: [c.pop(k, None) for k in _MACHINE_KEYS])
+        return data                                      # 못 썼으면 이번에는 이 값을 쓰고 다음에 다시 가져온다
+
+
+def _machine_get(key, default):
+    data = _machine_settings()
+    if data is None:
+        return load_config().get(key, default)          # 관리자 권한이 아니면 읽지 못한다(그때는 바꾸지도 못한다)
+    return data.get(key, default)
+
+
+def _machine_update(change):
+    """PC 전체 설정을 고쳐 저장한다. 저장했으면 True."""
+    from backend import machine_store
+    with _lock:
+        data = _machine_settings()
+        if data is None:
+            return False
+        data = dict(data)
+        change(data)
+        return machine_store.write(_MACHINE_VALUE, data)
+
+
 def get_boost_restore_mode():
     """게임 부스트가 게이밍 전원 모드를 켜기 전에 쓰던 모드. 없으면 None.
 
     게임이 끝나면 지워진다. 앱을 다시 켰는데 남아 있으면 게임 도중 비정상 종료된 것이다.
     """
-    return load_config().get("boost_restore_mode")
+    return _machine_get("boost_restore_mode", None)
 
 
 def set_boost_restore_mode(mode):
@@ -194,7 +239,7 @@ def set_boost_restore_mode(mode):
             c.pop("boost_restore_mode", None)
         else:
             c["boost_restore_mode"] = str(mode)
-    return update_config(change)
+    return _machine_update(change)
 
 def get_eula_accepted():
     return load_config().get("eula_accepted", False)
@@ -203,7 +248,7 @@ def set_eula_accepted(state):
     return update_config(lambda c: c.__setitem__("eula_accepted", bool(state)))
 
 def get_optimization_mode():
-    return load_config().get("optimization_mode", "standard")
+    return _machine_get("optimization_mode", "standard")
 
 def set_optimization_mode(mode, user_set=True):
     """저장했으면 True."""
@@ -212,10 +257,10 @@ def set_optimization_mode(mode, user_set=True):
         # 게임 자동감지 등 내부 호출(user_set=False)은 '사용자가 고른 모드'로 기록하지 않는다
         if user_set:
             c["optimization_mode_user_set"] = True
-    return update_config(change)
+    return _machine_update(change)
 
 def get_optimization_mode_user_set():
-    return load_config().get("optimization_mode_user_set", False)
+    return bool(_machine_get("optimization_mode_user_set", False))
 
 def get_wu_recovery_done():
     return load_config().get("wu_recovery_done", False)

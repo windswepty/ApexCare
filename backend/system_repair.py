@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 import logging
 
 log = logging.getLogger('SystemRepair')
@@ -59,9 +60,11 @@ _sfc_state = {"status": "idle", "output": "", "error": None, "summary": ""}
 _dism_state = {"status": "idle", "output": "", "error": None, "summary": ""}
 _trim_state = {"status": "idle", "output": "", "error": None, "summary": ""}
 
-# 디스크 최적화 시간 제한. 시간이 지나면 subprocess 가 defrag 를 강제로 끝낸다.
-# 예전에는 300초였는데, HDD 조각 모음은 수십 분 걸려 늘 도중에 끊기고 '실패' 로 보였다.
-TRIM_TIMEOUT_SEC = 3 * 3600
+# SFC·DISM·디스크 최적화는 시간 제한을 두지 않는다. 시간 제한은 subprocess 가 도구를 강제로 끝내는 것이다.
+#   - sfc /scannow·DISM /RestoreHealth 를 중간에 죽이면 복구가 반쯤 적용되거나 구성 요소 저장소(WinSxS)가 손상될 수 있다.
+#   - 디스크 최적화는 화면이 '끝날 때까지 진행됩니다' 라고 약속한다. 예전에는 300초, 그다음 3시간에 강제로 끊어
+#     큰 HDD 여러 대에서는 약속이 거짓이 됐다.
+TRIM_TIMEOUT_SEC = None
 
 # 진행 표시 줄(검증 45% 완료, [=====  20.0%  ])은 결과가 아니다. 요약에서 뺀다.
 _PROGRESS_LINE = re.compile(r'\d+(?:[.,]\d+)?\s*%')
@@ -120,11 +123,12 @@ def summarize_output(text, max_lines=3, max_chars=400):
     return out if len(out) <= max_chars else out[:max_chars] + '…'
 
 
-def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
+def _run_hidden_cmd_bg(args, state_dict, timeout_sec=None):
     cmd_str = " ".join(str(a) for a in args)        # 로그 표시용. 실행에는 쓰지 않는다.
     if not args or not os.path.isabs(str(args[0])):
         state_dict["status"] = "error"
         state_dict["error"] = "실행 파일은 절대 경로로만 실행합니다."
+        state_dict["finished_at"] = time.time()
         return
     try:
         log.info(f"Starting background command: {cmd_str}")
@@ -157,6 +161,22 @@ def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
         state_dict["status"] = "error"
         state_dict["error"] = str(e)
         log.warning(f"⚠ Command exception: {cmd_str} -> {e}")
+    finally:
+        state_dict["finished_at"] = time.time()
+
+
+def _begin(state):
+    """작업 상태를 '실행 중' 으로 바꾸고 시작 시각을 남긴다."""
+    state.update(status="running", error=None, output="", summary="", started_at=time.time(), finished_at=None)
+
+
+def _with_elapsed(state):
+    """화면에 줄 상태. 걸린 시간은 백엔드 시각으로 잰다(화면을 다시 띄워도 0 부터 세지 않게). 모르면 None."""
+    out = dict(state)
+    start = state.get("started_at")
+    out["elapsed_sec"] = (int((state.get("finished_at") or time.time()) - start)
+                          if isinstance(start, (int, float)) else None)
+    return out
 
 # ─────────────────────────────────────────────
 # TRIM / Disk Optimization (async)
@@ -167,17 +187,14 @@ def run_trim():
     global _trim_state
     if _trim_state["status"] == "running":
         return {"success": False, "message": "이미 디스크 최적화가 실행 중입니다."}
-    _trim_state["status"] = "running"
-    _trim_state["error"] = None
-    _trim_state["output"] = ""
-    _trim_state["summary"] = ""
+    _begin(_trim_state)
     t = threading.Thread(target=_run_hidden_cmd_bg,
                          args=([sys_tool("defrag.exe"), "/C", "/O"], _trim_state, TRIM_TIMEOUT_SEC), daemon=True)
     t.start()
     return {"success": True}
 
 def get_trim_status():
-    return _trim_state
+    return _with_elapsed(_trim_state)
 
 # ─────────────────────────────────────────────
 # SFC (async)
@@ -188,18 +205,14 @@ def run_sfc():
     global _sfc_state
     if _sfc_state["status"] == "running":
         return {"success": False, "message": "이미 SFC 무결성 검사가 실행 중입니다."}
-    _sfc_state["status"] = "running"
-    _sfc_state["error"] = None
-    _sfc_state["output"] = ""
-    _sfc_state["summary"] = ""
-    # 타임아웃은 subprocess 를 '강제 종료'시킨다. sfc /scannow 를 중간에 죽이면
-    # 복구가 반쯤 적용된 상태로 남을 수 있으므로 넉넉하게 잡는다(느린 HDD 기준).
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("sfc.exe"), "/scannow"], _sfc_state, 3600), daemon=True)
+    _begin(_sfc_state)
+    # 시간 제한 없음: 중간에 죽이면 복구가 반쯤 적용된 상태로 남을 수 있다(위 TRIM_TIMEOUT_SEC 설명)
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("sfc.exe"), "/scannow"], _sfc_state, None), daemon=True)
     t.start()
     return {"success": True}
 
 def get_sfc_status():
-    return _sfc_state
+    return _with_elapsed(_sfc_state)
 
 # ─────────────────────────────────────────────
 # DISM (async)
@@ -210,18 +223,15 @@ def run_dism():
     global _dism_state
     if _dism_state["status"] == "running":
         return {"success": False, "message": "이미 DISM 복구 작업이 실행 중입니다."}
-    _dism_state["status"] = "running"
-    _dism_state["error"] = None
-    _dism_state["output"] = ""
-    _dism_state["summary"] = ""
-    # DISM /RestoreHealth 를 중간에 죽이면 구성 요소 저장소(WinSxS)가 손상될 수 있다.
-    # 느린 회선에서 Windows Update 로 원본을 받아오면 1시간을 넘기도 하므로 2시간으로 잡는다.
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("dism.exe"), "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, 7200), daemon=True)
+    _begin(_dism_state)
+    # 시간 제한 없음: DISM /RestoreHealth 를 중간에 죽이면 구성 요소 저장소(WinSxS)가 손상될 수 있다.
+    # 느린 회선에서 Windows Update 로 원본을 받아오면 몇 시간이 걸리기도 한다.
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("dism.exe"), "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, None), daemon=True)
     t.start()
     return {"success": True}
 
 def get_dism_status():
-    return _dism_state
+    return _with_elapsed(_dism_state)
 
 # ─────────────────────────────────────────────
 # 네트워크

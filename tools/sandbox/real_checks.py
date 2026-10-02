@@ -180,6 +180,11 @@ def _expect_gaming():
         out.append(f'게이밍: 활성 플랜이 {want} 가 아닙니다 ({ss.active_plan_guid()})')
     if ss._read_power_value(want, ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN, True) != 100:
         out.append('게이밍: CPU 최소 속도(AC)가 100 이 아닙니다')
+    # 원래 값 기록은 관리자만 쓰는 PC 저널(HKLM)에 있어야 한다. 계정 파일에 있으면 일반 권한 프로그램이 고칠 수 있다.
+    from backend import machine_store
+    machine = (machine_store.read('Journal') or {}).get('entries', {})
+    if ss._PLAN_KEY not in machine:
+        out.append('게이밍: 원래 전원 플랜 기록이 PC 저널(HKLM\\SOFTWARE\\APEX CARE)에 없습니다')
     out += _expect_power(want, '게이밍', [(ss.SUB_PROCESSOR, ss.PERFBOOSTMODE, 2, 'CPU 부스트 모드'),
                                         (ss.SUB_PROCESSOR, ss.PERFEPP, 0, 'EPP'),
                                         (ss.SUB_PCIEXPRESS, ss.PCIE_ASPM, 0, 'PCIe 절전')])
@@ -783,9 +788,81 @@ def uninstall_revert():
                 problems.append(f"결과 파일: {res.get('failed')}")
         except Exception as e:
             problems.append(f'결과 파일을 읽지 못했습니다: {e}')
+        if _machine_key_exists():
+            problems.append(r'전부 되돌렸는데 PC 쪽 기록(HKLM\SOFTWARE\APEX CARE)이 남았습니다')
         return verdict(problems, diff(before, snapshot('uninstall_after')))
     finally:
         reg_del('HKCU', RUN_U, 'ApexSbxUninst')
+
+
+def _machine_key_exists():
+    from backend import machine_store
+    try:
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, machine_store.KEY, 0,
+                                       winreg.KEY_READ | winreg.KEY_WOW64_64KEY))
+        return True
+    except FileNotFoundError:
+        return False
+
+
+@check('저널: 예전 계정 저널은 관리자만 쓰는 PC 저널로 한 번 옮기고, 그 뒤 계정 파일에 써 넣은 PC 쪽 기록은 쓰지 않음')
+def journal_location():
+    from backend import machine_store, system_state as ss
+    key = r'SOFTWARE\ApexSbxJournal'
+    evil = 'ApexSbxEvil'
+    before = snapshot('journal_before')
+    problems = []
+
+    def write_account_file(entries):
+        os.makedirs(ss.APPDATA_DIR, exist_ok=True)
+        with open(ss.JOURNAL_PATH, 'w', encoding='utf-8') as f:
+            json.dump({'version': 1, 'entries': entries}, f)
+
+    def entry(path, name, value, vtype):
+        return {'kind': 'registry', 'group': 'sbx_journal', 'hive': 'HKLM', 'path': path, 'name': name,
+                'existed': True, 'value': value, 'type': vtype, 'created_keys': []}
+
+    def machine_entries():
+        try:
+            return (machine_store.read('Journal') or {}).get('entries', {})
+        except machine_store.Unreadable as e:
+            problems.append(f'PC 저널을 읽지 못했습니다: {e}')
+            return {}
+
+    try:
+        # 예전 버전: 원래 7 인 값을 1 로 바꾸고 계정 파일에 기록해 두었다
+        reg_set('HKLM', key, 'Tuned', 1, winreg.REG_DWORD)
+        legacy_key = f'reg:HKLM\\{key}\\Tuned'
+        write_account_file({legacy_key: entry(key, 'Tuned', 7, winreg.REG_DWORD)})
+        if legacy_key not in ss.pending_changes():
+            problems.append('예전 계정 저널의 기록을 이어 쓰지 못했습니다')
+        if legacy_key not in machine_entries():
+            problems.append('예전 기록이 PC 저널로 옮겨지지 않았습니다')
+        with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
+            if legacy_key in json.load(f).get('entries', {}):
+                problems.append('옮긴 기록이 계정 파일에 남았습니다')
+
+        # 옮긴 뒤 일반 권한 프로그램이 계정 파일에 PC 쪽 기록을 써 넣는다
+        evil_key = f'reg:HKLM\\{RUN_M}\\{evil}'
+        write_account_file({evil_key: entry(RUN_M, evil, r'C:\Windows\System32\notepad.exe', winreg.REG_SZ)})
+        if evil_key in ss.pending_changes():
+            problems.append('옮긴 뒤 계정 파일에 써 넣은 PC 쪽 기록을 썼습니다')
+        r = ss.restore_group('sbx_journal')
+        if not r.get('ok'):
+            problems.append(f"되돌리기 실패: {r.get('failed')}")
+        if reg_get('HKLM', RUN_M, evil) is not None:
+            problems.append('계정 파일에 써 넣은 값을 관리자 권한으로 HKLM 에 썼습니다')
+        if reg_get('HKLM', key, 'Tuned') != 7:
+            problems.append(f"예전 기록으로 되돌리지 못했습니다 ({reg_get('HKLM', key, 'Tuned')})")
+    finally:
+        reg_del('HKLM', RUN_M, evil)
+        reg_del('HKLM', key, 'Tuned')
+        try:
+            winreg.DeleteKeyEx(winreg.HKEY_LOCAL_MACHINE, key, winreg.KEY_WOW64_64KEY, 0)
+        except OSError:
+            pass
+        write_account_file({})
+    return verdict(problems, diff(before, snapshot('journal_after')))
 
 
 @check('원클릭 최적화: Windows Update 캐시·Prefetch 는 건드리지 않음')
@@ -1011,6 +1088,8 @@ def install_uninstall():
                             f"목록 키={reg_get('HKLM', UNINSTALL_KEY, 'DisplayName') is not None} 실행 중={alive}")
         if os.path.exists(_desktop_shortcut()) or os.path.exists(_start_menu_shortcut()):
             problems.append('바로 가기가 남았습니다')
+        if _machine_key_exists():
+            problems.append(r'PC 쪽 기록(HKLM\SOFTWARE\APEX CARE)이 남았습니다')
         # 정리 배치는 %SystemRoot%\Temp 아래 자기 폴더째 지워져야 한다
         temp_root = os.path.join(os.environ['SystemRoot'], 'Temp')
         def bat_dirs():

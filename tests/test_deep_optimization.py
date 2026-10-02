@@ -47,13 +47,18 @@ def test_one_click_skips_windows_update_cache_and_prefetch(recorded):
 def test_dashboard_asks_before_starting():
     with open(os.path.join(ROOT, 'src', 'components', 'Dashboard.jsx'), encoding='utf-8') as f:
         src = f.read()
-    body = src[src.index('const runMasterOptimization'):]
+    body = src[src.index('const startMasterOptimization'):]
     body = body[:body.index('\n  };\n')]
     assert 'getDeepOptimizationPlan' in body
     confirm_at = body.index('window.confirm(')
     assert confirm_at < body.index('startDeepOptimization()')
     # 확인을 거절하면 시작하지 않는다
     assert re.search(r'if \(!window\.confirm\([^;]*\)\) return;', body, re.S)
+    # 확인 창을 기다리는 동안 두 번째 클릭은 들어오지 않고, '이미 실행 중' 은 실패가 아니라 진행 화면을 따라간다
+    run = src[src.index('const runMasterOptimization'):]
+    run = run[:run.index('\n  };\n')]
+    assert 'startingRef.current) return;' in run and 'startMasterOptimization()' in run
+    assert body.index('res?.busy') < body.index("title: '시작 실패'")
 
 
 def test_stopping_keeps_finished_steps_and_freed_space(recorded, monkeypatch):

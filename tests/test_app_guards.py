@@ -69,14 +69,29 @@ def test_second_instance_exits_before_touching_anything():
     with open(os.path.join(ROOT, 'main.py'), encoding='utf-8') as f:
         src = f.read()
     body = src[src.index("if __name__ == '__main__':\n    #"):]
-    assert body.index('single_instance.acquire()') < body.index('Api(None)')
-    assert 'sys.exit(0)' in body[:body.index('Api(None)')]
+    assert body.index('single_instance.acquire_both()') < body.index('Api(None)')
+    assert body.index('tell_other_session()') < body.index('Api(None)')
+    assert body[:body.index('Api(None)')].count('sys.exit(0)') == 2
 
 
 def test_single_instance_check_failure_does_not_block_start(monkeypatch):
     # 확인하지 못했다고 앱을 못 켜게 하지 않는다(fakewin 이 ctypes 를 막아 둔 상태가 그 경우다)
     from backend import single_instance
     assert single_instance.acquire('Local\\apex-test') is True
+    assert single_instance.acquire_both() is None
+
+
+def test_instance_in_another_windows_account_is_told_apart(monkeypatch):
+    # PC 전체 상태(저널·성능 모드)는 하나라서 다른 계정(빠른 사용자 전환)의 실행도 막는다
+    from backend import single_instance
+    held = set()
+    monkeypatch.setattr(single_instance, 'acquire', lambda name: name not in held)
+    assert single_instance.acquire_both() is None
+    held.add(single_instance.GLOBAL_MUTEX_NAME)                       # 다른 세션에서 실행 중
+    assert single_instance.acquire_both() == 'other'
+    held.add(single_instance.MUTEX_NAME)                              # 이 세션에서 실행 중
+    assert single_instance.acquire_both() == 'same'
+    assert single_instance.GLOBAL_MUTEX_NAME.startswith('Global\\')
 
 
 def test_kill_refuses_a_process_that_took_over_the_listed_number(procs):

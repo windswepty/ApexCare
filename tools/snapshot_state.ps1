@@ -140,16 +140,38 @@ foreach ($pat in $patterns) {
 if ($found.Count -eq 0) { Line '  <없음>' } else { foreach ($n in ($found | Sort-Object -Unique)) { Line "  $n" } }
 
 # ── APEX CARE 자체 기록 ────────────────────────────
+# PC 전체 변경의 저널과 성능 모드는 HKLM\SOFTWARE\APEX CARE(관리자만 씀), 이 계정의 시작 프로그램 표시 기록은 계정 파일에 있다.
 $data = Join-Path $env:APPDATA 'APEX_CARE_DATA'
-Line "[APEX CARE] 저널 $data\system_state.json"
+function JournalLines($json) {
+    $j = $json | ConvertFrom-Json
+    $keys = @($j.entries.PSObject.Properties | ForEach-Object { "{0} (group={1})" -f $_.Name, $_.Value.group } | Sort-Object)
+    Line "  항목 $($keys.Count)개"
+    foreach ($k in $keys) { Line "  $k" }
+}
+$mk = 'HKLM:\SOFTWARE\APEX CARE'
+Line "[APEX CARE] PC 저널 $mk (Journal)"
+$mj = $null
+try { $mj = (Get-ItemProperty -LiteralPath $mk -Name Journal -ErrorAction Stop).Journal } catch { }
+if ($mj) {
+    try { JournalLines $mj } catch { Line "  <읽지 못함: $($_.Exception.Message)>" }
+} else { Line '  <없음>' }
+Line "[APEX CARE] PC 설정 $mk (Settings)"
+$ms = $null
+try { $ms = (Get-ItemProperty -LiteralPath $mk -Name Settings -ErrorAction Stop).Settings } catch { }
+if ($ms) {
+    try {
+        $m = $ms | ConvertFrom-Json
+        foreach ($k in 'optimization_mode', 'optimization_mode_user_set', 'boost_restore_mode') {
+            $v = $m.$k
+            Line ("  {0} = {1}" -f $k, $(if ($null -eq $v) { '<없음>' } else { $v }))
+        }
+    } catch { Line "  <읽지 못함: $($_.Exception.Message)>" }
+} else { Line '  <없음>' }
+
+Line "[APEX CARE] 계정 저널 $data\system_state.json"
 $jp = Join-Path $data 'system_state.json'
 if (Test-Path -LiteralPath $jp) {
-    try {
-        $j = Get-Content -LiteralPath $jp -Raw -Encoding UTF8 | ConvertFrom-Json
-        $keys = @($j.entries.PSObject.Properties | ForEach-Object { "{0} (group={1})" -f $_.Name, $_.Value.group } | Sort-Object)
-        Line "  항목 $($keys.Count)개"
-        foreach ($k in $keys) { Line "  $k" }
-    } catch { Line "  <읽지 못함: $($_.Exception.Message)>" }
+    try { JournalLines (Get-Content -LiteralPath $jp -Raw -Encoding UTF8) } catch { Line "  <읽지 못함: $($_.Exception.Message)>" }
 } else { Line '  <파일 없음>' }
 
 Line "[APEX CARE] 설정 $data\settings.json"
@@ -157,8 +179,7 @@ $sp = Join-Path $data 'settings.json'
 if (Test-Path -LiteralPath $sp) {
     try {
         $s = Get-Content -LiteralPath $sp -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($k in 'optimization_mode', 'optimization_mode_user_set', 'booster_enabled', 'boost_restore_mode',
-                       'boost_disable_nagle', 'boost_auto_power_mode', 'setup_wizard_done') {
+        foreach ($k in 'booster_enabled', 'boost_disable_nagle', 'boost_auto_power_mode', 'setup_wizard_done') {
             $v = $s.$k
             Line ("  {0} = {1}" -f $k, $(if ($null -eq $v) { '<없음>' } else { $v }))
         }

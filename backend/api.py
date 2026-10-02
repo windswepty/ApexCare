@@ -182,7 +182,11 @@ class Api:
         구버전이 settings.json 에 따로 남긴 백업도 함께 보여준다. 여기서 빠지면
         복구 센터가 '되돌릴 변경이 없습니다' 라고 말하는데 실제로는 남아 있게 된다.
         """
-        changes = system_state.pending_changes()
+        changes = system_state.pending_changes_or_none()
+        if changes is None:
+            # 기록을 읽지 못했다. 0건으로 보내면 복구 센터가 '모두 원래 값으로 돌아가 있습니다' 라고 말한다.
+            return {'error': '변경 기록을 읽지 못했습니다(다른 프로그램이 잠시 잡고 있을 수 있습니다).',
+                    'count': None, 'groups': {}}
         by_group = {}
         for key, e in changes.items():
             group = e.get('group') or '기타'
@@ -314,9 +318,12 @@ class Api:
         return config_manager.set_setup_wizard_done()
 
     # --- 프로세스 우선순위 (게이밍 탭) ---
-    def boostProcess(self, pid, priority):
-        """프로세스 우선순위를 바꾼다. 원래 값을 기록하므로 되돌릴 수 있다."""
-        return process_boost.set_priority(pid, priority, reason='(사용자 지정)')
+    def boostProcess(self, pid, priority, created=None):
+        """프로세스 우선순위를 바꾼다. 원래 값을 기록하므로 되돌릴 수 있다.
+
+        created: 화면이 목록에서 본 생성 시각. 그 사이 PID 를 다른 프로세스가 받았으면 바꾸지 않는다.
+        """
+        return process_boost.set_priority(pid, priority, reason='(사용자 지정)', created=created)
 
     def restoreProcess(self, pid):
         return process_boost.restore(pid)

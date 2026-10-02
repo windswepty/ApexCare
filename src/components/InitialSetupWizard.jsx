@@ -284,7 +284,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <HardDrive className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>C: 드라이브</div>
+                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>{stats?.systemDrive || '시스템'} 드라이브</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate">{Number(stats?.diskTotalGB) > 0 ? `전체 ${stats.diskTotalGB} GB` : '알 수 없음'}</div>

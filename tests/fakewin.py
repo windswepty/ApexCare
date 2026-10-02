@@ -127,6 +127,7 @@ class FakeRegistry:
       ignore_writes 쓰기·지우기가 '성공한 척' 하고 실제로는 아무것도 바뀌지 않는다
                     (다른 프로그램이 되돌려 놓는 경우를 흉내. 되읽어 확인하는지 본다)
     writes 에는 winreg 를 거쳐 실제로 바뀐 것만 쌓인다. '아무것도 쓰지 않았다' 를 확인할 때 쓴다.
+    앱 자신의 상태 키(HKLM\\SOFTWARE\\APEX CARE — 저널·성능 모드)에 쓴 것은 시스템 변경이 아니라 app_writes 에 따로 쌓는다.
     """
 
     def __init__(self):
@@ -138,6 +139,11 @@ class FakeRegistry:
         self.deny_write = set()
         self.ignore_writes = set()
         self.writes = []
+        self.app_writes = []
+
+    def log(self, op, hive, parts, name, value):
+        entry = (op, _HIVE_NAMES[hive], '\\'.join(parts), name, value)
+        (self.app_writes if is_app_key(hive, parts) else self.writes).append(entry)
 
     # ── 규칙 ───────────────────────────────────
     @staticmethod
@@ -198,6 +204,16 @@ class FakeRegistry:
 
 
 REGISTRY = FakeRegistry()
+
+APP_KEY = r'SOFTWARE\APEX CARE'          # backend.machine_store.KEY
+
+
+def is_app_key(hive, parts):
+    """앱 자신의 상태 키(또는 그 아래)인가. 레지스트리 전체를 비교하는 테스트는 이 키를 빼고 비교한다."""
+    if isinstance(parts, str):
+        parts = _parts(parts)
+    app = [p.lower() for p in _parts(APP_KEY)]
+    return _hive(hive) == HKEY_LOCAL_MACHINE and [p.lower() for p in parts][:len(app)] == app
 
 
 class PyHKEY:
@@ -269,7 +285,7 @@ def CreateKeyEx(key, sub_key, reserved=0, access=KEY_WRITE):
         raise _denied()
     if REGISTRY._find(hive, parts) is None:
         REGISTRY._find(hive, parts, create=True)
-        REGISTRY.writes.append(('create_key', _HIVE_NAMES[hive], '\\'.join(parts), None, None))
+        REGISTRY.log('create_key', hive, parts, None, None)
     return PyHKEY(hive, parts, access)
 
 
@@ -320,7 +336,7 @@ def SetValueEx(key, value_name, reserved, vtype, value):
     if REGISTRY._matches(REGISTRY.ignore_writes, key.hive, key.parts, value_name or ''):
         return
     k.values[(value_name or '').lower()] = (value_name or '', value, vtype)
-    REGISTRY.writes.append(('set', _HIVE_NAMES[key.hive], '\\'.join(key.parts), value_name, value))
+    REGISTRY.log('set', key.hive, key.parts, value_name, value)
 
 
 def DeleteValue(key, value_name):
@@ -335,7 +351,7 @@ def DeleteValue(key, value_name):
     if REGISTRY._matches(REGISTRY.ignore_writes, key.hive, key.parts, value_name or ''):
         return
     del k.values[(value_name or '').lower()]
-    REGISTRY.writes.append(('delete', _HIVE_NAMES[key.hive], '\\'.join(key.parts), value_name, None))
+    REGISTRY.log('delete', key.hive, key.parts, value_name, None)
 
 
 def DeleteKey(key, sub_key):
@@ -350,7 +366,7 @@ def DeleteKey(key, sub_key):
     if k.subkeys or REGISTRY._matches(REGISTRY.deny_write, hive, parts):
         raise _denied()                    # 진짜 DeleteKey 도 하위 키가 있으면 거부한다
     del parent.subkeys[parts[-1].lower()]
-    REGISTRY.writes.append(('delete_key', _HIVE_NAMES[hive], '\\'.join(parts), None, None))
+    REGISTRY.log('delete_key', hive, parts, None, None)
 
 
 def DeleteKeyEx(key, sub_key, access=KEY_WOW64_64KEY, reserved=0):
@@ -385,6 +401,10 @@ def QueryInfoKey(key):
     return len(k.subkeys), len(k.values), 0
 
 
+def FlushKey(key):
+    _handle(key)._key()
+
+
 def ConnectRegistry(computer_name, key):
     if computer_name:
         _blocked('winreg.ConnectRegistry 원격')
@@ -410,7 +430,7 @@ def _make_winreg_module():
             setattr(m, name, g[name])
     for fn in (OpenKey, CreateKey, CreateKeyEx, CloseKey, QueryValueEx,
                SetValueEx, DeleteValue, DeleteKey, DeleteKeyEx, EnumKey, EnumValue, QueryInfoKey,
-               ConnectRegistry, ExpandEnvironmentStrings):
+               FlushKey, ConnectRegistry, ExpandEnvironmentStrings):
         setattr(m, fn.__name__, fn)
     m.OpenKeyEx = OpenKeyEx
     return m
@@ -886,12 +906,16 @@ def patch_optimizer(opt):
     opt._DELETE_API = HANDLE_DELETE
 
 
+ACCOUNT_SID = 'S-1-5-21-1111111111-2222222222-3333333333-1001'     # 가짜 '이 계정'
+
+
 def patch_system_state(ss):
     """system_state 의 전원·서비스 경로를 가짜로 바꾼다. 테스트마다 다시 불러도 된다."""
     ss._powrprof = lambda: POWRPROF
     ss.active_plan_guid = fake_active_plan_guid
     ss.available_plans = fake_available_plans
     ss._sc_config_start = SERVICES.sc_config_start
+    ss._account_sid = lambda: ACCOUNT_SID
 
 
 def install():
@@ -927,6 +951,9 @@ def check():
     assert ss.winreg is winreg, 'system_state 가 진짜 winreg 를 쥐고 있습니다'
     assert ss._powrprof() is POWRPROF, '전원 API 가 가짜가 아닙니다'
     assert ss._sc_config_start == SERVICES.sc_config_start, 'sc.exe 호출이 가짜가 아닙니다'
+    assert ss._account_sid() == ACCOUNT_SID, '계정 SID 가 가짜가 아닙니다'
+    from backend import machine_store
+    assert machine_store.winreg is winreg, 'PC 저널이 진짜 레지스트리를 씁니다'
     from backend import optimizer
     assert optimizer._DELETE_API is HANDLE_DELETE, '정크 파일 삭제(핸들)가 가짜가 아닙니다'
     appdata = os.environ.get('APPDATA', '')

@@ -246,17 +246,32 @@ def test_mode_cards_use_registered_plan_names():
 
 def test_plan_switch_failure_writes_nothing_else_and_says_standard():
     _seed_plans()
-    assert perf_modes.apply_mode('eco')['success']
     POWER.fail_set_active = True                     # 정책·제조사 도구가 플랜 전환을 막는다
 
     r = perf_modes.apply_mode('gaming')
 
     # 세부값·레지스트리를 쓰지 않는다(예전에는 비활성 플랜과 시스템 레지스트리를 바꿨다)
     assert REGISTRY.get('HKLM', MM, 'NetworkThrottlingIndex') is None
-    assert not [k for k in ss.pending_changes() if not k.startswith('power:active_plan')]
+    assert ss.pending_changes() == {}                # 바꾼 것이 없으니 '되돌리지 못한 설정' 도 없다
     assert r['success'] is False and r['partial'] is False and r['fellBackTo'] == 'standard'
-    assert '표준 상태' in r['message']
+    assert '지금은 표준 상태입니다' in r['message']
+    assert perf_modes.get_mode()['inSync'] is True
+
+
+def test_plan_switch_failure_after_failed_revert_does_not_claim_standard():
+    _seed_plans()
+    assert perf_modes.apply_mode('eco')['success']
+    POWER.fail_set_active = True                     # 에코 플랜(절전)에서 돌아가는 것도 막힌다
+
+    r = perf_modes.apply_mode('gaming')
+
+    assert REGISTRY.get('HKLM', MM, 'NetworkThrottlingIndex') is None
+    assert not [k for k in ss.pending_changes() if not k.startswith('power:active_plan')]
+    # 절전 플랜이 그대로다. 예전에는 이때도 '지금은 표준 상태입니다' 라고 했다
+    assert r['success'] is False and 'fellBackTo' not in r
+    assert '표준 상태가 아닙니다' in r['message']
     assert config_manager.get_optimization_mode() == 'standard'      # 화면이 '에코 사용 중' 으로 남지 않는다
+    assert perf_modes.get_mode()['outOfSync'] == 'leftover'          # 남은 설정을 알린다
 
 
 def test_revert_step_is_not_counted_as_applied():
@@ -315,3 +330,26 @@ def test_two_mode_changes_at_once_keep_the_original_values():
 
         assert perf_modes.revert_everything()['success']
         assert _snapshot() == before and ss.pending_changes() == {}
+
+
+def test_unreadable_journal_is_not_reported_as_nothing_to_revert():
+    from backend import machine_store
+    from backend.api import Api
+    _seed_plans()
+    assert perf_modes.apply_mode('gaming')['success']
+    assert perf_modes.apply_mode('standard')['success']
+    REGISTRY.deny_read_value('HKLM', machine_store.KEY, 'Journal')     # 다른 프로그램이 잡고 있다
+
+    p = Api.getPendingSystemChanges(object.__new__(Api))
+    assert p.get('error') and p['count'] is None    # 예전에는 0건 → '모두 원래 값으로 돌아가 있습니다'
+    m = perf_modes.get_mode()
+    assert m['inSync'] is False and m['outOfSync'] == 'journal'
+
+
+def test_mode_card_preview_does_not_say_it_already_applied():
+    del POWER.plans[fakewin.PLAN_HIGH_PERF]          # Modern Standby 노트북: 고성능·절전 플랜이 없다
+    del POWER.plans[fakewin.PLAN_POWER_SAVER]
+    cards = {m['id']: m for m in perf_modes.list_modes()}
+    for mode in ('gaming', 'eco'):
+        note = cards[mode]['note']
+        assert '적용하면' in note and '적용했습니다' not in note, note

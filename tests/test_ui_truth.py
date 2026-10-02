@@ -48,3 +48,31 @@ def test_descriptions_do_not_promise_what_the_code_does_not_do():
     # SFC·DISM 은 시스템 파일 손상만 고친다. 블루스크린을 '원천 방지' 하지 않는다.
     assert '레지스트리 및 찌꺼기 파일까지 완벽하게' not in _read('src/components/Uninstaller.jsx')
     assert '원천 방지' not in _read('src/components/DriverUpdater.jsx')
+
+
+def test_uninstall_button_asks_first():
+    # Squirrel 계열(Update.exe --uninstall)은 확인 창 없이 바로 지운다. 마우스를 올리면 나오는 버튼이라 잘못 누르기 쉽다.
+    src = _read('src/components/Uninstaller.jsx')
+    body = src[src.index('const handleUninstall'):]
+    body = body[:body.index('\n  };\n')]
+    assert body.index('window.confirm(') < body.index('a.uninstallApp(')
+    assert 'launchingRef.current) return;' in body
+
+
+def test_restore_center_shows_failure_reasons_not_a_false_admin_hint():
+    src = _read('src/components/RestoreCenter.jsx')
+    assert '관리자 권한으로 실행하면 해결됩니다' not in src      # 이 앱은 늘 관리자 권한으로 돈다
+    assert 'f.reason' in src
+
+
+def test_dashboard_keeps_live_values_updating_during_one_click():
+    src = _read('src/components/Dashboard.jsx')
+    assert 'usePolling(fetchRealStats, 3000, active);' in src
+    assert '!isScanning);' not in src
+
+
+def test_tabs_reread_state_when_opened_again():
+    app = _read('src/App.jsx')
+    assert "<StartupManager active={activeTab === 'startup'}" in app
+    assert 'if (active) refresh();' in _read('src/components/PerformanceModes.jsx')
+    assert 'wasActive.current' in _read('src/components/StartupManager.jsx')

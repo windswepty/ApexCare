@@ -12,6 +12,8 @@ import {
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 
 const elapsedLabel = (sec) => `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+// 걸린 시간은 백엔드가 잰 값(elapsed_sec)만 쓴다. 예전에는 이 화면이 1초씩 세서, 화면을 다시 띄우면 0 부터 다시 셌다.
+const elapsedOf = (st) => (Number.isFinite(st?.elapsed_sec) ? st.elapsed_sec : null);
 
 /**
  * SFC·DISM 한 가지를 실행하고 끝날 때까지 상태를 읽는다.
@@ -29,7 +31,7 @@ const DISM = { label: 'DISM 복구', start: () => api()?.runDism?.(), status: ()
 function useRepairTask(task, addToast) {
   const { label } = task;
   const [status, setStatus] = useState('idle');
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(null);       // 모르면 null(0분 0초를 지어내지 않는다)
   const [detail, setDetail] = useState({ summary: '', error: '' });
 
   // 화면을 새로 띄웠을 때(오류 화면에서 다시 불러오기 등) 이미 돌고 있거나 끝난 작업이 있으면 그 상태를 보여 준다.
@@ -39,6 +41,7 @@ function useRepairTask(task, addToast) {
     Promise.resolve(task.status()).then((st) => {
       if (!alive || !st || st.status === 'idle') return;
       if (st.status !== 'running') setDetail({ summary: st.summary || '', error: st.error || '' });
+      setElapsed(elapsedOf(st));
       setStatus(st.status);
     }).catch(() => {});
     return () => { alive = false; };
@@ -47,9 +50,9 @@ function useRepairTask(task, addToast) {
   useEffect(() => {
     if (status !== 'running') return undefined;
     const interval = setInterval(async () => {
-      setElapsed((t) => t + 1);
       try {
         const state = await task.status();
+        if (state) setElapsed(elapsedOf(state));
         if (state && state.status !== 'running' && state.status !== 'idle') {
           setDetail({ summary: state.summary || '', error: state.error || '' });
           setStatus(state.status);
@@ -76,7 +79,7 @@ function useRepairTask(task, addToast) {
     try {
       const res = await task.start();
       if (res?.success) {
-        setElapsed(0);
+        setElapsed(null);
         setDetail({ summary: '', error: '' });
         setStatus('running');
       } else {
@@ -95,7 +98,7 @@ function ResultLine({ status, detail, elapsed }) {
     return (
       <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1">
         <p className="font-bold text-emerald-500 flex items-center gap-1.5">
-          <CheckCircle2 className="w-4 h-4" /> 끝났습니다 (걸린 시간 {elapsedLabel(elapsed)})
+          <CheckCircle2 className="w-4 h-4" /> 끝났습니다{elapsed !== null ? ` (걸린 시간 ${elapsedLabel(elapsed)})` : ''}
         </p>
         <p className="text-gray-600 dark:text-slate-300">
           {detail.summary || '도구가 결과 문장을 남기지 않았습니다. 자세한 내용은 C:\\Windows\\Logs\\CBS\\CBS.log 에 있습니다.'}
@@ -185,7 +188,7 @@ export default function SystemRepair({ addToast }) {
                 <span>시스템 파일을 검사하는 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">경과 {elapsedLabel(sfc.elapsed)}</span>
+                <span className="font-bold">경과 {sfc.elapsed !== null ? elapsedLabel(sfc.elapsed) : "확인 중…"}</span>
                 <span className="text-xs ml-3 text-slate-500">보통 5~15분 걸립니다</span>
               </div>
             </div>
@@ -244,7 +247,7 @@ export default function SystemRepair({ addToast }) {
                 <span>Windows 이미지를 검사·복구하는 중...</span>
               </div>
               <div className="text-right">
-                <span className="font-bold">경과 {elapsedLabel(dism.elapsed)}</span>
+                <span className="font-bold">경과 {dism.elapsed !== null ? elapsedLabel(dism.elapsed) : "확인 중…"}</span>
                 <span className="text-xs ml-3 text-slate-500">보통 10~30분 걸립니다</span>
               </div>
             </div>

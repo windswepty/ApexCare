@@ -235,12 +235,18 @@ def _apply_mode_locked(mode, user_set, persist):
 
     if spec['plan'] and not plan_ok:
         # 플랜을 못 바꿨으면 세부값·레지스트리도 쓰지 않는다. 예전에는 계속 써서, 비활성 플랜에 값이 들어가고
-        # 시스템 레지스트리는 바뀐 채 '적용 실패' 로 보였다. 이전 모드는 이미 되돌렸으므로 지금은 표준 상태다.
+        # 시스템 레지스트리는 바뀐 채 '적용 실패' 로 보였다.
         if persist:
             _save_mode('standard', user_set, notes)
         reason = next((s['detail'] for s in steps if not s.get('revert') and not s['ok']), '')
-        msg = (f"{spec['label']} 모드를 적용하지 못했습니다(전원 플랜을 바꾸지 못함{': ' + reason if reason else ''}). "
-               "이전 모드 설정은 되돌렸으므로 지금은 표준 상태입니다.")
+        msg = f"{spec['label']} 모드를 적용하지 못했습니다(전원 플랜을 바꾸지 못함{': ' + reason if reason else ''}). "
+        if reverted['failed']:
+            # 이전 모드 설정 일부가 그대로다. 예전에는 이때도 '지금은 표준 상태' 라고 했다.
+            msg += ("이전 모드 설정 일부도 되돌리지 못해 지금은 표준 상태가 아닙니다. "
+                    "'변경 내역 · 되돌리기' 에서 남은 항목을 확인하세요.")
+            log.info(f"[모드] {mode}: 플랜 전환 실패, 이전 모드 되돌리기도 일부 실패")
+            return _result(mode, spec, steps, notes, msg, success=False, partial=False)
+        msg += "이전 모드 설정은 되돌렸으므로 지금은 표준 상태입니다."
         log.info(f"[모드] {mode}: 플랜 전환 실패 — 표준 상태로 둠")
         return _result(mode, spec, steps, notes, msg, success=False, partial=False, fell_back='standard')
 
@@ -354,7 +360,10 @@ def get_mode():
     if saved not in MODES:
         saved = 'standard'
 
-    pending = ss.pending_changes()
+    pending = ss.pending_changes_or_none()
+    journal_unreadable = pending is None
+    if journal_unreadable:
+        pending = {}
     left_over = sum(1 for e in pending.values() if e.get('group') == MODE_GROUP)
     if MODES[saved]['plan']:
         expected_plan, _ = _plan_fallback(MODES[saved]['plan'])
@@ -365,8 +374,12 @@ def get_mode():
         # 표준은 특정 플랜이 정답이 아니다. 성능 모드가 남긴 변경이 없으면 맞는 상태다.
         # 이때 어긋남은 전원 플랜이 아니라 되돌리지 못한 성능 모드 설정이다.
         expected_plan = None
-        in_sync = left_over == 0
-        out_of_sync = None if in_sync else 'leftover'
+        if journal_unreadable:
+            # 남은 변경이 있는지 모른다. '맞는 상태' 라고 하지 않는다.
+            in_sync, out_of_sync = False, 'journal'
+        else:
+            in_sync = left_over == 0
+            out_of_sync = None if in_sync else 'leftover'
 
     return {
         'mode': saved,
@@ -475,6 +488,11 @@ def list_modes():
             target, note = _plan_fallback(spec['plan'])
             pname = plan_name(target, plans) if target else '사용 가능한 플랜 없음'
             plan_available = spec['plan'] in plans
+            if note and target:
+                # 카드는 적용 전 미리보기다. 결과 문구('…적용했습니다')를 그대로 쓰면 아무것도 하지 않았는데 적용했다고 말한다.
+                want = ss.KNOWN_PLANS.get(spec['plan'], spec['plan'])
+                note = (f"이 PC 에는 '{want}' 전원 플랜이 없어, 적용하면 '{pname}' 플랜 위에 "
+                        "세부 설정만 바꿉니다.")
         else:
             note, pname, plan_available = None, '원래 플랜 유지', True
         out.append({

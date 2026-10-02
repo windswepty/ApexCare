@@ -207,7 +207,7 @@ export default function App() {
                 {isMounted('ram') && <RamBooster active={activeTab === 'ram'} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'startup' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('startup') && <StartupManager addToast={addToast} />}
+                {isMounted('startup') && <StartupManager active={activeTab === 'startup'} addToast={addToast} />}
               </div>
               <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('modes') && <PerformanceModes active={activeTab === 'modes'} currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />}

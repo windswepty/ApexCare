@@ -180,3 +180,61 @@ def test_messenger_call_apps_are_never_tamed(procs):
     procs.add(860, 'KakaoTalk.exe', cpu=40.0)
     procs.add(861, 'Telegram.exe', cpu=40.0)
     assert _candidates(procs) == set()
+
+
+def test_guard_runs_only_for_busy_apps(procs, monkeypatch):
+    # 관문은 부모 프로세스를 거슬러 올라가며 프로세스 목록 전체를 다시 읽는다. 바쁘지 않은 앱마다 부르면 게임 중
+    # 5초마다 몇 초씩 CPU 를 썼다.
+    from backend import process_guard
+    checked = []
+    real = process_guard.check_controllable
+    monkeypatch.setattr(process_guard, 'check_controllable',
+                        lambda pid, action='kill': checked.append(pid) or real(pid, action))
+    for pid in range(870, 880):
+        procs.add(pid, f'quiet{pid}.exe', cpu=0.1)
+    procs.add(880, 'encoder.exe', cpu=20.0)
+    assert _candidates(procs) == {880}
+    assert checked == [880]
+
+
+def test_user_choice_on_a_tamed_app_also_releases_efficiency_mode(procs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(game_booster, '_set_process_power_throttling', lambda pid, v: calls.append((pid, v)) or True)
+    procs.add(890, 'chrome.exe', created=1000.0)
+    assert game_booster._tame_processes([890]) == [890]
+    calls.clear()
+
+    assert process_boost.set_priority(890, 'high', owner='user')['ok']     # 사용자가 게이밍 탭에서 '높음'
+
+    assert (890, None) in calls                                # 예전에는 효율 모드에 묶인 채 남았다
+    assert not process_boost._original[890].get('ecoqos')
+
+
+def test_tampered_crash_record_is_not_applied(procs, monkeypatch, tmp_path):
+    import json
+    monkeypatch.setattr(game_booster, '_set_process_power_throttling', lambda pid, v: True)
+    procs.add(900, 'busy.exe', created=1000.0)
+    procs.add(901, 'dwm.exe', created=1000.0)
+    procs.add(902, 'app.exe', nice=IDLE_PRIORITY_CLASS, created=1000.0)
+    path = process_boost._state_path()
+    with open(path, 'w', encoding='utf-8') as f:
+        # 같은 계정의 일반 권한 프로그램이 써 넣은 기록: 실시간 우선순위, 보호된 시스템 프로세스, 사용자 기록
+        json.dump({'900': {'priority': 0x100, 'created': 1000.0, 'name': 'busy.exe', 'owner': 'boost'},
+                   '901': {'priority': IDLE_PRIORITY_CLASS, 'created': 1000.0, 'name': 'dwm.exe', 'owner': 'boost'},
+                   '902': {'priority': HIGH_PRIORITY_CLASS, 'created': 1000.0, 'name': 'app.exe', 'owner': 'user'}}, f)
+
+    n, bad = process_boost.recover_after_crash()
+
+    assert n == 0 and len(bad) == 3
+    assert procs.nice_calls == []                              # 관리자 권한으로 아무것도 바꾸지 않았다
+
+
+def test_priority_change_is_refused_when_listed_process_was_replaced(procs):
+    procs.add(910, 'build.exe', created=1000.0)
+    procs.remove(910)
+    procs.add(910, 'other.exe', created=2000.0)                # 목록을 본 뒤 같은 번호를 다른 프로그램이 받았다
+
+    r = process_boost.set_priority(910, 'idle', owner='user', created=1000.0)
+
+    assert r['ok'] is False and '같은 번호' in r['reason'] and procs.nice_calls == []
+    assert process_boost.set_priority(910, 'idle', owner='user', created=2000.0)['ok']

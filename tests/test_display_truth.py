@@ -52,8 +52,9 @@ def test_dashboard_free_space_comes_from_backend_not_rounded_subtraction():
     assert 'stats.diskFreeGB' in src
     assert 'parseFloat(stats.diskTotalGB) - parseFloat(stats.diskUsedGB)' not in src
     assert "'diskFreeGB'" in _read('backend/system_monitor.py')
-    # 'Storage' 는 C: 드라이브만 잰 값이었다
-    assert '>Storage<' not in src and 'C: 드라이브' in src
+    # 'Storage' 는 시스템 드라이브만 잰 값이었다. 그 드라이브 문자를 백엔드에서 받아 쓴다(C: 가 아닐 수 있다)
+    assert '>Storage<' not in src and "{sysInfo.systemDrive || '시스템'} 드라이브" in src
+    assert 'C: 드라이브</span>' not in src
 
 
 def test_process_list_can_return_everything_for_game_tab(monkeypatch):
@@ -167,7 +168,15 @@ def test_recycle_bin_that_grew_after_confirmation_is_not_emptied(monkeypatch):
     emptied = _bin(monkeypatch, [20 * 1024 ** 3])
     optimizer.clean_junk_background([5], cancel_event=None, recycle_bytes_seen=0)
     st = optimizer.get_junk_clean_status()
-    assert emptied == [] and any('새로 들어온' in w for w in st['warnings'])
+    assert emptied == [] and any('내용이 바뀌어' in w for w in st['warnings'])
+
+
+def test_recycle_bin_that_shrank_and_refilled_after_confirmation_is_not_emptied(monkeypatch):
+    # 확인 창에는 3GB. 그 뒤 탐색기에서 비우고, '프로그램 삭제' 가 남은 폴더 800MB 를 휴지통으로 보냈다.
+    # 예전에는 '커졌을 때만' 막아서, 확인 창에 없던 800MB 가 영구 삭제됐다
+    emptied = _bin(monkeypatch, [800 * 1024 ** 2])
+    optimizer.clean_junk_background([5], cancel_event=None, recycle_bytes_seen=3 * 1024 ** 3)
+    assert emptied == [] and any('내용이 바뀌어' in w for w in optimizer.get_junk_clean_status()['warnings'])
 
 
 def test_recycle_bin_of_unknown_size_is_not_emptied(monkeypatch):
@@ -273,9 +282,26 @@ def test_sfc_four_line_result_keeps_its_first_line():
     assert summary.startswith('Windows 리소스 보호에서 손상된 파일을 찾았지만 그중 일부를 복구할 수 없습니다.')
 
 
-def test_disk_optimization_is_not_killed_after_five_minutes():
-    # HDD 조각 모음은 수십 분 걸린다. 예전에는 300초에 강제 종료돼 늘 '실패' 로 보였다.
-    assert system_repair.TRIM_TIMEOUT_SEC >= 3600
+def test_repair_tools_are_never_killed_and_report_real_elapsed_time(monkeypatch):
+    # HDD 조각 모음은 수십 분~몇 시간 걸린다. 예전에는 300초, 그다음 3시간에 강제 종료했고(화면은 '끝날 때까지 진행'),
+    # SFC·DISM 도 1·2시간에 죽였다(복구가 반쯤 적용될 수 있음).
+    assert system_repair.TRIM_TIMEOUT_SEC is None
+    started = []
+    monkeypatch.setattr(system_repair.threading, 'Thread',
+                        lambda target, args, daemon: started.append(args) or type('T', (), {'start': lambda self: None})())
+    clock = [1000.0]
+    monkeypatch.setattr(system_repair.time, 'time', lambda: clock[0])
+    for run, status in ((system_repair.run_sfc, system_repair.get_sfc_status),
+                        (system_repair.run_dism, system_repair.get_dism_status),
+                        (system_repair.run_trim, system_repair.get_trim_status)):
+        assert run()['success']
+        assert started[-1][2] is None                       # 시간 제한(강제 종료) 없음
+        clock[0] += 754
+        st = status()
+        assert st['status'] == 'running' and st['elapsed_sec'] == 754   # 화면을 다시 띄워도 0 부터 세지 않는다
+        started[-1][1].update(status='success', finished_at=clock[0])
+        clock[0] += 100
+        assert status()['elapsed_sec'] == 754               # 끝난 뒤에는 늘지 않는다
 
 
 def test_command_timeout_is_reported_in_words(monkeypatch):
@@ -624,3 +650,21 @@ def test_installer_progress_is_real_and_failures_are_reported():
     # 사용자에게 보이는 화면 이름이 앱과 같다
     un = _read('tools/uninstall.py')
     assert "'Windows 기본 앱 정리'" in un and '디블로터 화면' not in un
+
+
+def test_stats_use_the_windows_drive_and_survive_a_missing_c_drive(monkeypatch):
+    from backend import system_monitor
+    seen = []
+
+    def disk_usage(path):
+        seen.append(path)
+        raise FileNotFoundError(path)                  # 이 PC 에는 그 드라이브가 없다
+    monkeypatch.setenv('SystemDrive', 'D:')
+    monkeypatch.setattr(system_monitor.psutil, 'disk_usage', disk_usage)
+    monkeypatch.setattr(system_monitor, 'memory_lists', lambda: None)
+
+    st = system_monitor.get_system_stats()
+
+    assert seen == ['D:\\']
+    # 예전에는 C: 를 못 읽으면 통계 전체가 None 이라 앱이 로딩 화면에서 멈췄다
+    assert st is not None and st['systemDrive'] == 'D:' and st['diskPct'] is None and st['ramTotalGB']

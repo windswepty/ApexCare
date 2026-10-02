@@ -17,7 +17,8 @@ APEX CARE — 되돌릴 수 있는 시스템 변경 계층.
   4. 언제든 restore_all() 로 전부 원래대로 되돌릴 수 있다.
   5. 원래 값이 '없었던' 항목은 복구 시 값을 되돌리는 게 아니라 지운다.
 
-저널 위치: %APPDATA%\\APEX_CARE_DATA\\system_state.json
+저널 위치: PC 전체에 걸친 변경은 HKLM\\SOFTWARE\\APEX CARE 의 'Journal'(machine_store, 관리자만 씀),
+          이 계정의 시작 프로그램 표시(HKCU)는 %APPDATA%\\APEX_CARE_DATA\\system_state.json.
 """
 
 import ctypes
@@ -32,10 +33,14 @@ import time
 import uuid
 import winreg
 
+from backend import machine_store
+
 log = logging.getLogger('SystemState')
 
+# 이 계정의 저널 파일: 이 계정의 시작 프로그램 표시(HKCU) 기록과, 예전 버전이 남긴 기록
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'APEX_CARE_DATA')
 JOURNAL_PATH = os.path.join(APPDATA_DIR, 'system_state.json')
+_MACHINE_VALUE = 'Journal'           # PC 쪽 저널(machine_store)의 값 이름
 
 HIVES = {
     'HKLM': winreg.HKEY_LOCAL_MACHINE,
@@ -68,8 +73,146 @@ def _locked(fn):
     return wrapper
 
 
+# 저널은 두 곳에 나눠 둔다.
+#   PC 전체(전원 플랜·세부값, HKLM, 서비스): machine_store 의 'Journal'. 관리자만 쓸 수 있다.
+#   이 계정의 시작 프로그램 표시(HKCU\...\StartupApproved): JOURNAL_PATH. 계정마다 다른 값이라 계정마다 둔다.
+# 예전 버전은 모두 JOURNAL_PATH 에 두었다. 그 파일은 같은 계정의 일반 권한 프로그램도 쓸 수 있어서, 거기 써 넣은
+# 항목을 관리자 권한의 '되돌리기' 가 어느 HKLM 키에든 썼다. 계정마다 한 번만 PC 쪽으로 옮기고(_import_legacy),
+# 그 뒤로 그 파일에서는 시작 프로그램 표시 기록만 읽는다.
+_USER_PATH = 'software\\microsoft\\windows\\currentversion\\explorer\\startupapproved\\'
+_KINDS = ('registry', 'power_value', 'power_plan', 'service')
+
+
+def _is_user_entry(e):
+    return isinstance(e, dict) and e.get('kind') == 'registry' and e.get('hive') == 'HKCU'
+
+
+def _trusted_user_entry(e):
+    """계정 파일의 기록 중 쓰는 것: 이 계정의 시작 프로그램 표시뿐. HKCU 의 다른 곳(관리자만 쓰는 Software\\Policies 등)을
+    관리자 권한의 되돌리기로 쓰게 하지 않는다."""
+    return (_is_user_entry(e) and isinstance(e.get('path'), str) and isinstance(e.get('name'), str)
+            and e['path'].lower().startswith(_USER_PATH))
+
+
+def _account_sid():
+    """이 프로세스를 실행한 계정의 SID. 모르면 None."""
+    try:
+        adv = ctypes.WinDLL('advapi32', use_last_error=True)
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        k32.LocalFree.argtypes = [ctypes.c_void_p]
+        adv.OpenProcessToken.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
+        adv.GetTokenInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
+                                            ctypes.POINTER(ctypes.c_uint32)]
+        adv.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        token = ctypes.c_void_p()
+        if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):   # TOKEN_QUERY
+            return None
+        try:
+            size = ctypes.c_uint32()
+            adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))                      # TokenUser
+            buf = ctypes.create_string_buffer(size.value)
+            if not size.value or not adv.GetTokenInformation(token, 1, buf, size, ctypes.byref(size)):
+                return None
+            psid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+            out = ctypes.c_void_p()
+            if not adv.ConvertSidToStringSidW(psid, ctypes.byref(out)):
+                return None
+            try:
+                return ctypes.wstring_at(out.value)
+            finally:
+                k32.LocalFree(out)
+        finally:
+            k32.CloseHandle(token)
+    except Exception as e:
+        log.warning(f"계정 SID 를 읽지 못했습니다: {e}")
+        return None
+
+
+def _load_machine():
+    """PC 쪽 저널. 없거나 깨졌으면 빈 저널(깨진 값은 machine_store 가 옆에 남긴다). 못 읽으면 JournalUnreadable."""
+    try:
+        data = machine_store.read(_MACHINE_VALUE)
+    except machine_store.Unreadable as e:
+        log.error(f"PC 저널을 읽지 못했습니다: {e}")
+        raise JournalUnreadable(str(e))
+    if data is not None and not (isinstance(data, dict) and isinstance(data.get('entries'), dict)):
+        log.error('PC 저널 형식이 아닙니다. 옆에 남기고 새로 시작합니다')
+        machine_store.write(f"{_MACHINE_VALUE}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}", data)
+        data = None
+    if data is None:
+        data = {'version': 1, 'entries': {}}
+    if not isinstance(data.get('imported'), list):
+        data['imported'] = []
+    return data
+
+
+def _import_legacy(machine, user, entries):
+    """예전 버전이 이 계정의 파일에 남긴 PC 쪽 기록을 PC 저널로 옮긴다. 계정마다 한 번만.
+
+    한 번 옮긴 뒤 그 파일에 생긴 PC 쪽 기록은 이 앱이 쓴 것이 아니다(새 버전은 거기 쓰지 않는다). 쓰지 않는다.
+    PC 저널에 같은 키가 이미 있으면 그쪽이 먼저 기록한 원래 값이라 그대로 둔다.
+    """
+    legacy = {k: e for k, e in user['entries'].items() if isinstance(e, dict) and not _is_user_entry(e)}
+    if not legacy:
+        return
+    sid = _account_sid()
+    if not sid or sid in machine['imported']:
+        if sid:
+            log.warning(f"계정 저널에 PC 쪽 기록 {len(legacy)}개가 있지만 이미 옮긴 계정이라 쓰지 않습니다")
+        return
+    moved = {k: e for k, e in legacy.items() if e.get('kind') in _KINDS and k not in machine['entries']}
+    new = dict(machine, entries={**machine['entries'], **moved}, imported=machine['imported'] + [sid])
+    if not machine_store.write(_MACHINE_VALUE, new):
+        return                                  # 다음에 다시 시도한다
+    machine.update(new)
+    entries.update(moved)
+    log.info(f"예전 저널의 PC 쪽 기록 {len(moved)}개를 옮겼습니다")
+    # 계정 파일에서는 뺀다. 못 빼도 이 계정은 옮긴 것으로 기록됐으므로 다시 쓰이지 않는다.
+    _save_user_file({'version': 1, 'entries': {k: e for k, e in user['entries'].items() if k not in legacy}})
+
+
 def _load():
-    """저널을 읽는다. 없으면 빈 저널. 내용이 깨졌으면 옆으로 옮기고 빈 저널.
+    """저널을 읽는다(PC 쪽과 이 계정 쪽을 합친 것). 없으면 빈 저널.
+
+    둘 중 하나라도 읽지 못하면 JournalUnreadable — 빈 저널로 보고 쓰면 기존 원래 값 기록을 덮는다.
+    """
+    with _lock:
+        machine = _load_machine()
+        user = _load_user_file()
+        entries = dict(machine['entries'])
+        for k, e in user['entries'].items():
+            if _trusted_user_entry(e):
+                entries[k] = e
+            elif _is_user_entry(e):
+                log.warning(f"계정 저널의 이 기록은 쓰지 않습니다(시작 프로그램 표시가 아님): {k}")
+        _import_legacy(machine, user, entries)
+        return {'version': 1, 'entries': entries}
+
+
+def _save(data):
+    """PC 쪽과 이 계정 쪽에 나눠 쓴다. 바뀐 쪽만 쓴다. 둘 다 저장됐으면 True."""
+    with _lock:
+        try:
+            machine = _load_machine()
+            user = _load_user_file()
+        except JournalUnreadable:
+            return False
+        ok = True
+        m_entries = {k: e for k, e in data['entries'].items() if not _is_user_entry(e)}
+        if machine['entries'] != m_entries:
+            ok = machine_store.write(_MACHINE_VALUE, dict(machine, entries=m_entries))
+        # 이 계정 파일에서 쓰지 않는 기록(아직 옮기지 못한 예전 기록 등)은 그대로 둔다
+        u_entries = {k: e for k, e in user['entries'].items() if not _trusted_user_entry(e)}
+        u_entries.update({k: e for k, e in data['entries'].items() if _is_user_entry(e)})
+        if user['entries'] != u_entries:
+            ok = _save_user_file({'version': 1, 'entries': u_entries}) and ok
+        return ok
+
+
+def _load_user_file():
+    """이 계정의 저널 파일을 읽는다. 없으면 빈 저널. 내용이 깨졌으면 옆으로 옮기고 빈 저널.
 
     잠깐 잠겨 읽지 못하면 다시 읽고, 끝내 못 읽으면 JournalUnreadable. 예전에는 이것도 '깨짐' 으로 보고
     옆으로 치운 뒤 빈 저널에 새 기록만 남겨, 그때까지의 원래 값 기록이 되돌리기에서 사라졌다.
@@ -106,8 +249,8 @@ def _load():
             return {'version': 1, 'entries': {}}
 
 
-def _save(data):
-    """원자적으로 쓴다. 쓰다가 죽으면 복구 정보가 통째로 사라진다."""
+def _save_user_file(data):
+    """이 계정의 저널 파일을 원자적으로 쓴다. 쓰다가 죽으면 복구 정보가 통째로 사라진다."""
     with _lock:
         tmp = None
         try:
@@ -222,6 +365,14 @@ def pending_changes():
         return _load()['entries']
     except JournalUnreadable:
         return {}
+
+
+def pending_changes_or_none():
+    """pending_changes 와 같지만, 저널을 읽지 못하면 None. 화면이 '되돌릴 것 없음' 과 '모름' 을 구분하게 한다."""
+    try:
+        return _load()['entries']
+    except JournalUnreadable:
+        return None
 
 
 def has_pending():
@@ -470,6 +621,13 @@ def set_active_plan(guid_str, group, why=''):
     if not before:
         return {'ok': False, 'verified': False,
                 'reason': '현재 전원 플랜을 읽지 못해 바꾸지 않았습니다'}
+    if guid_str not in available_plans():
+        return {'ok': False, 'verified': False,
+                'reason': f'이 PC 에 없는 전원 플랜입니다 ({KNOWN_PLANS.get(guid_str, guid_str)})'}
+    try:
+        had_record = _PLAN_KEY in _load()['entries']
+    except JournalUnreadable:
+        return dict(_NOT_RECORDED)
     if not _record(_PLAN_KEY, {
         'kind': 'power_plan', 'group': group, 'value': before, 'why': why,
     }):
@@ -488,21 +646,32 @@ def set_active_plan(guid_str, group, why=''):
         return {'ok': False, 'verified': False,
                 'reason': '원래 전원 플랜 기록을 저장하지 못해 바꾸지 않았습니다'}
 
-    if guid_str not in available_plans():
-        return {'ok': False, 'verified': False,
-                'reason': f'이 PC 에 없는 전원 플랜입니다 ({KNOWN_PLANS.get(guid_str, guid_str)})'}
+    def failed(reason):
+        # 이번 호출이 만든 기록인데 플랜이 그대로면 바뀐 것이 없다. 남기면 '되돌리지 못한 설정 1개' 가 계속 보이고,
+        # 플랜 전환을 막는 PC 에서는 그 기록을 되돌리는 것도 계속 실패했다.
+        if not had_record and active_plan_guid() == before:
+            _forget([_PLAN_KEY])
+        return {'ok': False, 'verified': False, 'reason': reason}
+
     try:
         g = _guid(guid_str)
         r = _powrprof().PowerSetActiveScheme(None, ctypes.byref(g))
         if r != 0:
-            return {'ok': False, 'verified': False, 'reason': f'PowerSetActiveScheme 오류 {r}'}
+            return failed(f'PowerSetActiveScheme 오류 {r}')
     except Exception as e:
-        return {'ok': False, 'verified': False, 'reason': str(e)}
+        return failed(str(e))
 
     after = active_plan_guid()
     if after != guid_str.lower():
-        return {'ok': False, 'verified': False,
-                'reason': f'전환 후 확인 실패 (기대 {guid_str}, 실제 {after})'}
+        return failed(f'전환 후 확인 실패 (기대 {guid_str}, 실제 {after})')
+    # 이 앱이 바꿔 둔 플랜. 원래 플랜이 지워진 뒤 사용자가 다른 플랜을 골랐는지 알아보는 데 쓴다(_restore).
+    try:
+        data = _load()
+        if _PLAN_KEY in data['entries'] and data['entries'][_PLAN_KEY].get('set_to') != after:
+            data['entries'][_PLAN_KEY]['set_to'] = after
+            _save(data)
+    except JournalUnreadable:
+        pass
     return {'ok': True, 'verified': True, 'before': before, 'after': after}
 
 
@@ -811,10 +980,13 @@ def _restore(predicate):
                 fn = p.PowerWriteACValueIndex if e['ac'] else p.PowerWriteDCValueIndex
                 r = fn(None, ctypes.byref(pg), ctypes.byref(sg), ctypes.byref(stg),
                        ctypes.c_ulong(e['value']))
+                if r == _ERROR_FILE_NOT_FOUND and str(e['plan']).lower() not in available_plans():
+                    # 값을 바꿨던 플랜이 지워졌다. 그 값도 함께 사라졌으므로 되돌릴 것이 없다. 남기면 이후 모든
+                    # 모드 전환·'전부 원래대로'·제거 전 되돌리기가 영원히 실패한다.
+                    done.append(key)
+                    continue
                 if r != 0:
-                    why = (f"값을 바꿨던 전원 플랜({KNOWN_PLANS.get(e['plan'], e['plan'])})이 이 PC 에서 삭제되어 되돌릴 수 없습니다"
-                           if r == _ERROR_FILE_NOT_FOUND else f'쓰기 오류 {r}')
-                    failed.append({'key': key, 'reason': why})
+                    failed.append({'key': key, 'reason': f'쓰기 오류 {r}'})
                     continue
                 now = _read_power_value(e['plan'], e['sub'], e['setting'], e['ac'])
                 if now != e['value']:
@@ -825,15 +997,26 @@ def _restore(predicate):
                 done.append(key)
 
             elif kind == 'power_plan':
-                if e.get('value'):
-                    res = _powrprof().PowerSetActiveScheme(None, ctypes.byref(_guid(e['value'])))
-                    if res != 0:
-                        name = KNOWN_PLANS.get(str(e['value']).lower(), e['value'])
-                        failed.append({'key': key, 'reason': (
-                            f"원래 전원 플랜({name})이 이 PC 에서 삭제되어 되돌릴 수 없습니다. Windows 설정에서 플랜을 고르세요"
-                            if res == _ERROR_FILE_NOT_FOUND else f'플랜 복구 실패 {res}')})
+                original = str(e.get('value') or '').lower()
+                active = active_plan_guid()
+                if original and active != original:
+                    if original not in available_plans():
+                        # 원래 플랜이 지워졌다. 이 앱이 바꿔 둔 플랜이 아직 켜져 있으면 사용자가 골라야 한다(한 번 안내).
+                        # 사용자가 이미 다른 플랜을 골랐으면 돌아갈 곳이 없으니 기록을 정리한다. 예전에는 기록이 영원히
+                        # 남아 이후 모든 모드 전환과 제거 전 되돌리기가 실패했다.
+                        if active and active == str(e.get('set_to') or '').lower():
+                            name = KNOWN_PLANS.get(original, original)
+                            failed.append({'key': key, 'reason': (
+                                f"원래 전원 플랜({name})이 이 PC 에서 삭제되어 되돌릴 수 없습니다. "
+                                "Windows 설정 → 전원에서 쓸 플랜을 고르면 이 기록은 정리됩니다")})
+                            continue
+                        done.append(key)
                         continue
-                    if active_plan_guid() != str(e['value']).lower():
+                    res = _powrprof().PowerSetActiveScheme(None, ctypes.byref(_guid(original)))
+                    if res != 0:
+                        failed.append({'key': key, 'reason': f'플랜 복구 실패 {res}'})
+                        continue
+                    if active_plan_guid() != original:
                         failed.append({'key': key, 'reason': '플랜을 되돌린 뒤 확인에 실패했습니다'})
                         continue
                 done.append(key)

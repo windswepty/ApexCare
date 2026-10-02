@@ -99,11 +99,46 @@ def test_file_saved_with_bom_is_read():
 
 
 def test_setters_report_save_result(monkeypatch):
+    from backend import machine_store
     assert cm.set_optimization_mode('eco') is True and cm.get_optimization_mode() == 'eco'
     monkeypatch.setattr(cm, 'save_config', lambda c: False)
-    assert cm.set_optimization_mode('gaming') is False
     assert cm.set_booster_state(True) is False
     assert cm.set_boost_setting('boost_disable_nagle', True)['success'] is False
+    monkeypatch.setattr(machine_store, 'write', lambda name, data: False)
+    assert cm.set_optimization_mode('gaming') is False
+    assert cm.set_boost_restore_mode('eco') is False
+
+
+# ── PC 전체 설정(성능 모드) ──────────────────────────────────
+
+def test_mode_is_one_per_pc_and_lives_where_only_admins_can_write():
+    import json as _json
+    from backend import machine_store
+    from tests.fakewin import REGISTRY
+    assert cm.set_optimization_mode('gaming') is True
+    stored = _json.loads(REGISTRY.value('HKLM', machine_store.KEY, 'Settings'))
+    assert stored['optimization_mode'] == 'gaming' and stored['optimization_mode_user_set'] is True
+    assert 'optimization_mode' not in _raw_json()                 # 계정 파일에는 없다
+
+
+def test_old_mode_is_taken_from_the_account_file_once_and_not_again_after_uninstall():
+    from backend import machine_store
+    _seed({'optimization_mode': 'gaming', 'optimization_mode_user_set': True, 'ui_theme': 'stone'})
+    assert cm.get_optimization_mode() == 'gaming' and cm.get_optimization_mode_user_set() is True
+    assert 'optimization_mode' not in _raw_json() and _raw_json()['ui_theme'] == 'stone'
+
+    assert cm.set_optimization_mode('standard', user_set=False)
+    assert machine_store.remove()                                  # 제거 전 되돌리기가 PC 쪽 기록을 지웠다
+    # 다시 설치: 옛 '게이밍' 을 다시 가져와 적용하지 않는다
+    assert cm.get_optimization_mode() == 'standard' and cm.get_optimization_mode_user_set() is False
+
+
+def _raw_json():
+    try:
+        with open(cm.CONFIG_FILE, encoding='utf-8-sig') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
 
 def _locked_file(monkeypatch):

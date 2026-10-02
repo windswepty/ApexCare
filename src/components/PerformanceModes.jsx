@@ -53,7 +53,13 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
       const r = await a.runCpuBenchmark();
       if (r?.success) {
         setBench(r.results || {});
-        addToast?.(`${MODE_LABEL[r.mode] || r.mode} 모드 측정: ${r.result.score} MB/s`, 'success');
+        const label = `${MODE_LABEL[r.mode] || r.mode} 모드 측정: ${r.result.score} MB/s`;
+        if (r.saved === false) {
+          // 측정은 했지만 저장하지 못했다. 성공으로 보이면 다음에 켰을 때 결과가 사라진 이유를 모른다.
+          addToast?.(`${label} — 결과를 저장하지 못해 앱을 다시 켜면 사라집니다.`, 'error');
+        } else {
+          addToast?.(label, 'success');
+        }
       } else {
         addToast?.(r?.message || '측정하지 못했습니다.', 'error');
       }
@@ -68,7 +74,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   const [result, setResult] = useState(null);          // 마지막 적용 결과 (steps 포함)
   const [showSteps, setShowSteps] = useState(false);
   const [status, setStatus] = useState(null);          // getOptimizationMode 결과
-  const [pending, setPending] = useState(0);           // 되돌리지 않은 변경 수
+  const [pending, setPending] = useState(0);           // 되돌리지 않은 변경 수. null 이면 기록을 읽지 못함
   const [reverting, setReverting] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -83,7 +89,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
       }
       if (a.getPendingSystemChanges) {
         const p = await a.getPendingSystemChanges();
-        setPending(p?.count || 0);
+        setPending(p?.error ? null : (p?.count || 0));
       }
     } catch (e) {
       console.error('모드 정보 조회 실패:', e);
@@ -91,11 +97,15 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
   }, [setCurrentMode]);
 
   useEffect(() => {
-    refresh();
     const onReady = () => refresh();
     window.addEventListener('pywebviewready', onReady);
     return () => window.removeEventListener('pywebviewready', onReady);
   }, [refresh]);
+  // 탭을 열 때마다 다시 읽는다. 다른 화면('변경 내역 · 되돌리기' 의 전부 원래대로, 게임 부스트)이 모드를 바꿨을 수 있다.
+  // 예전에는 처음 열 때만 읽어, 되돌린 뒤에도 이전 모드가 '사용 중' 으로 보였다.
+  useEffect(() => {
+    if (active) refresh();
+  }, [active, refresh]);
 
   /**
    * 모드를 적용하고 '실제 결과'를 보여준다.
@@ -186,14 +196,14 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             언제든 원래대로 되돌릴 수 있습니다.
           </p>
         </div>
-        {pending > 0 && (
+        {(pending === null || pending > 0) && (
           <button
             onClick={revertAll}
             disabled={reverting}
             className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-black/10 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-bold hover:border-cyan-500 transition-colors disabled:opacity-50"
           >
             {reverting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-            전부 원래대로 ({pending})
+            전부 원래대로 ({pending === null ? '?' : pending})
           </button>
         )}
       </div>
@@ -297,6 +307,17 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
             </strong>{' '}
             아래 표준 모드를 다시 누르면 되돌리기를 다시 시도합니다. 무엇이 남았는지는
             '변경 내역 · 되돌리기' 화면에서 볼 수 있습니다.
+          </div>
+        </div>
+      )}
+
+      {/* 변경 기록을 읽지 못함. 남은 변경이 있는지 모르니 '맞는 상태' 로 보이지 않게 알린다. */}
+      {status && status.outOfSync === 'journal' && (
+        <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-sm text-black/80 dark:text-white/80">
+            <strong className="text-black dark:text-white">변경 기록을 읽지 못해 원래대로 돌아가 있는지 확인하지 못했습니다.</strong>{' '}
+            백신 검사 같은 다른 프로그램이 잠시 잡고 있을 수 있습니다. 잠시 뒤 이 화면을 다시 열어 주세요.
           </div>
         </div>
       )}

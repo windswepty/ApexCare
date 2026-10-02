@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Rocket,
   Power
@@ -14,7 +14,7 @@ const LOCATION_LABEL = {
   LEGACY: '예전 버전에서 끔',
 };
 
-export default function StartupManager({ addToast }) {
+export default function StartupManager({ addToast, active = true }) {
   const [startupApps, setStartupApps] = useState([]);
   // 'loading' → 'ok' | 'error'. 읽기 전에는 '0개' 라고 말하지 않는다(예전에는 읽기 전에도 0개로 보였다).
   const [loadState, setLoadState] = useState('loading');
@@ -57,6 +57,14 @@ export default function StartupManager({ addToast }) {
       return () => window.removeEventListener('pywebviewready', fetchStartup);
     }
   }, []);
+
+  // 탭을 다시 열면 다시 읽는다. '변경 내역 · 되돌리기' 의 전부 원래대로가 켜고 끈 상태를 바꿨을 수 있다.
+  // 예전에는 처음 열 때만 읽어, 되돌린 뒤에도 '꺼짐' 으로 보였다. 요청 중인 항목이 있으면 그 결과를 기다린다.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current && pendingId === null && loadState === 'ok') reload();
+    wasActive.current = active;
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleApp = async (id, appName) => {
     const app = startupApps.find(a => a.id === id);
