@@ -261,6 +261,18 @@ def test_sfc_utf16_output_is_decoded_and_summarized():
     assert summary.endswith('무결성 위반을 찾지 못했습니다.')
 
 
+def test_sfc_four_line_result_keeps_its_first_line():
+    # '찾았지만 일부를 고치지 못함' 은 결과 한 줄 + CBS.log 안내 3줄이다. 예전에는 마지막 3줄만 남아
+    # '복구함' 과 '일부 복구 못 함' 이 똑같이 보였다.
+    text = ('확인 100% 완료.\r\n\r\n'
+            'Windows 리소스 보호에서 손상된 파일을 찾았지만 그중 일부를 복구할 수 없습니다.\r\n'
+            '온라인 복구의 경우 세부 정보는 %WinDir%\\Logs\\CBS\\CBS.log에 있는\r\n'
+            'CBS 로그 파일에 포함되어 있습니다. 예를 들면 C:\\Windows\\Logs\\CBS\\CBS.log입니다.\r\n'
+            '오프라인 복구의 경우 세부 정보는 /OFFLOGFILE 플래그가 제공하는 로그 파일에 포함되어 있습니다.\r\n')
+    summary = system_repair.summarize_output(text)
+    assert summary.startswith('Windows 리소스 보호에서 손상된 파일을 찾았지만 그중 일부를 복구할 수 없습니다.')
+
+
 def test_disk_optimization_is_not_killed_after_five_minutes():
     # HDD 조각 모음은 수십 분 걸린다. 예전에는 300초에 강제 종료돼 늘 '실패' 로 보였다.
     assert system_repair.TRIM_TIMEOUT_SEC >= 3600
@@ -273,7 +285,7 @@ def test_command_timeout_is_reported_in_words(monkeypatch):
         raise subprocess.TimeoutExpired(args, kw.get('timeout'))
     monkeypatch.setattr(system_repair.subprocess, 'run', fake_run)
     state = {'status': 'running', 'error': None}
-    system_repair._run_hidden_cmd_bg(['defrag.exe', '/C', '/O'], state, 120)
+    system_repair._run_hidden_cmd_bg([system_repair.sys_tool('defrag.exe'), '/C', '/O'], state, 120)
     assert state['status'] == 'error' and '2분' in state['error']
 
 

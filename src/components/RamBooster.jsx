@@ -101,7 +101,8 @@ export default function RamBooster({ addToast, active = true }) {
     }
     setKillingPid(proc.pid);
     try {
-      const res = await api.killProcess(proc.pid);
+      // 생성 시각도 넘겨, 그 사이 PID 를 물려받은 다른 프로그램을 종료하지 않게 한다
+      const res = await api.killProcess(proc.pid, proc.created ?? null);
       if (res?.success) {
         // 결과를 받은 뒤에만 목록에서 뺀다
         setProcesses(prev => (prev || []).filter(p => p.pid !== proc.pid));

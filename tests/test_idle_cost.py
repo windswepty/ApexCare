@@ -193,6 +193,68 @@ def test_gpu_usage_is_none_until_measured_and_when_unavailable(monkeypatch):
     assert system_monitor._fresh_gpu_usage() is None          # 이 PC 에서는 읽을 수 없음(0% 로 꾸미지 않음)
 
 
+def test_first_gpu_sample_after_rest_is_only_a_baseline(monkeypatch):
+    """사용률은 직전 수집과 이번 수집 사이의 평균이다. 화면이 쉬다 돌아온 첫 수집은 쉬는 동안의 평균이라 버린다."""
+    import sys
+    import types
+
+    me = threading.get_ident()
+    now = [1000.0]
+
+    class Stop(BaseException):
+        pass
+
+    # 수집 스레드가 매 바퀴 화면이 값을 원하는지 묻는다: 한 번 보고, 10초 쉬고, 다시 두 번 본다
+    wanted = [True] + [False] * 10 + [True, True]
+
+    class Clock:
+        @staticmethod
+        def time():
+            return now[0] if threading.get_ident() == me else real_time.time()
+
+        @staticmethod
+        def sleep(s):
+            if threading.get_ident() != me:        # 뒤에서 도는 수집 스레드는 그대로 잔다
+                real_time.sleep(s)
+                return
+            if not wanted:
+                raise Stop
+            now[0] += s
+
+    def fake_wanted():
+        return wanted.pop(0) if threading.get_ident() == me else False
+
+    shown = []
+    values = [30.0, 60.0]
+    pdh = types.ModuleType('win32pdh')
+    pdh.PDH_FMT_DOUBLE = 0
+    pdh.OpenQuery = lambda: 'q'
+    pdh.AddCounter = lambda hq, path: 'c'
+    pdh.CollectQueryData = lambda hq: None
+
+    def counters(hc, fmt):
+        shown.append((system_monitor._gpu_usage, system_monitor._gpu_sample[0]))
+        return {'pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D': values.pop(0)}
+    pdh.GetFormattedCounterArray = counters
+
+    monkeypatch.setitem(sys.modules, 'win32pdh', pdh)
+    monkeypatch.setattr(system_monitor, 'time', Clock)
+    monkeypatch.setattr(system_monitor, '_wanted', fake_wanted)
+    monkeypatch.setattr(system_monitor, '_gpu_usage', None)
+    monkeypatch.setattr(system_monitor, '_gpu_state', 'measuring')
+    monkeypatch.setattr(system_monitor, '_gpu_sample', [0.0])
+
+    try:
+        system_monitor._gpu_poller()
+    except Stop:
+        pass
+
+    # 처음 1초 뒤 30%. 10초 쉰 뒤 첫 수집(1012초)은 기준점이라 값을 읽지도, 시각을 바꾸지도 않는다.
+    # 그 다음 수집(1013초)부터 다시 '지금 값' 이다
+    assert shown == [(None, 0.0), (30, 1001.0)]
+    assert system_monitor._gpu_usage == 60 and system_monitor._gpu_sample[0] == 1013.0
+
+
 def test_failed_stats_are_not_filled_with_zeros(monkeypatch):
     from backend.api import Api
     monkeypatch.setattr(system_monitor, 'get_system_stats', lambda: None)

@@ -2,6 +2,7 @@
 APEX CARE - System Repair and Advanced Disk Ops
 Runs long-running commands like SFC, DISM, Defrag, and Network optimization in hidden subprocesses with full logging and error handling.
 """
+import os
 import re
 import subprocess
 import threading
@@ -9,6 +10,19 @@ import logging
 
 log = logging.getLogger('SystemRepair')
 CREATE_NO_WINDOW = 0x08000000
+
+
+def sys_tool(name):
+    """Windows 도구의 절대 경로(%SystemRoot%\\System32\\name). 32비트로 돌면 Sysnative 로 64비트 쪽을 쓴다.
+
+    이 앱은 관리자 권한으로 돈다. 'sfc.exe' 처럼 이름만 넘기면 CreateProcess 가 실행 파일 폴더와 '현재 폴더' 를
+    System32 보다 먼저 찾아, 사용자가 쓸 수 있는 현재 폴더에 같은 이름의 exe 를 심으면 그것이 관리자 권한으로 돌았다.
+    """
+    sysroot = os.environ.get('SystemRoot') or os.environ.get('WINDIR') or r'C:\Windows'
+    native = os.path.join(sysroot, 'Sysnative', name)
+    if os.path.exists(native):
+        return native
+    return os.path.join(sysroot, 'System32', name)
 
 def _run_hidden_cmd(args, timeout=120):
     """명령을 창 없이 실행한다. 인자 리스트만 받는다(shell=False).
@@ -18,6 +32,8 @@ def _run_hidden_cmd(args, timeout=120):
     """
     if not isinstance(args, (list, tuple)) or not args:
         return {"success": False, "error": "명령은 인자 리스트로만 실행합니다."}
+    if not os.path.isabs(str(args[0])):
+        return {"success": False, "error": "실행 파일은 절대 경로로만 실행합니다."}
     try:
         result = subprocess.run(
             [str(a) for a in args],
@@ -74,18 +90,42 @@ def decode_console_output(data):
     return data.decode('utf-8', errors='replace')
 
 
+def _meaningful(ln):
+    return bool(ln) and not _PROGRESS_LINE.search(ln) and not set(ln) <= set('=-_*. ')
+
+
 def summarize_output(text, max_lines=3, max_chars=400):
-    """명령 출력의 마지막 의미 있는 몇 줄. 진행률 줄과 빈 줄은 뺀다. 없으면 ''."""
+    """명령 출력의 마지막 결과 문단(빈 줄로 나뉜 덩어리) 전체. 진행률 줄은 뺀다. 없으면 ''.
+
+    예전에는 마지막 3줄만 남겼다. SFC 의 결과 메시지('손상 파일을 찾아 복구함', '일부를 복구하지 못함',
+    '무결성 위반을 찾음')는 결과 한 줄 + CBS.log 안내 3줄이라, 늘 안내 3줄만 남아 세 결과가 똑같이 보였다.
+    문단을 찾지 못하면(빈 줄 없는 긴 출력) 예전처럼 마지막 max_lines 줄을 쓴다.
+    """
     if not text:
         return ''
-    lines = [ln.strip() for ln in re.split(r'[\r\n]+', str(text))]
-    lines = [ln for ln in lines if ln and not _PROGRESS_LINE.search(ln) and not set(ln) <= set('=-_*. ')]
-    out = ' '.join(lines[-max_lines:])
-    return out if len(out) <= max_chars else '…' + out[-max_chars:]
+    norm = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    paragraphs = []
+    for block in re.split(r'\n\s*\n', norm):
+        lines = [ln.strip() for ln in block.split('\n')]
+        lines = [ln for ln in lines if _meaningful(ln)]
+        if lines:
+            paragraphs.append(lines)
+    if not paragraphs:
+        return ''
+    last = paragraphs[-1]
+    if len(paragraphs) == 1 and len(last) > max_lines + 1:
+        last = last[-max_lines:]                   # 문단 구분이 없는 긴 출력은 끝부분만
+    out = ' '.join(last)
+    # 결과 문장은 문단 첫 줄이다. 길면 앞부분(결과)을 남기고 뒤(안내)를 줄인다.
+    return out if len(out) <= max_chars else out[:max_chars] + '…'
 
 
 def _run_hidden_cmd_bg(args, state_dict, timeout_sec=600):
     cmd_str = " ".join(str(a) for a in args)        # 로그 표시용. 실행에는 쓰지 않는다.
+    if not args or not os.path.isabs(str(args[0])):
+        state_dict["status"] = "error"
+        state_dict["error"] = "실행 파일은 절대 경로로만 실행합니다."
+        return
     try:
         log.info(f"Starting background command: {cmd_str}")
         result = subprocess.run(
@@ -132,7 +172,7 @@ def run_trim():
     _trim_state["output"] = ""
     _trim_state["summary"] = ""
     t = threading.Thread(target=_run_hidden_cmd_bg,
-                         args=(["defrag.exe", "/C", "/O"], _trim_state, TRIM_TIMEOUT_SEC), daemon=True)
+                         args=([sys_tool("defrag.exe"), "/C", "/O"], _trim_state, TRIM_TIMEOUT_SEC), daemon=True)
     t.start()
     return {"success": True}
 
@@ -154,7 +194,7 @@ def run_sfc():
     _sfc_state["summary"] = ""
     # 타임아웃은 subprocess 를 '강제 종료'시킨다. sfc /scannow 를 중간에 죽이면
     # 복구가 반쯤 적용된 상태로 남을 수 있으므로 넉넉하게 잡는다(느린 HDD 기준).
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["sfc.exe", "/scannow"], _sfc_state, 3600), daemon=True)
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("sfc.exe"), "/scannow"], _sfc_state, 3600), daemon=True)
     t.start()
     return {"success": True}
 
@@ -176,7 +216,7 @@ def run_dism():
     _dism_state["summary"] = ""
     # DISM /RestoreHealth 를 중간에 죽이면 구성 요소 저장소(WinSxS)가 손상될 수 있다.
     # 느린 회선에서 Windows Update 로 원본을 받아오면 1시간을 넘기도 하므로 2시간으로 잡는다.
-    t = threading.Thread(target=_run_hidden_cmd_bg, args=(["dism.exe", "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, 7200), daemon=True)
+    t = threading.Thread(target=_run_hidden_cmd_bg, args=([sys_tool("dism.exe"), "/Online", "/Cleanup-image", "/Restorehealth"], _dism_state, 7200), daemon=True)
     t.start()
     return {"success": True}
 
@@ -209,7 +249,7 @@ _AUTOTUNING_LEVELS = {"normal", "disabled", "highlyrestricted", "restricted", "e
 
 def flush_dns():
     """DNS 캐시만 비운다. 캐시라서 되돌릴 필요가 없는 유일한 안전 항목."""
-    return _run_hidden_cmd(["ipconfig", "/flushdns"])
+    return _run_hidden_cmd([sys_tool("ipconfig.exe"), "/flushdns"])
 
 
 def run_network_optimization_sync():
@@ -292,7 +332,7 @@ def restore_network_tweaks():
             failed.append({"item": "TCP 자동 튜닝", "reason": f"알 수 없는 기록값 '{level}'"})
             remaining.pop("autotuning", None)
         else:
-            r = _run_hidden_cmd(["netsh", "int", "tcp", "set", "global", f"autotuninglevel={lv}"])
+            r = _run_hidden_cmd([sys_tool("netsh.exe"), "int", "tcp", "set", "global", f"autotuninglevel={lv}"])
             if r.get("success"):
                 restored.append("TCP 자동 튜닝")
                 remaining.pop("autotuning", None)

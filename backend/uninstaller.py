@@ -198,6 +198,17 @@ def run_uninstall(uninstall_string):
             return a
         args = [_to_uninstall(a) for a in args]
 
+    if not os.path.isabs(args[0]):
+        # 'MsiExec.exe /X{…}' 처럼 이름만 적힌 제거 명령. 이름만 넘기면 CreateProcess 가 '현재 폴더' 를 System32 보다
+        # 먼저 찾는다(관리자 권한 실행). Windows 폴더의 도구일 때만 그 절대 경로로 실행한다.
+        from backend.system_repair import sys_tool
+        candidate = sys_tool(os.path.basename(args[0]) if args[0].lower().endswith('.exe') else args[0] + '.exe')
+        if not os.path.isfile(candidate):
+            return {"success": False,
+                    "message": f"제거 명령의 실행 파일 위치가 적혀 있지 않습니다: {exe}\n"
+                               "Windows 의 '설정 → 앱' 에서 제거해 주세요."}
+        args = [candidate] + args[1:]
+
     try:
         proc = subprocess.Popen(args, shell=False)
     except FileNotFoundError:

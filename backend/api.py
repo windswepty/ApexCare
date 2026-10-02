@@ -128,8 +128,8 @@ class Api:
         """메모리 순 프로세스 목록. limit=0 이면 전부(게이밍 탭의 우선순위 조정이 이름으로 찾는다)."""
         return system_monitor.get_processes(limit)
 
-    def killProcess(self, pid):
-        return system_monitor.kill_process(pid)
+    def killProcess(self, pid, created=None):
+        return system_monitor.kill_process(pid, created)
 
     def setProcessPriority(self, pid, priority):
         """프로세스 우선순위 변경 (구 API 이름).

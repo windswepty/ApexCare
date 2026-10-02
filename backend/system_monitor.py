@@ -224,6 +224,7 @@ def _gpu_poller():
         _gpu_state = 'unavailable'
         return
 
+    last_collect = time.time()
     while True:
         try:
             time.sleep(1)
@@ -231,6 +232,13 @@ def _gpu_poller():
             if not _wanted():
                 continue
             win32pdh.CollectQueryData(hq)
+            now = time.time()
+            idle = now - last_collect
+            last_collect = now
+            if idle > _GPU_MAX_INTERVAL:
+                # 사용률은 직전 수집과 이번 수집 사이의 평균이다. 쉬다 깨어난 첫 수집은 쉬는 동안의 평균이라
+                # '지금 값' 이 아니다. 기준점으로만 쓰고 다음 수집부터 보여 준다.
+                continue
             arr = win32pdh.GetFormattedCounterArray(hc, win32pdh.PDH_FMT_DOUBLE)
             usage = gpu_3d_usage(arr if isinstance(arr, dict) else {})
             _gpu_usage = min(100, round(usage))      # 가장 바쁜 어댑터의 3D 엔진 값(작업 관리자와 같은 방식)
@@ -242,6 +250,7 @@ def _gpu_poller():
             time.sleep(1)
 
 
+_GPU_MAX_INTERVAL = 3        # 직전 수집이 이보다 오래됐으면 이번 수집은 기준점일 뿐이다(초)
 _gpu_sample = [0.0]          # 마지막으로 GPU 사용률을 잰 시각
 _gpu_state = 'measuring'     # 'measuring' | 'ok' | 'unavailable'
 
@@ -504,9 +513,15 @@ def get_processes(limit=8):
                     raw_cpu = p.info.get('cpu_percent') or 0
                     num_cores = psutil.cpu_count(logical=True) or 1
                     cpu_text = None if first_sample else f"{raw_cpu / num_cores:.1f}%"
+                    try:
+                        created = p.create_time()
+                    except Exception:
+                        created = None
                     procs.append({
                         'id': p.info['pid'],
                         'pid': p.info['pid'],
+                        # 생성 시각. 종료할 때 같은 프로세스인지 확인한다(그 사이 PID 가 재사용될 수 있다)
+                        'created': created,
                         'name': p.info['name'] or 'unknown',
                         'memoryMB': round(mem_mb),
                         'cpuPct': cpu_text,
@@ -527,7 +542,7 @@ def get_processes(limit=8):
         print(f"[SystemMonitor] Process list error: {e}")
         return []
 
-def kill_process(pid):
+def kill_process(pid, created=None):
     """Terminate a process by PID securely with Win32 API / taskkill fallback.
 
     Zero-Risk Shield: process_guard.check_controllable() 이 단일 관문이다.
@@ -539,6 +554,17 @@ def kill_process(pid):
         return {"success": False, "message": error, "error": error}
 
     done_msg = f"'{proc_name}' 프로세스를 종료했습니다."
+    if created is not None:
+        # 목록을 본 뒤 그 프로세스가 끝나고 다른 프로그램이 같은 PID 를 받았으면 그것을 종료하게 된다
+        try:
+            same = abs(psutil.Process(safe_pid).create_time() - float(created)) < 0.01
+        except psutil.NoSuchProcess:
+            return {"success": True, "message": f"'{proc_name}' 프로세스는 이미 종료되었습니다."}
+        except (TypeError, ValueError, psutil.Error):
+            same = False
+        if not same:
+            msg = "목록을 본 뒤 그 프로세스가 끝나 다른 프로그램이 같은 번호를 받았습니다. 목록을 새로 고쳐 주세요."
+            return {"success": False, "message": msg, "error": msg}
     try:
         p = psutil.Process(safe_pid)
         p.kill()
@@ -567,7 +593,8 @@ def kill_process(pid):
 
     # 폴백 2: taskkill. 셸을 거치지 않고 인자 리스트로 넘긴다.
     try:
-        res = subprocess.run(["taskkill", "/F", "/PID", str(safe_pid)], shell=False,
+        from backend.system_repair import sys_tool
+        res = subprocess.run([sys_tool("taskkill.exe"), "/F", "/PID", str(safe_pid)], shell=False,
                              capture_output=True, text=True, errors='replace', creationflags=0x08000000, timeout=10)
         if res.returncode == 0:
             return {"success": True, "message": done_msg}

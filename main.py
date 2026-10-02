@@ -26,6 +26,13 @@ def get_html_path():
     return "http://localhost:5173"
 
 if __name__ == '__main__':
+    # 작업 폴더를 프로그램 폴더로. 이 앱은 관리자 권한으로 돌고, 이름만으로 실행하는 도구는 현재 폴더부터 찾는다.
+    # 바로 가기가 아닌 곳(다운로드 폴더 등)에서 실행돼도 사용자가 쓸 수 있는 폴더가 현재 폴더로 남지 않게 한다.
+    try:
+        os.chdir(os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)))
+    except OSError:
+        pass
+
     # 한 번에 하나만. 두 번째로 켜면 떠 있는 창을 앞으로 가져오고 끝낸다(Api 를 만들기 전에 —
     # 생성자가 저장된 모드를 다시 적용하고 게임 부스트를 켠다).
     from backend import single_instance

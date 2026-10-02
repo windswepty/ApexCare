@@ -616,6 +616,7 @@ class FakeProcessTable:
     def __init__(self):
         self.procs = {}
         self.nice_calls = []               # (pid, 설정한 값)
+        self.killed = []                   # (pid, 이름) — 끝낸 프로세스
         self.cpus = 8                      # 논리 프로세서 수
         self.clock = 1000.0
 
@@ -698,6 +699,11 @@ class FakeProcessTable:
 
             def is_running(self):
                 return table.procs.get(self.pid) is self._p
+
+            def kill(self):
+                self._live()
+                table.killed.append((self.pid, self._p.name))
+                table.procs.pop(self.pid)
 
             def __getattr__(self, name):
                 _blocked(f'가짜 psutil.Process.{name}')

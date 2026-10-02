@@ -1,10 +1,12 @@
 """system_repair: 구버전 네트워크 튜닝 되돌리기와 명령 실행 방식."""
 
+import os
 import subprocess
 
 import pytest
 
 from backend import config_manager, system_repair
+from tests.conftest import ROOT
 from tests.fakewin import REGISTRY
 
 THROTTLE = system_repair._THROTTLE_KEY
@@ -51,7 +53,7 @@ def test_restores_backup_and_clears_it(cmds):
     r = system_repair.restore_network_tweaks()
 
     assert r['success'], r
-    assert cmds == [['netsh', 'int', 'tcp', 'set', 'global', 'autotuninglevel=normal']]
+    assert cmds == [[system_repair.sys_tool('netsh.exe'), 'int', 'tcp', 'set', 'global', 'autotuninglevel=normal']]
     assert REGISTRY.value('HKLM', THROTTLE, 'NetworkThrottlingIndex') == 10
     assert REGISTRY.get('HKLM', f'{NAGLE}\\{IFACE}', 'TcpAckFrequency') is None
     assert REGISTRY.value('HKLM', f'{NAGLE}\\{IFACE}', 'TCPNoDelay') == 0
@@ -93,6 +95,21 @@ def test_run_hidden_cmd_rejects_string_commands(monkeypatch):
     assert r['success'] is False and runs == []
     assert system_repair._run_hidden_cmd([])['success'] is False and runs == []
 
-    assert system_repair._run_hidden_cmd(['ipconfig', '/flushdns'])['success']
+    # 이름만 넘기면 실행하지 않는다. 관리자 권한에서 '현재 폴더' 의 같은 이름 exe 가 먼저 실행될 수 있다
+    assert system_repair._run_hidden_cmd(['ipconfig', '/flushdns'])['success'] is False and runs == []
+
+    tool = system_repair.sys_tool('ipconfig.exe')
+    assert os.path.isabs(tool) and tool.lower().endswith(os.path.join('system32', 'ipconfig.exe').lower()) \
+        or 'sysnative' in tool.lower()
+    assert system_repair._run_hidden_cmd([tool, '/flushdns'])['success']
     args, kw = runs[0]
-    assert args == ['ipconfig', '/flushdns'] and kw.get('shell') is False
+    assert args == [tool, '/flushdns'] and kw.get('shell') is False
+
+
+def test_every_tool_is_launched_by_absolute_path():
+    import re
+    for rel in ('backend/system_repair.py', 'backend/system_monitor.py', 'backend/storage.py', 'backend/uninstaller.py'):
+        with open(os.path.join(ROOT, rel), encoding='utf-8') as f:
+            src = f.read()
+        # 실행 목록의 첫 인자로 이름만 쓴 곳이 없어야 한다(sys_tool(...)·_powershell_exe() 로 절대 경로)
+        assert not re.search(r"\[\s*[\"'](sfc|dism|defrag|netsh|ipconfig|taskkill|powershell|cmd|reg|ping)(\.exe)?[\"']", src, re.I), rel

@@ -291,8 +291,11 @@ def test_cleanup_runs_outside_install_dir_and_retries(monkeypatch):
     un = _load_uninstaller(monkeypatch)
     lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\Public\Desktop\APEX CARE.lnk'])
     body = [l for l in lines if l != '@echo off']
-    # 배치 파일이 설치 폴더나 자기 폴더를 작업 폴더로 두면 그 폴더는 지워지지 않는다
-    assert body[0] == r'cd /d "C:\Windows\Temp"'
+    # 작업 폴더는 System32(관리자만 씀). 설치 폴더·자기 폴더면 지워지지 않고, 사용자가 쓸 수 있는 폴더면
+    # cmd 가 거기 심은 ping.exe·reg.exe 를 먼저 찾아 관리자 권한으로 실행한다
+    assert body[0] == r'cd /d "%SystemRoot%\System32"'
+    tools = [l for l in lines if 'PING.EXE' in l or 'reg.exe' in l]
+    assert tools and all(l.startswith('"%SystemRoot%\\System32\\') for l in tools)
     retry = lines.index(':retry')
     rmdir = lines.index(f'if exist "{INSTALL}" rmdir /s /q "{INSTALL}"')
     assert retry < rmdir < lines.index('if %tries% lss 30 goto retry')
@@ -305,7 +308,7 @@ def test_cleanup_reports_success_only_when_folder_is_gone(monkeypatch):
     un = _load_uninstaller(monkeypatch)
     lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\Public\Desktop\APEX CARE.lnk'])
     removed, failed = lines.index(':removed'), lines.index(':cleanup')
-    reg = next(i for i, l in enumerate(lines) if l.startswith('reg delete'))
+    reg = next(i for i, l in enumerate(lines) if 'reg.exe" delete' in l)
     shown = [(i, _shown_text(l)) for i, l in enumerate(lines) if '-EncodedCommand' in l]
     ok = next(i for i, t in shown if '제거되었습니다' in t)
     fail = next(i for i, t in shown if '지우지 못했습니다' in t)
@@ -360,4 +363,4 @@ def test_uninstaller_starts_cleanup_with_its_own_working_dir():
     assert 'os.startfile' not in code                          # 작업 폴더를 물려주는 실행 방식
     popen = next(n for n in ast.walk(main) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'subprocess.Popen')
     kw = {k.arg: ast.unparse(k.value) for k in popen.keywords}
-    assert kw.get('cwd') == 'temp_dir' and kw.get('shell') == 'False'
+    assert kw.get('cwd') == "_system32('')" and kw.get('shell') == 'False'

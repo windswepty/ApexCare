@@ -158,9 +158,9 @@ def main():
     # 정리 배치는 관리자만 고칠 수 있는 곳에 무작위 이름으로 만든다. 예전에는 사용자 %TEMP% 의 고정 이름
     # (uninstall_apex.bat)이라, 관리자 권한 cmd 가 줄 단위로 다시 읽는 수십 초 동안 일반 권한 프로그램이
     # 내용을 바꿔 관리자 권한으로 실행시킬 수 있었다.
-    temp_dir = _secure_temp_root()
+    temp_root = _secure_temp_root()
     try:
-        work_dir = tempfile.mkdtemp(prefix="apexcare-uninst-", dir=temp_dir)
+        work_dir = tempfile.mkdtemp(prefix="apexcare-uninst-", dir=temp_root)
         bat_path = os.path.join(work_dir, "cleanup.bat")
         _write_cleanup_bat(bat_path, install_dir)
     except (OSError, UnicodeEncodeError) as e:
@@ -173,7 +173,9 @@ def main():
     # 배치 파일의 작업 폴더를 설치 폴더 밖으로 둔다. 탐색기에서 제거 프로그램을 실행하면 작업 폴더가
     # 설치 폴더이고, os.startfile 로 띄운 cmd 가 그것을 물려받는다. 어떤 프로세스의 작업 폴더인 폴더는
     # 지울 수 없어서 샌드박스 점검에서 설치 폴더가 그대로 남았다.
-    subprocess.Popen([_system32("cmd.exe"), "/d", "/c", bat_path], shell=False, cwd=temp_dir,
+    # 작업 폴더는 System32(관리자만 씀). 사용자가 파일을 만들 수 있는 폴더를 작업 폴더로 두면, 배치가 이름만으로
+    # 부르는 도구 대신 그 폴더에 심은 같은 이름의 exe 가 관리자 권한으로 돌 수 있다.
+    subprocess.Popen([_system32("cmd.exe"), "/d", "/c", bat_path], shell=False, cwd=_system32(""),
                      creationflags=CREATE_NO_WINDOW, close_fds=True)
     sys.exit(0)
 
@@ -224,10 +226,12 @@ def _cleanup_bat_lines(bat_path, install_dir, shortcuts):
     work_dir = ntpath.dirname(bat_path)
     lines = [
         '@echo off',
-        f'cd /d "{ntpath.dirname(work_dir)}"',
+        # 작업 폴더는 System32(관리자만 씀). 도구도 모두 절대 경로로 부른다. %SystemRoot%\\Temp 처럼 사용자가 파일을
+        # 만들 수 있는 폴더를 작업 폴더로 두면, cmd 가 현재 폴더에서 먼저 찾은 ping.exe·reg.exe 가 관리자 권한으로 돌았다.
+        'cd /d "%SystemRoot%\\System32"',
         'set /a tries=0',
         ':retry',
-        'ping -n 2 127.0.0.1 > NUL',          # 창 없이 돌면 timeout 은 입력 리디렉션 오류로 바로 끝난다
+        '"%SystemRoot%\\System32\\PING.EXE" -n 2 127.0.0.1 > NUL',   # 창 없이 돌면 timeout 은 바로 끝난다
         f'if exist "{install_dir}" rmdir /s /q "{install_dir}"',
         f'if not exist "{install_dir}" goto removed',
         'set /a tries+=1',
@@ -237,7 +241,7 @@ def _cleanup_bat_lines(bat_path, install_dir, shortcuts):
     ]
     lines += [f'del /q "{p}" > NUL 2>&1' for p in shortcuts]
     lines += [
-        f'reg delete "HKLM\\{UNINSTALL_KEY}" /f /reg:64 > NUL 2>&1',
+        f'"%SystemRoot%\\System32\\reg.exe" delete "HKLM\\{UNINSTALL_KEY}" /f /reg:64 > NUL 2>&1',
         _message_line(ok_msg),
         'goto end',
         ':cleanup',

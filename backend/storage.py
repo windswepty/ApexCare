@@ -39,8 +39,9 @@ def _probe_media_type(mountpoint):
         if not letter:
             return 'unknown'
         # PowerShell 의 MSFT_PhysicalDisk 가 가장 정확하다
+        from backend.debloater import _powershell_exe
         r = subprocess.run(
-            ['powershell', '-NoProfile', '-Command',
+            [_powershell_exe(), '-NoProfile', '-Command',
              f"(Get-Partition -DriveLetter {letter} -ErrorAction SilentlyContinue | "
              f"Get-Disk | Get-PhysicalDisk).MediaType"],
             capture_output=True, text=True, errors="replace", timeout=12,

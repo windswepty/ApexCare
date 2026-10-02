@@ -77,3 +77,42 @@ def test_single_instance_check_failure_does_not_block_start(monkeypatch):
     # 확인하지 못했다고 앱을 못 켜게 하지 않는다(fakewin 이 ctypes 를 막아 둔 상태가 그 경우다)
     from backend import single_instance
     assert single_instance.acquire('Local\\apex-test') is True
+
+
+def test_kill_refuses_a_process_that_took_over_the_listed_number(procs):
+    # 목록을 본 뒤 그 프로세스가 끝나고 다른 프로그램이 같은 PID 를 받으면, 예전에는 그 프로그램을 끝냈다
+    from backend import system_monitor
+    procs.add(4321, 'notepad.exe', created=1000.0)
+    procs.remove(4321)
+    procs.add(4321, 'WINWORD.EXE', created=2000.0)
+
+    r = system_monitor.kill_process(4321, created=1000.0)
+    assert r['success'] is False and '같은 번호' in r['message']
+    assert procs.killed == []
+
+    r = system_monitor.kill_process(4321, created=2000.0)
+    assert r['success'] and procs.killed == [(4321, 'WINWORD.EXE')]
+
+
+def test_uninstall_command_without_a_folder_runs_only_from_the_windows_folder(monkeypatch, tmp_path):
+    # 'MsiExec.exe /X{…}' 처럼 이름만 적힌 명령은 CreateProcess 가 현재 폴더부터 찾는다(관리자 권한 실행)
+    import types
+    from backend import uninstaller
+    started = []
+    monkeypatch.setattr(uninstaller.subprocess, 'Popen',
+                        lambda args, shell=None: started.append((list(args), shell)) or types.SimpleNamespace(pid=7))
+    monkeypatch.setattr(uninstaller, '_split_command', lambda s: s.split())   # CommandLineToArgvW 대신
+    system32 = tmp_path / 'Windows' / 'System32'
+    system32.mkdir(parents=True)
+    (system32 / 'MsiExec.exe').write_bytes(b'')
+    (system32 / 'rundll32.exe').write_bytes(b'')
+    monkeypatch.setenv('SystemRoot', str(tmp_path / 'Windows'))
+
+    assert uninstaller.run_uninstall('MsiExec.exe /I{1234}')['success']
+    assert started.pop() == ([str(system32 / 'MsiExec.exe'), '/x{1234}'], False)
+    assert uninstaller.run_uninstall('rundll32 app.dll,Uninstall')['success']
+    assert started.pop() == ([str(system32 / 'rundll32.exe'), 'app.dll,Uninstall'], False)
+
+    # Windows 폴더에 없는 이름은 실행하지 않는다
+    r = uninstaller.run_uninstall('setup.exe /uninstall')
+    assert r['success'] is False and '설정 → 앱' in r['message'] and started == []
