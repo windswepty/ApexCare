@@ -28,6 +28,7 @@ APEX CARE — 성능 모드 (표준 / 게이밍 / 에코).
 
 import ctypes
 import logging
+import threading
 
 from backend import system_state as ss
 
@@ -132,21 +133,34 @@ def plan_name(guid, plans=None):
 
 
 def _plan_fallback(wanted):
-    """원하는 플랜이 없으면 대안을 고른다.
+    """원하는 플랜이 없으면 대안을 고른다. (플랜 GUID 또는 None, 안내 문구 또는 None)
 
     Modern Standby 노트북에는 고성능·절전 플랜이 아예 없다. 그런 기기에서
     플랜 전환에 실패했다고 모드 적용 전체를 포기하면 안 된다. 세부 전원값만으로도
     상당 부분 효과가 있으므로 균형 플랜 위에 적용하고 그 사실을 알린다.
+    균형 조정도 없으면(지웠다가 복제해 GUID 가 바뀐 경우 등) 지금 쓰는 플랜 위에 적용한다.
+    예전에는 목록의 첫 플랜(사용자가 만든 플랜일 수 있다)으로 바꾸면서 '플랜을 찾지 못했습니다' 라고 알렸다.
     """
     plans = ss.available_plans()
     if wanted in plans:
         return wanted, None
+    want = ss.KNOWN_PLANS.get(wanted, wanted)
     if ss.PLAN_BALANCED in plans:
         return ss.PLAN_BALANCED, (
-            f"이 PC 에는 '{ss.KNOWN_PLANS.get(wanted, wanted)}' 전원 플랜이 없어 "
-            f"'균형 조정' 위에 세부 설정만 적용했습니다.")
-    return (next(iter(plans)) if plans else None,
-            '사용 가능한 전원 플랜을 찾지 못했습니다.')
+            f"이 PC 에는 '{want}' 전원 플랜이 없어 '균형 조정' 위에 세부 설정만 적용했습니다.")
+    active = ss.active_plan_guid()
+    if active and active in plans:
+        return active, (f"이 PC 에는 '{want}' 와 '균형 조정' 전원 플랜이 없어 지금 쓰는 "
+                        f"'{plan_name(active, plans)}' 플랜 위에 세부 설정만 적용했습니다.")
+    return None, '사용 가능한 전원 플랜을 찾지 못했습니다.'
+
+
+# 모드 전환은 한 번에 하나만. 앱 시작 때 저장된 모드 재적용과 게임 부스트의 게이밍 전환이 겹치면
+# 한쪽의 되돌리기가 다른 쪽이 막 남긴 원래 값 기록을 지웠다. 잠금 순서: 부스터 → 이 잠금 → 저널(system_state).
+_mode_lock = threading.RLock()
+
+# 재부팅해야 완전히 반영되는 레지스트리 항목(MMCSS·네트워크 스택이 시작할 때 읽는다)
+_REBOOT_NOTE = '다음 재부팅부터 완전히 반영됩니다'
 
 
 def apply_mode(mode, user_set=True, persist=True):
@@ -164,40 +178,71 @@ def apply_mode(mode, user_set=True, persist=True):
         return {'success': False, 'error': 'UAC_REQUIRED',
                 'message': '성능 모드를 바꾸려면 관리자 권한으로 실행해야 합니다.'}
 
+    with _mode_lock:
+        return _apply_mode_locked(mode, user_set, persist)
+
+
+def _save_mode(mode, user_set, notes):
+    try:
+        from backend import config_manager
+        saved_ok = config_manager.set_optimization_mode(mode, user_set=user_set)
+    except Exception as e:
+        log.warning(f'모드 저장 실패: {e}')
+        saved_ok = False
+    if not saved_ok:
+        # 시스템 설정은 바뀌었지만 '어느 모드인지' 기록을 못 했다. 앱을 다시 켜면 저장돼 있던 이전 모드가
+        # 다시 적용될 수 있다(init_optimization_mode).
+        notes.append('설정 파일에 고른 모드를 저장하지 못했습니다. 앱을 다시 켜면 이전 모드가 다시 적용될 수 있습니다.')
+    return saved_ok
+
+
+def _apply_mode_locked(mode, user_set, persist):
     spec = MODES[mode]
     steps = []
     notes = []
 
     # ── 1단계: 이전 모드가 남긴 변경을 먼저 되돌린다 ──────────────
     # 이게 빠지면 모드가 겹쳐 쌓인다. 기존 구현의 핵심 결함이었다.
+    # 이 단계는 '적용한 항목' 개수에 넣지 않는다(revert). 되돌리기 실패는 성공을 막는다.
     reverted = ss.restore_group(MODE_GROUP)
     steps.append({
         'name': '이전 모드 설정 되돌리기',
         'ok': reverted['ok'],
+        'revert': True,
         'detail': f"{reverted['restored']}개 항목 복구"
                   + (f", {len(reverted['failed'])}개 실패 — {reverted['failed'][0].get('reason', '')}"
                      if reverted['failed'] else ''),
         'failures': reverted['failed'],
     })
     if reverted['failed']:
-        notes.append('일부 이전 설정을 되돌리지 못했습니다. 관리자 권한을 확인하세요.')
+        notes.append("일부 이전 설정을 되돌리지 못했습니다. '변경 내역 · 되돌리기' 에서 남은 항목을 확인하세요.")
 
     # ── 2단계: 전원 플랜 ──────────────────────────────────────────
     target_plan = None
+    plan_ok = True
     if spec['plan']:
         target_plan, fallback_note = _plan_fallback(spec['plan'])
         if fallback_note:
             notes.append(fallback_note)
-
         if target_plan:
             r = ss.set_active_plan(target_plan, group=MODE_GROUP, why=f'{spec["label"]} 모드')
-            steps.append({
-                'name': f"전원 플랜 → {plan_name(target_plan)}",
-                'ok': r['ok'], 'detail': '' if r['ok'] else r.get('reason', ''),
-            })
+            plan_ok = bool(r['ok'])
+            steps.append({'name': f"전원 플랜 → {plan_name(target_plan)}",
+                          'ok': r['ok'], 'detail': '' if r['ok'] else r.get('reason', '')})
         else:
-            steps.append({'name': '전원 플랜 전환', 'ok': False,
-                          'detail': '사용 가능한 플랜 없음'})
+            plan_ok = False
+            steps.append({'name': '전원 플랜 전환', 'ok': False, 'detail': '사용 가능한 플랜 없음'})
+
+    if spec['plan'] and not plan_ok:
+        # 플랜을 못 바꿨으면 세부값·레지스트리도 쓰지 않는다. 예전에는 계속 써서, 비활성 플랜에 값이 들어가고
+        # 시스템 레지스트리는 바뀐 채 '적용 실패' 로 보였다. 이전 모드는 이미 되돌렸으므로 지금은 표준 상태다.
+        if persist:
+            _save_mode('standard', user_set, notes)
+        reason = next((s['detail'] for s in steps if not s.get('revert') and not s['ok']), '')
+        msg = (f"{spec['label']} 모드를 적용하지 못했습니다(전원 플랜을 바꾸지 못함{': ' + reason if reason else ''}). "
+               "이전 모드 설정은 되돌렸으므로 지금은 표준 상태입니다.")
+        log.info(f"[모드] {mode}: 플랜 전환 실패 — 표준 상태로 둠")
+        return _result(mode, spec, steps, notes, msg, success=False, partial=False, fell_back='standard')
 
     # ── 3단계: 전원 세부값 (AC/DC 모두) ──────────────────────────
     for sub, setting, value, label, names in spec['power']:
@@ -216,38 +261,28 @@ def apply_mode(mode, user_set=True, persist=True):
     for hive, path, name, value, label in spec['registry']:
         r = ss.set_registry(hive, path, name, value, group=MODE_GROUP, why=label)
         steps.append({'name': label, 'ok': r['ok'],
-                      'detail': '' if r['ok'] else r.get('reason', '')})
+                      'detail': _REBOOT_NOTE if r['ok'] else r.get('reason', '')})
+    if spec['registry']:
+        notes.append(f"MMCSS·네트워크 스로틀링 항목은 {_REBOOT_NOTE}.")
 
     # ── 결과 집계 ────────────────────────────────────────────────
-    applied = [s for s in steps if s['ok'] and not s.get('skipped')]
-    skipped = [s for s in steps if s.get('skipped')]
-    failed = [s for s in steps if not s['ok']]
+    work = [s for s in steps if not s.get('revert')]
+    applied = [s for s in work if s['ok'] and not s.get('skipped')]
+    skipped = [s for s in work if s.get('skipped')]
+    failed = [s for s in work if not s['ok']]
+    revert_failed = bool(reverted['failed'])
 
-    # 전원 플랜조차 못 바꿨으면 모드가 적용됐다고 말할 수 없다.
-    # 표준 모드는 플랜을 바꾸지 않으므로 '되돌리기' 가 성공했는지가 기준이다.
     if spec['plan']:
-        plan_step = next((s for s in steps if s['name'].startswith('전원 플랜')), None)
-        plan_ok = bool(plan_step and plan_step['ok'])
+        success = not failed and not revert_failed
+        partial = bool(failed) or revert_failed
     else:
-        plan_ok = reverted['ok']
-    success = plan_ok and not failed
-    partial = plan_ok and bool(failed)
-    if not spec['plan']:
         # 표준 = 되돌리기. 일부만 되돌렸어도 사용자는 표준을 골랐으므로 표준으로 기록하고,
-        # 남은 설정은 get_mode() 가 'leftover' 로 알린다. 예전에는 하나만 실패해도 저장된 모드가
-        # 게이밍으로 남아 '게이밍인데 전원 플랜이 다르다' 는 엉뚱한 안내가 떴다.
-        partial = bool(reverted['failed']) and reverted['restored'] > 0
+        # 남은 설정은 get_mode() 가 'leftover' 로 알린다.
+        success = not revert_failed
+        partial = revert_failed and reverted['restored'] > 0
 
-    if persist and (success or plan_ok or not spec['plan']):
-        try:
-            from backend import config_manager
-            saved_ok = config_manager.set_optimization_mode(mode, user_set=user_set)
-        except Exception as e:
-            log.warning(f'모드 저장 실패: {e}')
-            saved_ok = False
-        if not saved_ok:
-            # 설정은 바뀌었지만 '어느 모드인지' 기록을 못 했다. 다음 실행 때 화면이 다른 모드로 보일 수 있다.
-            notes.append('설정 파일에 고른 모드를 저장하지 못했습니다. 다음 실행 때 다른 모드로 표시될 수 있습니다.')
+    if persist:
+        _save_mode(mode, user_set, notes)
 
     if not spec['plan']:
         n_ok, n_fail = reverted['restored'], len(reverted['failed'])
@@ -258,29 +293,44 @@ def apply_mode(mode, user_set=True, persist=True):
             msg = f"표준 모드로 돌아왔습니다. 성능 모드가 바꾼 설정 {n_ok}개를 원래대로 되돌렸습니다."
         else:
             msg = "표준 모드입니다. 되돌릴 성능 모드 설정이 없었습니다."
-    elif failed:
-        msg = (f"{spec['label']} 모드를 적용했지만 {len(failed)}개 항목이 실패했습니다."
-               if plan_ok else f"{spec['label']} 모드 적용에 실패했습니다.")
+    elif failed or revert_failed:
+        n = len(failed) + len(reverted['failed'])
+        msg = f"{spec['label']} 모드를 적용했지만 {n}개 항목이 실패했습니다."
     else:
         msg = f"{spec['label']} 모드를 적용했습니다. ({len(applied)}개 항목"
         msg += f", 이 PC 에 없는 {len(skipped)}개 건너뜀)" if skipped else ")"
 
     log.info(f"[모드] {mode}: 성공 {len(applied)} 실패 {len(failed)}")
+    return _result(mode, spec, steps, notes, msg, success=success, partial=partial,
+                   applied=len(applied), skipped=len(skipped),
+                   failed=len(failed) + len(reverted['failed']),
+                   restored=reverted['restored'])
 
-    return {
+
+def _result(mode, spec, steps, notes, msg, success, partial, applied=0, skipped=0, failed=None,
+            restored=None, fell_back=None):
+    if failed is None:
+        failed = sum(1 for s in steps if not s['ok'])
+    active = ss.active_plan_guid()
+    out = {
         'success': success,
         'partial': partial,
         'mode': mode,
         'label': spec['label'],
         'message': msg,
         'steps': steps,
-        'appliedCount': len(applied),
-        'skippedCount': len(skipped),
-        'failedCount': len(failed),
+        'appliedCount': applied,
+        'skippedCount': skipped,
+        'failedCount': failed,
         'notes': notes,
-        'activePlan': ss.active_plan_guid(),
-        'activePlanName': plan_name(ss.active_plan_guid()),
+        'activePlan': active,
+        'activePlanName': plan_name(active),
     }
+    if restored is not None:
+        out['restoredCount'] = restored
+    if fell_back:
+        out['fellBackTo'] = fell_back
+    return out
 
 
 def get_mode():
@@ -358,7 +408,11 @@ def revert_everything():
     if not is_admin():
         return {'success': False, 'error': 'UAC_REQUIRED',
                 'message': '되돌리려면 관리자 권한이 필요합니다.'}
+    with _mode_lock:
+        return _revert_everything_locked()
 
+
+def _revert_everything_locked():
     parts = []
     # 저널이 먼저다. 구버전 백업은 저널보다 오래된 원본이므로 뒤에서 덮어쓰는 게 맞다.
     r = ss.restore_all()
@@ -385,15 +439,20 @@ def revert_everything():
             parts.append({'name': '구버전 서비스 시작 설정', 'ok': False, 'detail': str(e)})
 
     # 성능 모드 기록을 '표준' 으로. 저널을 비웠으니 실제 상태도 모드가 없는 상태다.
+    # 저장하지 못하면 앱을 다시 켤 때 이전 모드(게이밍·에코)가 다시 적용되므로 실패로 알린다.
     try:
         from backend import config_manager
-        config_manager.set_optimization_mode('standard', user_set=False)
+        saved = config_manager.set_optimization_mode('standard', user_set=False)
     except Exception:
-        pass
+        saved = False
+    if not saved:
+        parts.append({'name': '성능 모드 기록', 'ok': False,
+                      'detail': "설정 파일에 '표준' 을 저장하지 못했습니다. 앱을 다시 켜면 이전 모드가 다시 적용될 수 있습니다"})
 
     failed_parts = [p for p in parts if not p['ok']]
     ok = not failed_parts
-    total = r['restored']
+    # 구버전 백업에서 되돌린 영역도 센다. 예전에는 그것만 있으면 '0개 설정을 되돌렸습니다' 로 나왔다.
+    total = r['restored'] + sum(1 for p in parts[1:] if p['ok'] and p['name'].startswith('구버전'))
     return {
         'success': ok,
         'message': (f"{total}개 설정을 원래대로 되돌렸습니다." if ok else

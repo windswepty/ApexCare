@@ -31,7 +31,11 @@ export default function Debloater({ addToast }) {
     if (!a || typeof a.getDebloatInstallState !== 'function') return;
     try {
       const r = await a.getDebloatInstallState();
-      setInstallState(r?.items || {});
+      const state = r?.items || {};
+      setInstallState(state);
+      // 이제 설치돼 있지 않은 앱(방금 제거한 앱 등)은 선택에서 뺀다. 예전에는 일부 실패 뒤 그 앱이 선택된 채
+      // 비활성화돼 해제할 수 없었고, 다음 확인 창이 이미 지운 앱을 '제거합니다' 로 다시 나열했다.
+      setSelectedIds(prev => prev.filter(id => state[id] !== 'not_installed'));
     } catch (e) {
       console.error('Error fetching install state:', e);
       setInstallState({});
@@ -121,7 +125,8 @@ export default function Debloater({ addToast }) {
     if (selectedIds.length === 0) return;
 
     // 되돌릴 수 없는 항목(앱 제거)과 되돌릴 수 있는 항목(정책)을 나눠서 보여준다.
-    const chosen = items.filter(x => selectedIds.includes(x.id));
+    const chosen = items.filter(x => selectedIds.includes(x.id) && selectable(x));
+    if (chosen.length === 0) return;
     const irreversible = chosen.filter(x => !x.reversible);
     const reversible = chosen.filter(x => x.reversible);
     let msg = '';
@@ -142,7 +147,7 @@ export default function Debloater({ addToast }) {
     
     try {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.startDebloater === 'function') {
-        const res = await window.pywebview.api.startDebloater(selectedIds);
+        const res = await window.pywebview.api.startDebloater(chosen.map(x => x.id));   // 확인 창에 보인 것만
         if (!res?.success) {
           if (addToast) addToast(res?.message || '시작하지 못했습니다.', 'error');
           setIsScanning(false);

@@ -110,7 +110,8 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
       addToast?.('백엔드가 준비되지 않았습니다.', 'error');
       return;
     }
-    if (applying) return;
+    // 측정 중에 모드를 바꾸면 그 측정 결과가 어느 모드인지 알 수 없다(키보드로 눌러도 막는다)
+    if (applying || benching) return;
 
     setApplying(modeId);
     setResult(null);
@@ -317,7 +318,8 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyMode(mode.id); } }}
               className={`relative flex-1 glass-panel p-6 cursor-pointer transition-all duration-300 border-2 ${
                 isActive ? `${accent.ring} shadow-xl` : 'border-transparent hover:border-black/10 dark:hover:border-slate-700'
-              } ${applying && !isBusy ? 'opacity-50 pointer-events-none' : ''}`}
+              } ${(applying && !isBusy) || benching ? 'opacity-50 pointer-events-none' : ''}`}
+              aria-disabled={!!applying || benching}
             >
               {isActive && (
                 <div className="absolute top-4 right-4 flex items-center gap-1 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-gray-50 dark:bg-slate-800 border border-black/10 dark:border-slate-700">
@@ -376,7 +378,10 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                 <p className="font-bold text-black dark:text-white text-sm truncate">{result.message}</p>
                 {typeof result.appliedCount === 'number' && (
                   <p className="text-xs text-gray-500 mt-0.5">
-                    적용 {result.appliedCount}건
+                    {/* 표준은 새로 적용하는 것이 없다. 되돌린 개수를 보여 준다(예전에는 '적용 1건' 으로 보였다) */}
+                    {result.mode === 'standard' && typeof result.restoredCount === 'number'
+                      ? <>되돌림 {result.restoredCount}건</>
+                      : <>적용 {result.appliedCount}건</>}
                     {result.skippedCount > 0 && <span> · 이 PC 에 없어 건너뜀 {result.skippedCount}건</span>}
                     {result.failedCount > 0 && <span className="text-amber-500"> · 실패 {result.failedCount}건</span>}
                   </p>
@@ -420,7 +425,8 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
         <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
           모드를 바꾸면 <strong className="text-black dark:text-white">이전 모드가 바꾼 설정을 먼저 되돌린</strong> 뒤
           새 설정을 적용합니다. 바꾸기 전 원래 값을 기록해 두므로 <strong className="text-black dark:text-white">전부 원래대로</strong> 버튼으로
-          언제든 되돌릴 수 있습니다. 재부팅이 필요한 변경이나 GPU 드라이버 설정은 건드리지 않습니다.
+          언제든 되돌릴 수 있습니다. GPU 드라이버 설정은 건드리지 않습니다. 게이밍 모드의 MMCSS·네트워크 스로틀링
+          항목은 다음 재부팅부터 완전히 반영되고, 되돌릴 때도 마찬가지입니다.
         </div>
       </div>
     </div>

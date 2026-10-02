@@ -6,6 +6,8 @@ import {
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 const fmtMB = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Number(mb || 0).toFixed(1)} MB`);
+// 백엔드가 크기를 읽지 못한 항목(null)은 0 MB 가 아니라 '크기 모름'
+const sizeText = (mb) => (mb == null ? '크기 모름' : fmtMB(mb));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 디스크 최적화 상태를 사람이 읽는 말로. 예전에는 'running'·'error' 같은 내부 값이 그대로 보였다.
@@ -19,6 +21,9 @@ const SECTIONS = [
 
 export default function StorageCenter({ addToast }) {
   const [tab, setTab] = useState('junk');
+  // 한 번 연 하위 화면은 숨기기만 하고 없애지 않는다. 예전에는 탭을 옮기면 화면이 사라져, 진행 중인 검색·정리 결과가
+  // 버려지고 돌아오면 '검색 버튼을 눌러 시작하세요' 가 떠 같은 검색을 두 번 돌리게 됐다.
+  const [opened, setOpened] = useState(() => new Set(['junk']));
   const [overview, setOverview] = useState(null);
 
   const loadOverview = useCallback(async () => {
@@ -87,7 +92,8 @@ export default function StorageCenter({ addToast }) {
         {SECTIONS.map((s) => (
           <button
             key={s.id}
-            onClick={() => setTab(s.id)}
+            onClick={() => { setTab(s.id); setOpened((prev) => new Set(prev).add(s.id)); }}
+            aria-pressed={tab === s.id}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
               tab === s.id
                 ? 'bg-cyan-500 text-black'
@@ -99,9 +105,9 @@ export default function StorageCenter({ addToast }) {
         ))}
       </div>
 
-      {tab === 'junk' && <JunkSection addToast={addToast} onDone={loadOverview} />}
-      {tab === 'files' && <FileSection addToast={addToast} onDone={loadOverview} />}
-      {tab === 'disk' && <DiskSection addToast={addToast} overview={overview} />}
+      {opened.has('junk') && <div hidden={tab !== 'junk'}><JunkSection addToast={addToast} onDone={loadOverview} /></div>}
+      {opened.has('files') && <div hidden={tab !== 'files'}><FileSection addToast={addToast} onDone={loadOverview} /></div>}
+      {opened.has('disk') && <div hidden={tab !== 'disk'}><DiskSection addToast={addToast} overview={overview} /></div>}
     </div>
   );
 }
@@ -161,6 +167,8 @@ function JunkSection({ addToast, onDone }) {
 
   const chosen = items.filter((i) => selected.has(i.id));
   const totalMB = chosen.reduce((s, i) => s + (i.sizeMB || 0), 0);
+  // 크기를 모르는 항목이 있으면 합계는 '이상' 이다
+  const totalText = `${fmtMB(totalMB)}${chosen.some((i) => i.sizeMB == null) ? ' 이상' : ''}`;
   const hasIrreversible = chosen.some((i) => i.irreversible);
 
   const clean = async () => {
@@ -168,12 +176,12 @@ function JunkSection({ addToast, onDone }) {
     if (!a?.cleanJunk || !chosen.length) return;
 
     // 무엇이 지워지는지 먼저 보여준다. 예전에는 확인 절차가 전혀 없었다.
-    const lines = chosen.map((i) => `  · ${i.name} (${fmtMB(i.sizeMB)})`).join('\n');
+    const lines = chosen.map((i) => `  · ${i.name} (${sizeText(i.sizeMB)})`).join('\n');
     const warn = hasIrreversible
       ? '\n\n★ 휴지통 비우기가 포함되어 있습니다. 이 항목은 되돌릴 수 없습니다.'
       : '';
     if (!window.confirm(
-      `다음 항목을 정리합니다 (약 ${fmtMB(totalMB)}):\n\n${lines}\n\n`
+      `다음 항목을 정리합니다 (약 ${totalText}):\n\n${lines}\n\n`
       + `임시 파일·캐시는 휴지통을 거치지 않고 바로 지워집니다. 사용 중인 파일은 건너뜁니다.${warn}\n\n계속할까요?`
     )) return;
 
@@ -261,7 +269,7 @@ function JunkSection({ addToast, onDone }) {
                   <p className="text-xs text-gray-500 mt-0.5">{it.description}</p>
                 </div>
                 <span className="font-mono text-sm font-bold text-black dark:text-white shrink-0">
-                  {fmtMB(it.sizeMB)}
+                  {sizeText(it.sizeMB)}
                 </span>
               </div>
             </button>
@@ -291,7 +299,7 @@ function JunkSection({ addToast, onDone }) {
           className="w-full mt-4 py-3.5 rounded-xl font-bold bg-cyan-500 text-black disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {cleaning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-          {chosen.length ? `${chosen.length}개 항목 정리 (약 ${fmtMB(totalMB)})` : '정리할 항목을 선택하세요'}
+          {chosen.length ? `${chosen.length}개 항목 정리 (약 ${totalText})` : '정리할 항목을 선택하세요'}
         </button>
       </div>
 
@@ -383,7 +391,7 @@ function FileSection({ addToast, onDone }) {
       ? `\n\n★ 중복 묶음 ${allCopiesChosen.length}개는 모든 사본을 골랐습니다. 이 PC 에 한 부도 남지 않습니다.`
       : '';
     if (!window.confirm(
-      `${selected.size}개 파일을 휴지통으로 보냅니다.\n\n휴지통에서 복구할 수 있습니다.${warnAll}\n계속할까요?`
+      `${selected.size}개 파일을 휴지통으로 보냅니다.\n\n휴지통에서 복구할 수 있습니다. 휴지통에 들어가지 않는 파일(휴지통보다 큰 파일 등)은 지우지 않고 알려 드립니다.${warnAll}\n계속할까요?`
     )) return;
     setBusy(true);
     setFailures([]);
@@ -429,7 +437,8 @@ function FileSection({ addToast, onDone }) {
         {mode === 'large' && (
           <select value={minMB} onChange={(e) => setMinMB(Number(e.target.value))} disabled={busy}
             className="px-3 py-2 rounded-lg text-sm bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-700">
-            {[100, 300, 500, 1000, 2000].map((v) => <option key={v} value={v}>{v >= 1000 ? `${v / 1000}GB` : `${v}MB`} 이상</option>)}
+            {/* 크기 표시(fmtMB)와 같은 1 GB = 1024 MB 기준. 예전 값 1000·2000 은 '2GB 이상' 목록에 1.96 GB 가 섞였다 */}
+            {[100, 300, 500, 1024, 2048].map((v) => <option key={v} value={v}>{v >= 1024 ? `${v / 1024}GB` : `${v}MB`} 이상</option>)}
           </select>
         )}
         <button onClick={run} disabled={busy}
@@ -441,8 +450,10 @@ function FileSection({ addToast, onDone }) {
       <div className="flex gap-2 text-xs">
         <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
         <p className="text-gray-500 dark:text-gray-400 leading-relaxed">
-          시스템 폴더와 게임 설치 폴더는 검색에서 제외됩니다. 삭제는 휴지통을 거치므로
-          잘못 골라도 복구할 수 있습니다. <strong className="text-black dark:text-white">선택은 직접 하세요</strong> —
+          시스템 폴더와 알려진 게임 런처(Steam·Epic·Xbox·EA·Riot·넥슨 등)의 설치 폴더는 검색에서 제외됩니다.
+          다른 이름의 폴더에 직접 설치한 게임은 걸러지지 않을 수 있으니 경로를 확인하세요.
+          삭제는 휴지통을 거치므로 잘못 골라도 복구할 수 있고, 휴지통에 들어가지 않는 파일(휴지통보다 큰 파일 등)은 지우지 않습니다.
+          USB 메모리·네트워크 드라이브는 검색하지 않습니다. <strong className="text-black dark:text-white">선택은 직접 하세요</strong> —
           자동으로 체크되는 항목은 없습니다.
           {mode === 'dup' && ' 중복 파일은 10MB 가 넘는 파일만 내용을 비교해 같은 것끼리 묶습니다.'}
         </p>

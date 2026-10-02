@@ -308,3 +308,55 @@ def test_powershell_runs_without_shell_and_names_never_in_command_line(monkeypat
     assert kw.get('shell') is False and '-EncodedCommand' in args
     assert not any('Microsoft.BingNews' in a for a in args)          # 인자는 환경 변수로만
     assert 'Microsoft.BingNews' in kw['env'][debloater._ARG_ENV]
+
+
+# ── 감사에서 나온 것: 확인 조회 오류·시간 초과·다른 세션의 관리자 ─────────
+
+def _recorded_names():
+    return {e.get('name') for e in debloater.get_removed_apps()}
+
+
+def test_recheck_error_is_unknown_not_removed(appx):
+    appx.add('Microsoft.ZuneVideo')
+    appx.remove_ignored.add('Microsoft.ZuneVideo')               # 실제로는 남아 있다
+    real = appx.__call__
+
+    def flaky(body, arg, timeout):
+        if body is debloater._PS_QUERY and appx.ran('remove'):
+            # 제거 뒤 다시 확인할 때 Get-AppxPackage 가 이름별 예외를 낸다
+            return True, [{'query': n, 'error': '배포 서비스 일시 오류'} for n in arg['names']], None
+        return real(body, arg, timeout)
+    debloater._run_ps_json = flaky
+
+    status, detail = debloater._apply_appx_item(ITEM['zune'], 'kim')
+
+    assert status == 'unknown' and '확인하지 못했습니다' in detail       # 예전에는 '제거함'(성공)
+    assert 'Microsoft.ZuneVideo' in _recorded_names()               # 되살릴 수 있게 기록은 남긴다
+
+
+def test_timeout_keeps_the_record_because_removal_may_still_finish(appx):
+    appx.add('Microsoft.ZuneVideo')
+    real = appx.__call__
+
+    def slow(body, arg, timeout):
+        if body is debloater._PS_REMOVE:
+            raise subprocess.TimeoutExpired('powershell', timeout)    # 배포 서비스는 계속 지우는 중
+        return real(body, arg, timeout)
+    debloater._run_ps_json = slow
+
+    status, detail = debloater._apply_appx_item(ITEM['zune'], 'kim')
+
+    assert status == 'unknown' and '진행 중' in detail
+    assert 'Microsoft.ZuneVideo' in _recorded_names()               # 예전에는 기록을 지워 되살릴 수 없었다
+
+
+def test_admin_logged_in_another_session_does_not_pass_the_account_check(procs, monkeypatch):
+    # 관리자 'mom' 이 사용자 전환으로 로그인된 채, 표준 계정 'kid' 가 mom 암호로 승격해 실행했다
+    procs.add(os.getpid(), 'python.exe', username='PC\\mom')
+    procs.add(5001, 'explorer.exe', username='PC\\mom')      # 세션 1 (전환된 관리자)
+    procs.add(5002, 'explorer.exe', username='PC\\kid')      # 세션 2 (화면 앞의 사용자)
+    sessions = {os.getpid(): 2, 5001: 1, 5002: 2}
+    monkeypatch.setattr(debloater, '_session_of', lambda pid: sessions[pid])
+
+    assert debloater._desktop_accounts() == {'kid'}
+    assert debloater._account_problem('mom') is not None            # 막는다(예전에는 mom 도 바탕 화면 계정으로 잡혔다)

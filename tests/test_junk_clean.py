@@ -185,3 +185,51 @@ def test_skipped_files_log_goes_to_appdata_not_desktop(tree, monkeypatch):
     home = os.path.expanduser('~')
     assert not os.path.exists(os.path.join(home, 'Desktop')), '바탕화면에 파일을 만들었습니다'
     assert locked.exists()
+
+
+def test_file_swapped_after_check_is_not_deleted(tree):
+    # 경로로 확인한 뒤 중간 폴더가 정션으로 바뀌면, 연 핸들의 실제 위치는 루트 밖이다. 그 파일은 지우지 않는다.
+    victim = tree['root'] / 'sub' / 'b.log'
+    fakewin.HANDLE_DELETE.swap[str(victim)] = str(tree['docs'] / 'important.log')
+
+    st = _clean()
+
+    assert victim.exists()                                   # 지우지 않았다
+    assert str(victim) not in fakewin.HANDLE_DELETE.deleted
+    assert not (tree['root'] / 'a.tmp').exists()              # 다른 정크는 정리됐다
+    _assert_user_files_intact(tree)
+    assert st['status'] == 'success'
+
+
+def test_read_only_junk_is_deleted_through_the_same_handle(tree):
+    ro = tree['root'] / 'readonly.tmp'
+    _write(str(ro))
+    os.chmod(str(ro), 0o444)
+    _clean()
+    assert not ro.exists()
+
+
+@pytest.mark.parametrize('where', ['drive', 'home', 'documents'])
+def test_temp_pointing_at_user_or_drive_root_is_not_cleaned(tree, monkeypatch, where):
+    # 사용자가 %TEMP% 를 드라이브 루트나 사용자 폴더로 바꿔 둔 경우. 그 아래 .log·확장자 없는 파일이 지워졌다.
+    home = tree['root'].parent / 'home'
+    (home / 'Documents').mkdir(parents=True)
+    _write(str(home / 'Documents' / 'thesis.bak'))
+    _write(str(home / 'Documents' / 'notes'))
+    monkeypatch.setenv('USERPROFILE', str(home))
+    target = {'drive': os.path.splitdrive(str(home))[0] + os.sep, 'home': str(home),
+              'documents': str(home / 'Documents')}[where]
+    assert optimizer.unsafe_junk_root(target)
+    real_expand = os.path.expandvars
+    monkeypatch.setattr(os.path, 'expandvars', lambda s: target if s == '%TEMP%' else real_expand(s))
+    if where == 'drive':
+        # 진짜 드라이브 루트를 돌게 하지 않는다. 판정만 확인한다(_walk_junk_tree 가 들어가지 않음).
+        visited, it = optimizer._walk_junk_tree(target)
+        assert list(it) == [] and visited == []
+        return
+
+    optimizer.clean_junk_background([1], cancel_event=None)
+    st = optimizer.get_junk_clean_status()
+
+    assert (home / 'Documents' / 'thesis.bak').exists() and (home / 'Documents' / 'notes').exists()
+    assert any('안전하지 않아' in w for w in st['warnings'])

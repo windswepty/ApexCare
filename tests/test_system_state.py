@@ -13,6 +13,34 @@ def _journal():
     return ss.pending_changes()
 
 
+# ── 저널을 읽지 못할 때 ─────────────────────────────────────
+
+def test_locked_journal_is_not_treated_as_corrupt_and_nothing_changes(monkeypatch):
+    import os
+    assert ss.set_registry('HKLM', KEY, 'First', 1, group='t')['ok']
+    with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
+        before = f.read()
+    real_open = open
+
+    def locked_open(path, mode='r', *a, **kw):
+        if os.path.normcase(str(path)) == os.path.normcase(ss.JOURNAL_PATH) and 'r' in mode:
+            raise PermissionError(32, '다른 프로그램이 사용 중 (백신 검사)')
+        return real_open(path, mode, *a, **kw)
+    monkeypatch.setattr('builtins.open', locked_open)
+    monkeypatch.setattr(ss, '_RETRY_WAIT', 0)
+
+    r = ss.set_registry('HKLM', KEY, 'Second', 2, group='t')
+    restored = ss.restore_group('t')
+    monkeypatch.undo()
+
+    # 예전에는 '깨짐' 으로 보고 옆으로 치운 뒤 새 기록만 남겨 First 의 원래 값 기록을 잃었다
+    assert r['ok'] is False and REGISTRY.get('HKLM', KEY, 'Second') is None
+    assert restored['ok'] is False and REGISTRY.value('HKLM', KEY, 'First') == 1
+    with open(ss.JOURNAL_PATH, encoding='utf-8') as f:
+        assert f.read() == before
+    assert not [n for n in os.listdir(ss.APPDATA_DIR) if '.corrupt' in n or n.endswith('.tmp')]
+
+
 # ── 레지스트리 ────────────────────────────────────────────
 
 def test_value_that_did_not_exist_is_deleted_on_restore():
@@ -241,3 +269,16 @@ def test_created_key_is_removed_only_after_all_its_values_are_restored():
     ss.set_registry('HKLM', NEW, 'B', 1, group='t')                   # 이 기록 때는 키가 이미 있었다
     assert ss.restore_group('t')['ok']
     assert not REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')
+
+
+def test_created_key_goes_away_when_values_are_restored_one_group_at_a_time():
+    # 시작 프로그램처럼 항목마다 그룹이 다르고 하나씩 되돌리는 경우. 키를 만든 A 를 먼저 되돌리면 B 값 때문에
+    # 키를 못 지우고, 예전에는 '이 앱이 만든 키' 라는 기록이 A 와 함께 사라져 B 뒤에 빈 키가 남았다.
+    REGISTRY.seed_key('HKLM', 'SOFTWARE')
+    ss.set_registry('HKLM', NEW, 'A', 1, group='startup:A')
+    ss.set_registry('HKLM', NEW, 'B', 1, group='startup:B')
+    assert ss.restore_group('startup:A')['ok']
+    assert REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')          # B 값이 남아 있다
+    assert ss.restore_group('startup:B')['ok']
+    assert not REGISTRY.has_key('HKLM', r'SOFTWARE\ApexCareNew')
+    assert ss.pending_changes() == {}

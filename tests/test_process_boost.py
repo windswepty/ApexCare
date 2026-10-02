@@ -98,3 +98,85 @@ def test_child_spawned_after_family_was_cached_is_still_own(procs):
     assert process_boost.set_priority(701, 'high')['ok'] is False
     assert process_boost.set_priority(702, 'idle')['ok'] is False
     assert not process_guard.is_own_process(700)
+
+
+# ── 감사에서 나온 것: CPU 기준·지금 쓰는 앱·사용자 선택·EcoQoS·비정상 종료 ─────────
+
+def _candidates(procs, fg=None, seconds=2.0):
+    process_boost.prime_cpu_measurement()
+    procs.tick(seconds)
+    return {c['pid'] for c in process_boost.find_throttle_candidates(fg, cpu_threshold=3.0)}
+
+
+def test_busy_threshold_uses_task_manager_units(procs):
+    procs.cpus = 16
+    procs.add(800, 'idle_app.exe', cpu=0.3)        # 작업 관리자 0.3% (예전 기준이면 코어 단위 4.8% 로 '바쁨')
+    procs.add(801, 'encoder.exe', cpu=6.0)         # 작업 관리자 6%
+    assert _candidates(procs) == {801}
+
+
+def test_first_short_sample_is_not_used(procs):
+    procs.add(802, 'encoder.exe', cpu=50.0)
+    assert _candidates(procs, seconds=0.2) == set()          # 1초도 안 된 구간으로 판정하지 않는다
+
+
+def test_foreground_app_and_its_helpers_are_not_tamed(procs):
+    procs.add(810, 'chrome.exe', cpu=1.0, exe=r'C:\Chrome\chrome.exe')            # 창을 가진 프로세스
+    procs.add(811, 'chrome.exe', cpu=20.0, ppid=810, exe=r'C:\Chrome\chrome.exe')  # 렌더러(자식)
+    procs.add(812, 'chrome.exe', cpu=20.0, exe=r'C:\Chrome\chrome.exe')            # GPU(같은 실행 파일)
+    procs.add(813, 'other.exe', cpu=20.0, exe=r'C:\Other\other.exe')
+    assert _candidates(procs, fg=810) == {813}
+
+
+def test_user_choice_is_not_overridden_by_boost(procs):
+    procs.add(820, 'render.exe', cpu=30.0)
+    assert process_boost.set_priority(820, 'high', owner='user')['ok']
+    assert 820 not in _candidates(procs)
+    r = process_boost.set_priority(820, 'idle', owner='boost')
+    assert r['ok'] is False and procs.procs[820].nice == HIGH_PRIORITY_CLASS
+
+
+def test_refused_change_leaves_no_record_and_says_why(procs):
+    p = procs.add(830, 'av.exe')
+    p.deny = True
+    r = process_boost.set_priority(830, 'idle', owner='boost')
+    assert r['ok'] is False and '보호된 프로세스' in r['reason'] and '관리자 권한으로 실행' not in r['reason']
+    assert process_boost.adjusted_count() == 0               # 예전에는 '조정된 프로세스 1개' 가 남았다
+
+
+def test_restore_releases_ecoqos_only_for_the_same_process(procs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(game_booster, '_set_process_power_throttling', lambda pid, v: calls.append((pid, v)) or True)
+    procs.add(840, 'chrome.exe', created=1000.0)
+    procs.add(841, 'backup.exe', created=1000.0)
+    assert set(game_booster._tame_processes([840, 841])) == {840, 841}
+
+    assert process_boost.restore_all()['restored'] == 2
+    assert (840, None) in calls and (841, None) in calls      # '되돌리기' 가 효율 모드도 풀어 준다
+
+    calls.clear()
+    game_booster._tame_processes([840])
+    procs.remove(840)
+    procs.add(840, 'svchost.exe', created=2000.0, username='SYSTEM')   # PID 를 다른 프로세스가 물려받았다
+    game_booster._restore_processes([840])
+    assert (840, None) not in calls                           # 무관한 프로세스의 효율 모드를 건드리지 않는다
+
+
+def test_crash_leftovers_are_restored_on_next_start(procs, monkeypatch):
+    monkeypatch.setattr(game_booster, '_set_process_power_throttling', lambda pid, v: True)
+    procs.add(850, 'chrome.exe', nice=BELOW_NORMAL_PRIORITY_CLASS)
+    game_booster._tame_processes([850])
+    assert procs.procs[850].nice == IDLE_PRIORITY_CLASS
+
+    process_boost._original.clear()                           # 앱이 비정상 종료됐다(메모리 기록이 사라짐)
+    n, bad = process_boost.recover_after_crash()
+
+    assert n == 1 and bad == []
+    assert procs.procs[850].nice == BELOW_NORMAL_PRIORITY_CLASS   # IDLE 이 '원래 값' 으로 굳지 않는다
+    assert process_boost.recover_after_crash() == (0, [])     # 기록은 정리됐다
+
+
+def test_messenger_call_apps_are_never_tamed(procs):
+    procs.add(860, 'KakaoTalk.exe', cpu=40.0)
+    procs.add(861, 'Telegram.exe', cpu=40.0)
+    assert _candidates(procs) == set()

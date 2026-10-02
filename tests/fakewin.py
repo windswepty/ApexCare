@@ -23,6 +23,7 @@ import atexit
 import ctypes
 import os
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -591,14 +592,16 @@ REALTIME_PRIORITY_CLASS = 0x100
 
 class FakeProc:
     def __init__(self, pid, name, nice=NORMAL_PRIORITY_CLASS, created=1000.0,
-                 username='user', cpu=0.0, ppid=None):
+                 username='user', cpu=0.0, ppid=None, exe=''):
         self.pid = pid
         self.ppid = ppid                   # 부모 PID (표에 없으면 부모 없음)
         self.name = name
         self.nice = nice
         self.created = created
         self.username = username
-        self.cpu = cpu
+        self.cpu = cpu                     # 작업 관리자 기준 사용률(전체 CPU 의 %). tick() 이 누적 CPU 시간에 더한다
+        self.cpu_seconds = 0.0
+        self.exe = exe
         self.deny = False                  # True 면 우선순위 변경이 AccessDenied
 
 
@@ -607,15 +610,23 @@ class FakeProcessTable:
 
     install(monkeypatch) 로 psutil 에 끼운다. process_boost·process_guard·game_booster 가
     모두 psutil 모듈 속성을 통해 부르므로 한 번에 바뀐다.
+    CPU 는 진짜처럼 '누적 CPU 시간' 으로 흉내 낸다. tick(초) 가 시계를 움직이고 프로세스마다 cpu % 만큼 쌓는다.
     """
 
     def __init__(self):
         self.procs = {}
         self.nice_calls = []               # (pid, 설정한 값)
+        self.cpus = 8                      # 논리 프로세서 수
+        self.clock = 1000.0
 
     def add(self, pid, name, **kw):
         self.procs[pid] = FakeProc(pid, name, **kw)
         return self.procs[pid]
+
+    def tick(self, seconds):
+        self.clock += seconds
+        for p in self.procs.values():
+            p.cpu_seconds += p.cpu / 100.0 * seconds * self.cpus
 
     def remove(self, pid):
         self.procs.pop(pid, None)
@@ -680,7 +691,10 @@ class FakeProcessTable:
                 return kids
 
             def exe(self):
-                return ''
+                return self._live().exe
+
+            def cpu_times(self):
+                return types.SimpleNamespace(user=self._live().cpu_seconds, system=0.0)
 
             def is_running(self):
                 return table.procs.get(self.pid) is self._p
@@ -702,6 +716,10 @@ class FakeProcessTable:
 
         monkeypatch.setattr(psutil, 'Process', Process)
         monkeypatch.setattr(psutil, 'process_iter', process_iter)
+        monkeypatch.setattr(psutil, 'cpu_count', lambda logical=True: table.cpus)
+        from backend import process_boost
+        monkeypatch.setattr(process_boost, '_now', lambda: table.clock)
+        monkeypatch.setattr(process_boost, '_cpu_samples', {})
         return self
 
 
@@ -806,6 +824,62 @@ def _sandbox_env():
         os.environ[k] = v
 
 
+class FakeHandleDelete:
+    """optimizer._HandleDelete(파일을 핸들로 열어 확인한 뒤 같은 핸들로 지우기)의 가짜.
+
+    진짜와 같이: 링크는 링크 자체를 열고(FILE_FLAG_OPEN_REPARSE_POINT), 폴더는 열지 못하고(백업 시맨틱 없음),
+    final_path 는 중간 정션까지 푼 실제 경로를 돌려준다. 지우기는 os.remove 라서 테스트가 os.remove 를
+    바꿔 '사용 중' 을 흉내 낼 수 있다. swap 에 {경로: 바뀐 실제 경로} 를 넣으면 '연 뒤 확인 전에 중간 폴더가
+    정션으로 바뀐' 상황을 흉내 낸다(연 핸들의 실제 위치가 그쪽이 된다).
+    """
+
+    def __init__(self):
+        self.swap = {}
+        self.deleted = []
+
+    def open(self, path):
+        st = os.lstat(path)                       # 없으면 FileNotFoundError
+        isjunction = getattr(os.path, 'isjunction', None)
+        is_link = os.path.islink(path) or bool(isjunction and isjunction(path))
+        if stat.S_ISDIR(st.st_mode) and not is_link:
+            raise PermissionError(5, '폴더는 백업 시맨틱 없이 열 수 없습니다', path)
+        return {'path': path, 'link': is_link}
+
+    def attributes(self, h):
+        attrs = getattr(os.lstat(h['path']), 'st_file_attributes', 0)
+        if not attrs:                             # Windows 가 아니면 속성이 없다
+            attrs = 0x20 | (0 if os.access(h['path'], os.W_OK) else 0x1)
+        if h['link']:
+            attrs |= 0x400
+        return attrs
+
+    def final_path(self, h):
+        return self.swap.get(h['path']) or os.path.realpath(h['path'])
+
+    def size(self, h):
+        return os.lstat(h['path']).st_size
+
+    def clear_readonly(self, h, attrs):
+        os.chmod(h['path'], stat.S_IREAD | stat.S_IWRITE)
+        return True
+
+    def delete(self, h):
+        os.remove(h['path'])
+        self.deleted.append(h['path'])
+
+    def close(self, h):
+        pass
+
+
+HANDLE_DELETE = FakeHandleDelete()
+
+
+def patch_optimizer(opt):
+    """optimizer 의 핸들 삭제(Win32)를 가짜로 바꾼다. 테스트마다 다시 불러도 된다."""
+    HANDLE_DELETE.__init__()
+    opt._DELETE_API = HANDLE_DELETE
+
+
 def patch_system_state(ss):
     """system_state 의 전원·서비스 경로를 가짜로 바꾼다. 테스트마다 다시 불러도 된다."""
     ss._powrprof = lambda: POWRPROF
@@ -830,8 +904,9 @@ def install():
     _guard_psutil()
     INSTALLED = True
 
-    from backend import system_state
+    from backend import optimizer, system_state
     patch_system_state(system_state)
+    patch_optimizer(optimizer)
     check()
 
 
@@ -846,6 +921,8 @@ def check():
     assert ss.winreg is winreg, 'system_state 가 진짜 winreg 를 쥐고 있습니다'
     assert ss._powrprof() is POWRPROF, '전원 API 가 가짜가 아닙니다'
     assert ss._sc_config_start == SERVICES.sc_config_start, 'sc.exe 호출이 가짜가 아닙니다'
+    from backend import optimizer
+    assert optimizer._DELETE_API is HANDLE_DELETE, '정크 파일 삭제(핸들)가 가짜가 아닙니다'
     appdata = os.environ.get('APPDATA', '')
     assert SANDBOX and os.path.realpath(appdata).startswith(os.path.realpath(SANDBOX)), \
         f'APPDATA 가 임시 폴더가 아닙니다: {appdata}'
@@ -857,8 +934,9 @@ def reset():
     REGISTRY.reset()
     POWER.reset()
     SERVICES.reset()
-    from backend import config_manager, system_state
+    from backend import config_manager, optimizer, system_state
     patch_system_state(system_state)
+    patch_optimizer(optimizer)
     # 저널·설정·제거 기록·로그 등 앱이 남기는 파일을 모두 비운다. 임시 샌드박스 안일 때만.
     data_dir = os.path.realpath(config_manager.APPDATA_DIR)
     assert SANDBOX and data_dir.startswith(os.path.realpath(SANDBOX) + os.sep), data_dir

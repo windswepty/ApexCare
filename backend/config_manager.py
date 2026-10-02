@@ -161,8 +161,20 @@ def update_config(change):
         return save_config(cfg)
 
 
+def is_unreadable(cfg):
+    """load_config() 가 파일을 읽지 못해 기본값으로 대신한 설정인가. 이 값으로 무언가를 켜거나 바꾸면 안 된다."""
+    return isinstance(cfg, _Unreadable)
+
+
 def get_booster_state():
-    return load_config().get("booster_enabled", True)
+    """부스터를 켜 둘지. 설정을 읽지 못하면 None(모름) — 기본값 '켜짐' 으로 부스터를 켜지 않는다.
+
+    예전에는 백신 검사로 파일을 잠깐 못 읽으면 기본값 True 로 부스터가 켜지고 그 상태가 저장됐다.
+    """
+    cfg = load_config()
+    if is_unreadable(cfg):
+        return None
+    return cfg.get("booster_enabled", True)
 
 def set_booster_state(state):
     return update_config(lambda c: c.__setitem__("booster_enabled", bool(state)))
@@ -268,7 +280,11 @@ def set_ui_accent(value):
 
 
 def get_setup_wizard_done():
-    return bool(load_config().get("setup_wizard_done", False))
+    """마법사를 닫은 적이 있는지. 설정을 읽지 못하면 None(모름) — 화면은 그때 마법사를 띄우지 않는다."""
+    cfg = load_config()
+    if is_unreadable(cfg):
+        return None
+    return bool(cfg.get("setup_wizard_done", False))
 
 
 def set_setup_wizard_done():

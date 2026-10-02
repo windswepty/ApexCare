@@ -104,3 +104,40 @@ def test_setters_report_save_result(monkeypatch):
     assert cm.set_optimization_mode('gaming') is False
     assert cm.set_booster_state(True) is False
     assert cm.set_boost_setting('boost_disable_nagle', True)['success'] is False
+
+
+def _locked_file(monkeypatch):
+    def locked():
+        raise cm._ReadError(PermissionError('다른 프로그램이 사용 중'))
+    monkeypatch.setattr(cm, '_read_once', locked)
+    monkeypatch.setattr(cm, '_RETRY_WAIT', 0)
+
+
+def test_unreadable_settings_do_not_turn_the_booster_on(monkeypatch):
+    # 사용자가 부스터를 꺼 두었는데, 앱 시작 때 파일을 잠깐 못 읽으면 기본값 '켜짐' 으로 켜지고 저장됐다
+    from backend import game_booster
+    _seed({'booster_enabled': False})
+    _locked_file(monkeypatch)
+    started = []
+    monkeypatch.setattr(game_booster, 'toggle_booster', lambda on: started.append(on))
+    monkeypatch.setattr(game_booster, '_recover_after_crash', lambda: None)
+
+    assert cm.get_booster_state() is None
+    game_booster.init_booster()
+    assert started == []
+
+
+def test_unreadable_settings_do_not_reopen_the_wizard(monkeypatch):
+    _seed({'setup_wizard_done': True})
+    _locked_file(monkeypatch)
+    assert cm.get_setup_wizard_done() is None            # 화면은 false 일 때만 띄운다
+
+
+def test_unreadable_settings_apply_no_optional_boosts(monkeypatch):
+    # 사용자가 끈 '바쁜 앱 양보' 가 기본값(켜짐)으로 적용되면 안 된다
+    from backend import game_booster
+    _seed({'boost_tame_background': False})
+    _locked_file(monkeypatch)
+    game_booster._applied.clear()
+    game_booster._enter_boost_mode()
+    assert game_booster._applied == {} and game_booster.get_booster_status()['appliedBoosts'] == []

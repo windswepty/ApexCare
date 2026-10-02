@@ -235,20 +235,41 @@ def _current_account():
     return os.environ.get('USERNAME', '')
 
 
+def _session_of(pid):
+    """프로세스가 속한 로그인 세션 번호. 모르면 None."""
+    sid = ctypes.c_ulong(0)
+    if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.c_ulong(pid), ctypes.byref(sid)):
+        return sid.value
+    return None
+
+
 def _desktop_accounts():
-    """바탕 화면(explorer.exe)을 쓰는 계정 이름들(소문자). 알 수 없으면 빈 집합.
+    """이 프로그램과 같은 세션에서 바탕 화면(explorer.exe)을 쓰는 계정 이름들(소문자). 알 수 없으면 빈 집합.
 
     다른 관리자 계정으로 승격해 APEX CARE 를 실행하면 '현재 계정' 이 바탕 화면 사용자와 달라진다.
     그때 지우면 사용자의 앱은 그대로인데 '제거함' 으로 보고하게 된다.
+    PC 전체의 explorer.exe 를 보면, 승격에 쓴 관리자 계정이 '사용자 전환' 으로 로그인된 채 있을 때
+    그 계정도 바탕 화면 사용자로 잡혀 검사를 통과했다. 같은 세션만 본다(세션을 모르면 전체).
     """
     names = set()
     try:
+        my_session = _session_of(os.getpid())
+    except Exception:
+        my_session = None
+    try:
         import psutil
-        for p in psutil.process_iter(['name', 'username']):
-            if (p.info.get('name') or '').lower() == 'explorer.exe':
-                user = (p.info.get('username') or '').split('\\')[-1].strip().lower()
-                if user:
-                    names.add(user)
+        for p in psutil.process_iter(['pid', 'name', 'username']):
+            if (p.info.get('name') or '').lower() != 'explorer.exe':
+                continue
+            if my_session is not None:
+                try:
+                    if _session_of(p.info['pid']) != my_session:
+                        continue
+                except Exception:
+                    continue
+            user = (p.info.get('username') or '').split('\\')[-1].strip().lower()
+            if user:
+                names.add(user)
     except Exception:
         pass
     return names
@@ -451,10 +472,19 @@ def _apply_appx_item(item, account):
         # 기록은 남겨 둔다. 되살리기가 설치 여부를 다시 확인한다.
         return 'unknown', (('시간 초과. ' if timed_out else '') + f'제거됐는지 확인하지 못했습니다: {err2}')
     still = {str(r.get('familyName', '')).lower() for r in rows2 if not r.get('error')}
-    removed, not_removed = [], []
+    # 다시 확인할 때 오류가 난 패키지는 '없음' 이 아니라 '모름' 이다. 예전에는 남아 있지 않은 것으로 보고 '제거함' 이라 했다.
+    unread = {str(r.get('query', '')).lower() for r in rows2 if r.get('error')}
+    removed, not_removed, unknown = [], [], []
     for r in targets:
-        if str(r.get('familyName', '')).lower() in still:
-            why = errors.get(r['fullName']) or ('시간 초과' if timed_out else '제거되지 않았습니다')
+        if str(r.get('name', '')).lower() in unread:
+            unknown.append(f"{r['name']}: 제거됐는지 확인하지 못했습니다"
+                           + (f" ({errors[r['fullName']]})" if errors.get(r['fullName']) else ''))
+        elif str(r.get('familyName', '')).lower() in still:
+            if timed_out:
+                # 배포 서비스가 아직 지우는 중일 수 있다. 기록을 빼면 곧 지워진 뒤 되살릴 수 없게 된다.
+                unknown.append(f"{r['name']}: 시간 초과 — 제거가 계속 진행 중일 수 있습니다. 잠시 뒤 설치 여부를 다시 확인하세요")
+                continue
+            why = errors.get(r['fullName']) or '제거되지 않았습니다'
             problems.append(f"{r['name']}: {why}")
             not_removed.append(r['fullName'])
         else:
@@ -462,6 +492,10 @@ def _apply_appx_item(item, account):
     if not_removed and not _forget_removed(not_removed):
         log.warning("지워지지 않은 패키지를 제거 기록에서 빼지 못했습니다")
 
+    if unknown:
+        # 기록은 남긴다. 되살리기가 설치 여부를 다시 확인한다(이미 설치돼 있으면 기록만 정리한다).
+        done = (f"{len(removed)}개 제거. " if removed else '')
+        return 'unknown', done + '; '.join(unknown + problems)
     if removed and not problems:
         return 'removed', ', '.join(removed) + ' 제거함'
     if removed:

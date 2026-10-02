@@ -61,3 +61,19 @@ def test_maximize_fills_the_work_area_not_the_whole_screen():
     assert window_frame.toggle(1, (5, 5, 10, 10), **kw) == (5, 5, 10, 10)
     api_src = open(os.path.join(ROOT, 'backend', 'api.py'), encoding='utf-8').read()
     assert 'window_frame.toggle(' in api_src and 'toggle_fullscreen' not in api_src
+
+
+def test_second_instance_exits_before_touching_anything():
+    # 두 번째 인스턴스는 첫 인스턴스가 낮춘 우선순위를 '원래 값' 으로 기록하고, 게임 중인 세션을 비정상 종료
+    # 잔여물로 보고 되돌렸다. Api(모드 재적용·부스터 시작)를 만들기 전에 끝나야 한다.
+    with open(os.path.join(ROOT, 'main.py'), encoding='utf-8') as f:
+        src = f.read()
+    body = src[src.index("if __name__ == '__main__':\n    #"):]
+    assert body.index('single_instance.acquire()') < body.index('Api(None)')
+    assert 'sys.exit(0)' in body[:body.index('Api(None)')]
+
+
+def test_single_instance_check_failure_does_not_block_start(monkeypatch):
+    # 확인하지 못했다고 앱을 못 켜게 하지 않는다(fakewin 이 ctypes 를 막아 둔 상태가 그 경우다)
+    from backend import single_instance
+    assert single_instance.acquire('Local\\apex-test') is True

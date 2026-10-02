@@ -131,6 +131,29 @@ def test_windows_update_cache_is_not_selected_by_default(junk_root):
     assert '이미 설치 완료된' not in items[3]['description']
 
 
+def test_unreadable_recycle_bin_size_is_unknown_not_zero(junk_root, monkeypatch):
+    # 되돌릴 수 없는 항목이다. 읽지 못한 크기를 0.0 MB 로 보이면 비어 있는 줄 알고 고른다.
+    monkeypatch.setattr(optimizer, '_recycle_bin_bytes', lambda: None)
+    optimizer.scan_junk_background()
+    item = {d['id']: d for d in optimizer.get_junk_scan_status()['data']}[5]
+    assert item['sizeMB'] is None and '읽지 못했습니다' in item['description']
+    ui = _code('src/components/StorageCenter.jsx')
+    assert "'크기 모름'" in ui
+
+
+def test_emptied_recycle_bin_with_unknown_size_says_so(monkeypatch):
+    sizes = iter([None, None])
+    monkeypatch.setattr(optimizer, '_recycle_bin_bytes', lambda: next(sizes))
+
+    class Shell:
+        @staticmethod
+        def SHEmptyRecycleBinW(*a):
+            return 0
+    monkeypatch.setattr(optimizer.ctypes, 'windll', type('W', (), {'shell32': Shell})())
+    freed, why = optimizer._empty_recycle_bin()
+    assert freed == 0 and why and '측정하지 못해' in why          # 0 MB 를 확보했다고 조용히 말하지 않는다
+
+
 def test_browser_cache_covers_edge_whale_and_every_profile(tmp_path, monkeypatch):
     # 예전에는 Chrome 'Default' 프로필의 Cache 만 정리했다
     local = tmp_path / 'Local'

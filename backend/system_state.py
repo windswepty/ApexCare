@@ -21,10 +21,14 @@ APEX CARE — 되돌릴 수 있는 시스템 변경 계층.
 """
 
 import ctypes
+import functools
 import json
 import logging
 import os
 import subprocess
+import tempfile
+import threading
+import time
 import uuid
 import winreg
 
@@ -43,40 +47,95 @@ HIVES = {
 # 저널 입출력
 # ─────────────────────────────────────────────
 
+# 저널의 읽기-고치기-쓰기와, '원래 값 기록 → 쓰기 → 확인' 한 묶음을 한 번에 하나만 한다.
+# pywebview 는 JS 호출마다 스레드를 새로 쓰고, 게임 부스터 감시 스레드도 모드를 바꾼다. 예전에는 잠금이 없어
+# 한쪽의 되돌리기가 다른 쪽이 막 기록한 원래 값을 지우거나, 두 스레드가 같은 임시 파일에 써서 저널이 깨졌다.
+_lock = threading.RLock()
+
+_READ_RETRIES = 3          # 백신 검사 등으로 잠깐 잠긴 저널을 다시 읽어 볼 횟수
+_RETRY_WAIT = 0.15
+
+
+class JournalUnreadable(Exception):
+    """저널 파일은 있는데 읽지 못했다(잠김·권한). 깨진 것과 다르다 — 비우면 원래 값 기록을 잃는다."""
+
+
+def _locked(fn):
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        with _lock:
+            return fn(*a, **kw)
+    return wrapper
+
+
 def _load():
-    try:
-        with open(JOURNAL_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    """저널을 읽는다. 없으면 빈 저널. 내용이 깨졌으면 옆으로 옮기고 빈 저널.
+
+    잠깐 잠겨 읽지 못하면 다시 읽고, 끝내 못 읽으면 JournalUnreadable. 예전에는 이것도 '깨짐' 으로 보고
+    옆으로 치운 뒤 빈 저널에 새 기록만 남겨, 그때까지의 원래 값 기록이 되돌리기에서 사라졌다.
+    """
+    with _lock:
+        raw = None
+        for attempt in range(_READ_RETRIES):
+            try:
+                with open(JOURNAL_PATH, 'rb') as f:
+                    raw = f.read()
+                break
+            except FileNotFoundError:
+                return {'version': 1, 'entries': {}}
+            except OSError as e:
+                if attempt == _READ_RETRIES - 1:
+                    log.error(f"저널을 읽지 못했습니다(잠김·권한): {e}")
+                    raise JournalUnreadable(str(e))
+                time.sleep(_RETRY_WAIT)
+        try:
+            data = json.loads(raw.decode('utf-8-sig'))
             if isinstance(data, dict) and isinstance(data.get('entries'), dict):
                 return data
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        # 저널이 깨졌다고 조용히 새로 만들면 기존 백업이 통째로 날아간다.
-        # 깨진 파일을 옆에 남겨두고 사람이 확인할 수 있게 한다.
-        log.error(f"저널을 읽지 못했습니다: {e}")
-        try:
-            os.replace(JOURNAL_PATH, JOURNAL_PATH + '.corrupt')
-            log.error(f"깨진 저널을 {JOURNAL_PATH}.corrupt 로 옮겼습니다")
-        except Exception:
-            pass
-    return {'version': 1, 'entries': {}}
+            raise ValueError('저널 형식이 아닙니다')
+        except ValueError as e:
+            # 저널이 깨졌다고 조용히 새로 만들면 기존 백업이 통째로 날아간다.
+            # 깨진 파일을 옆에 남겨두고 사람이 확인할 수 있게 한다(시각을 붙여 앞선 것을 덮지 않는다).
+            log.error(f"저널이 깨져 있습니다: {e}")
+            dest = f"{JOURNAL_PATH}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+            try:
+                os.replace(JOURNAL_PATH, dest)
+                log.error(f"깨진 저널을 {dest} 로 옮겼습니다")
+            except Exception:
+                pass
+            return {'version': 1, 'entries': {}}
 
 
 def _save(data):
     """원자적으로 쓴다. 쓰다가 죽으면 복구 정보가 통째로 사라진다."""
-    try:
-        os.makedirs(APPDATA_DIR, exist_ok=True)
-        tmp = JOURNAL_PATH + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=1)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, JOURNAL_PATH)
-        return True
-    except Exception as e:
-        log.error(f"저널 저장 실패: {e}")
-        return False
+    with _lock:
+        tmp = None
+        try:
+            os.makedirs(APPDATA_DIR, exist_ok=True)
+            # 쓸 때마다 다른 임시 파일. 같은 이름을 함께 쓰면 서로의 내용을 잘라 먹는다.
+            fd, tmp = tempfile.mkstemp(prefix='system_state.', suffix='.tmp', dir=APPDATA_DIR)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+                f.flush()
+                os.fsync(f.fileno())
+            for attempt in range(_READ_RETRIES):
+                try:
+                    os.replace(tmp, JOURNAL_PATH)
+                    tmp = None
+                    return True
+                except PermissionError:
+                    if attempt == _READ_RETRIES - 1:
+                        raise
+                    time.sleep(_RETRY_WAIT)
+        except Exception as e:
+            log.error(f"저널 저장 실패: {e}")
+            return False
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)            # 우리가 만든 임시 파일만 지운다
+                except OSError:
+                    pass
 
 
 def _record(key, entry):
@@ -85,11 +144,15 @@ def _record(key, entry):
     원본이 디스크에 안전하게 있으면 True, 저장에 실패했으면 False.
     False 면 호출부는 시스템을 바꾸면 안 된다. 기록 없이 바꾸면 되돌릴 방법이 없다.
     """
-    data = _load()
-    if key in data['entries']:
-        return True           # 이미 원본이 있다. 덮어쓰면 진짜 원본을 잃는다.
-    data['entries'][key] = entry
-    return _save(data)
+    with _lock:
+        try:
+            data = _load()
+        except JournalUnreadable:
+            return False      # 기존 기록을 읽지 못하면 새로 쓰지 않는다(기존 기록을 덮게 된다)
+        if key in data['entries']:
+            return True           # 이미 원본이 있다. 덮어쓰면 진짜 원본을 잃는다.
+        data['entries'][key] = entry
+        return _save(data)
 
 
 _NOT_RECORDED = {'ok': False, 'verified': False,
@@ -114,19 +177,55 @@ def _dec(value):
 
 
 def _forget(keys):
-    data = _load()
-    for k in keys:
-        data['entries'].pop(k, None)
-    _save(data)
+    with _lock:
+        try:
+            data = _load()
+        except JournalUnreadable:
+            return False      # 못 읽었는데 쓰면 다른 기록까지 지운다. 기록이 남으면 다시 되돌릴 수 있다.
+        for k in keys:
+            data['entries'].pop(k, None)
+        return _save(data)
+
+
+def _forget_and_hand_over(keys, kept_keys):
+    """되돌린 기록을 지우되, 그 기록이 '이 앱이 만든 키' 로 들고 있던 것 중 아직 남은 키(다른 값이 있어 못 지움)는
+    그 키 안에 값을 둔 남은 기록에 넘긴다. 예전에는 그 정보가 함께 지워져, 마지막 값을 되돌려도 빈 키가 남았다
+    (시작 프로그램을 하나씩 다시 켜면 StartupApproved\\Run 이 원래 없던 PC 에 빈 키로 남음).
+    """
+    with _lock:
+        try:
+            data = _load()
+        except JournalUnreadable:
+            return False
+        entries = data['entries']
+        for k in keys:
+            entries.pop(k, None)
+        for hive, path in kept_keys:
+            low = path.lower()
+            for e in entries.values():
+                p = str(e.get('path', '')).lower()
+                if e.get('kind') == 'registry' and e.get('hive') == hive and (p == low or p.startswith(low + '\\')):
+                    ck = e.setdefault('created_keys', [])
+                    if path not in ck:
+                        ck.append(path)
+                    break
+        return _save(data)
 
 
 def pending_changes():
-    """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼을 띄울지 판단하는 데 쓴다."""
-    return _load()['entries']
+    """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼을 띄울지 판단하는 데 쓴다.
+
+    읽기 전용이다. 저널이 계속 잠겨 읽지 못하면 빈 목록을 돌려준다(쓰는 쪽 _record/_forget/_restore 는
+    그때 아무것도 쓰지 않고 실패를 알리므로 기록은 지워지지 않는다).
+    """
+    try:
+        return _load()['entries']
+    except JournalUnreadable:
+        return {}
 
 
 def has_pending():
-    return bool(_load()['entries'])
+    return bool(pending_changes())
 
 
 # ─────────────────────────────────────────────
@@ -192,6 +291,7 @@ def _delete_key_if_empty(hive, path):
         return False
 
 
+@_locked
 def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why=''):
     """레지스트리 값을 바꾸고 결과를 검증한다.
 
@@ -356,6 +456,7 @@ def available_plans():
 _PLAN_KEY = 'power:active_plan'
 
 
+@_locked
 def set_active_plan(guid_str, group, why=''):
     """전원 플랜을 바꾼다. 원래 플랜을 기록해 두고, 바꾼 뒤 확인한다.
 
@@ -373,7 +474,10 @@ def set_active_plan(guid_str, group, why=''):
         'kind': 'power_plan', 'group': group, 'value': before, 'why': why,
     }):
         return dict(_NOT_RECORDED)
-    data = _load()
+    try:
+        data = _load()
+    except JournalUnreadable:
+        return dict(_NOT_RECORDED)
     entry = data['entries'].get(_PLAN_KEY)
     if entry is not None and entry.get('group') != group:
         entry['group'] = group
@@ -425,6 +529,7 @@ def power_value(sub, setting, ac=True, plan=None):
     return _read_power_value(plan, sub, setting, ac) if plan else None
 
 
+@_locked
 def set_power_value(sub, setting, value, group, plan=None, label='', both_ac_dc=True):
     """전원 플랜의 세부 설정을 바꾼다.
 
@@ -566,6 +671,7 @@ def _write_service_start(service, start_type):
     return True, ''
 
 
+@_locked
 def set_service_start(service, start_type, group, why=''):
     """서비스 시작 유형을 바꾼다. 원래 Start·DelayedAutostart 를 먼저 기록한다.
 
@@ -589,12 +695,12 @@ def set_service_start(service, start_type, group, why=''):
                 'reason': f'시작 유형이 일반적이지 않아({start}) 건드리지 않았습니다'}
 
     key = f'svc:{service.lower()}'
-    _record(key, {
+    recorded = _record(key, {
         'kind': 'service', 'group': group, 'service': service,
         'start': start, 'delayed': delayed, 'why': why,
     })
-    # _record 는 저장 실패를 알리지 않는다. 기록이 실제로 남았는지 확인한 뒤에만 바꾼다.
-    if key not in _load()['entries']:
+    # 기록이 실제로 남았는지 확인한 뒤에만 바꾼다.
+    if not recorded or key not in pending_changes():
         return {'ok': False, 'changed': False, 'before': before,
                 'reason': '되돌릴 정보를 저장하지 못해 바꾸지 않았습니다'}
 
@@ -621,6 +727,7 @@ def _restore_service(e):
     return _write_service_start(svc, target)
 
 
+@_locked
 def restore_service_start(service, start, delayed):
     """저널 밖에 남은 기록(구버전 settings.json 백업)으로 되돌릴 때 쓴다. (ok, reason)"""
     return _restore_service({'service': service, 'start': start, 'delayed': delayed})
@@ -667,8 +774,14 @@ def _restore_registry(e):
     return None
 
 
+@_locked
 def _restore(predicate):
-    data = _load()
+    try:
+        data = _load()
+    except JournalUnreadable as e:
+        # 무엇을 되돌려야 하는지 모른다. 아무것도 쓰지 않고 실패로 알린다(기록은 그대로 남는다).
+        return {'ok': False, 'restored': 0, 'remaining': None,
+                'failed': [{'key': 'journal', 'reason': f'변경 기록 파일을 읽지 못해 되돌리지 못했습니다 ({e})'}]}
     entries = data['entries']
     done, failed, plans_touched = [], [], set()
     created_keys = set()        # 되돌린 값을 쓰면서 이 앱이 만들었던 키. 끝에 비어 있으면 지운다.
@@ -743,12 +856,14 @@ def _restore(predicate):
     _reapply_if_active(plans_touched)
 
     # 이 앱이 만든 키는 깊은 것부터, 비어 있을 때만 지운다. 같은 키의 다른 값이 아직 남아 있으면 그대로 둔다.
+    kept = []
     for hive, path in sorted(created_keys, key=lambda hp: hp[1].count('\\'), reverse=True):
-        _delete_key_if_empty(hive, path)
+        if not _delete_key_if_empty(hive, path) and not _missing_keys(hive, path):
+            kept.append((hive, path))           # 아직 있다(다른 값이 남음)
 
     # 성공한 것만 저널에서 지운다. 실패한 건 남겨야 다음에 다시 시도할 수 있다.
     if done:
-        _forget(done)
+        _forget_and_hand_over(done, kept)
 
     return {'ok': not failed, 'restored': len(done), 'failed': failed,
             'remaining': len(pending_changes())}

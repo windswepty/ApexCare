@@ -61,14 +61,37 @@ def _is_link_like(path):
         return True
 
 
+def unsafe_junk_root(root):
+    """정크 정리 루트로 쓰면 안 되는 위치면 그 이유, 괜찮으면 None.
+
+    %TEMP% 는 사용자가 바꿀 수 있다. 램디스크·보조 드라이브 안내를 따라 'D:\\' 같은 드라이브 루트나
+    사용자 폴더로 바꿔 두면, 그 아래 모든 폴더의 .log·.bak·확장자 없는 파일(.git 객체, 게임 세이브 등)이
+    휴지통 없이 지워졌다. 드라이브 루트이거나 사용자 데이터 폴더와 같거나 그것을 품은 위치는 정리하지 않는다.
+    """
+    from backend import safe_delete
+    real = safe_delete.norm(root)
+    if not real or len(real) <= 3:
+        return '드라이브 루트'
+    home = os.environ.get('USERPROFILE') or ''
+    user_dirs = [home] + [os.path.join(home, d) for d in (
+        'Documents', 'Desktop', 'Downloads', 'Pictures', 'Videos', 'Music', 'OneDrive',
+        'Favorites', 'Saved Games', 'Contacts', 'Links', 'Searches')] if home else []
+    user_dirs += [os.environ.get(k) for k in ('PUBLIC', 'OneDrive', 'SystemRoot', 'ProgramFiles',
+                                             'ProgramFiles(x86)', 'ProgramData', 'APPDATA', 'LOCALAPPDATA')]
+    for d in user_dirs:
+        if d and safe_delete.is_inside(d, real):
+            return f'사용자·시스템 폴더({d})를 품은 위치'
+    return None
+
+
 def _walk_junk_tree(root):
     """root 아래를 위에서부터 돈다. 링크·정션인 폴더는 들어가지 않는다.
 
     (dirpath, filenames) 를 내고, 다 돈 뒤 방문한 하위 폴더 목록(깊은 것부터)을 돌려준다.
-    root 자체가 링크·정션이면 아무것도 돌지 않는다 — 어디로 이어지는지 모른다.
+    root 자체가 링크·정션이거나 정리 루트로 안전하지 않은 위치면 아무것도 돌지 않는다.
     """
     visited = []
-    if not os.path.isdir(root) or _is_link_like(root):
+    if not os.path.isdir(root) or _is_link_like(root) or unsafe_junk_root(root):
         return visited, iter(())
 
     def gen():
@@ -103,6 +126,149 @@ def _junk_candidate(file_path, root_real):
     if safe_delete.is_protected(real):
         return False
     return True
+
+
+_FILE_ATTRIBUTE_READONLY = 0x1
+_FILE_ATTRIBUTE_DIRECTORY = 0x10
+
+
+class _HandleDelete:
+    """파일을 핸들로 열어, 그 핸들이 가리키는 실제 경로를 확인한 뒤 같은 핸들로 지운다(Win32).
+
+    경로 문자열로 확인하고 다시 경로로 지우면 그 사이에 중간 폴더가 정션으로 바뀔 수 있다.
+    C:\\Windows\\Temp 는 일반 사용자도 폴더를 만들 수 있어서, 관리자 권한으로 도는 이 앱이 다른 곳의 파일을
+    지우게 만들 수 있었다. 핸들은 연 순간의 파일에 묶이므로 확인한 것과 지우는 것이 같다.
+    fakewin 이 같은 메서드를 가진 가짜로 바꾼다.
+    """
+    _DELETE = 0x00010000
+    _READ_ATTR = 0x80
+    _WRITE_ATTR = 0x100
+    _SYNC = 0x00100000
+    _SHARE_ALL = 0x7
+    _OPEN_EXISTING = 3
+    _OPEN_REPARSE_POINT = 0x00200000
+    _FileBasicInfo, _FileStandardInfo, _FileDispositionInfo = 0, 1, 4
+
+    def __init__(self):
+        self._k = None
+
+    def _k32(self):
+        if self._k is None:
+            from ctypes import wintypes as wt
+            k = ctypes.WinDLL('kernel32', use_last_error=True)
+            k.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, ctypes.c_void_p, wt.DWORD, wt.DWORD, wt.HANDLE]
+            k.CreateFileW.restype = wt.HANDLE
+            k.GetFinalPathNameByHandleW.argtypes = [wt.HANDLE, wt.LPWSTR, wt.DWORD, wt.DWORD]
+            k.GetFinalPathNameByHandleW.restype = wt.DWORD
+            k.GetFileInformationByHandleEx.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
+            k.GetFileInformationByHandleEx.restype = wt.BOOL
+            k.SetFileInformationByHandle.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
+            k.SetFileInformationByHandle.restype = wt.BOOL
+            k.CloseHandle.argtypes = [wt.HANDLE]
+            k.CloseHandle.restype = wt.BOOL
+            self._k = k
+        return self._k
+
+    @staticmethod
+    def _basic():
+        class FILE_BASIC_INFO(ctypes.Structure):
+            _fields_ = [('CreationTime', ctypes.c_int64), ('LastAccessTime', ctypes.c_int64),
+                        ('LastWriteTime', ctypes.c_int64), ('ChangeTime', ctypes.c_int64),
+                        ('FileAttributes', ctypes.c_uint32)]
+        return FILE_BASIC_INFO()
+
+    def open(self, path):
+        k = self._k32()
+        invalid = ctypes.c_void_p(-1).value
+        base = self._DELETE | self._READ_ATTR | self._SYNC
+        for access in (base | self._WRITE_ATTR, base):        # 속성 쓰기 권한이 없으면 읽기 전용 해제 없이
+            h = k.CreateFileW(path, access, self._SHARE_ALL, None, self._OPEN_EXISTING, self._OPEN_REPARSE_POINT, None)
+            if h and h != invalid:
+                return h
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    def attributes(self, h):
+        info = self._basic()
+        if not self._k32().GetFileInformationByHandleEx(h, self._FileBasicInfo, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info.FileAttributes
+
+    def size(self, h):
+        class FILE_STANDARD_INFO(ctypes.Structure):
+            _fields_ = [('AllocationSize', ctypes.c_int64), ('EndOfFile', ctypes.c_int64),
+                        ('NumberOfLinks', ctypes.c_uint32), ('DeletePending', ctypes.c_ubyte),
+                        ('Directory', ctypes.c_ubyte)]
+        info = FILE_STANDARD_INFO()
+        if not self._k32().GetFileInformationByHandleEx(h, self._FileStandardInfo, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return max(0, info.EndOfFile)
+
+    def final_path(self, h):
+        buf = ctypes.create_unicode_buffer(32768)
+        n = self._k32().GetFinalPathNameByHandleW(h, buf, len(buf), 0)
+        if not n or n >= len(buf):
+            raise ctypes.WinError(ctypes.get_last_error())
+        p = buf.value
+        if p.startswith('\\\\?\\UNC\\'):
+            return '\\\\' + p[8:]
+        if p.startswith('\\\\?\\'):
+            return p[4:]
+        return p
+
+    def clear_readonly(self, h, attrs):
+        info = self._basic()                     # 시각 0 = 바꾸지 않음
+        info.FileAttributes = (attrs & ~_FILE_ATTRIBUTE_READONLY) or 0x80
+        return bool(self._k32().SetFileInformationByHandle(h, self._FileBasicInfo, ctypes.byref(info), ctypes.sizeof(info)))
+
+    def delete(self, h):
+        flag = ctypes.c_ubyte(1)                 # FILE_DISPOSITION_INFO.DeleteFile
+        if not self._k32().SetFileInformationByHandle(h, self._FileDispositionInfo, ctypes.byref(flag), ctypes.sizeof(flag)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self, h):
+        try:
+            self._k32().CloseHandle(h)
+        except Exception:
+            pass
+
+
+_DELETE_API = _HandleDelete()
+
+
+class _JunkLocked(Exception):
+    """열었지만 지우지 못했다(사용 중 등). size 는 그 파일의 크기."""
+
+    def __init__(self, size, why):
+        super().__init__(why)
+        self.size = size
+
+
+def _delete_junk_file(path, root_real):
+    """정크 파일 하나를 지운다. (지운 바이트, None) 또는 (0, 건너뛴 이유).
+
+    열지 못하면 OSError, 열었지만 지우지 못하면 _JunkLocked 를 던진다(둘 다 '사용 중이라 건너뜀').
+    """
+    from backend import safe_delete
+    api = _DELETE_API
+    h = api.open(path)
+    try:
+        attrs = api.attributes(h)
+        if attrs & (_REPARSE_POINT | _FILE_ATTRIBUTE_DIRECTORY):
+            return 0, '링크·폴더'
+        final = api.final_path(h)
+        # 연 파일의 실제 위치로 다시 판정한다. 경로 확인 뒤 바뀐 정션은 여기서 걸린다.
+        if not safe_delete.is_inside(final, root_real) or safe_delete.is_protected(final):
+            return 0, '정리 대상 폴더 밖'
+        size = api.size(h)
+        try:
+            if attrs & _FILE_ATTRIBUTE_READONLY:
+                api.clear_readonly(h, attrs)
+            api.delete(h)
+        except OSError as e:
+            raise _JunkLocked(size, str(e))
+        return size, None
+    finally:
+        api.close(h)
 
 
 def _skipped_log_path():
@@ -160,6 +326,23 @@ def get_deep_optimization_status():
 _cancel_event = threading.Event()
 _junk_cancel_event = threading.Event()
 
+
+class _Cancelled(Exception):
+    """원클릭 중지. 오류가 아니다 — 그때까지 끝낸 단계 결과를 그대로 남긴다."""
+
+
+def _summarize_deep_steps(steps):
+    """(실패 단계, 진행 중 단계, 문구 조각). 진행 중(pending)은 실패가 아니다."""
+    failed = [s for s in steps if not s["ok"] and not s.get("pending")]
+    pending = [s for s in steps if s.get("pending")]
+    parts = [f"{len(steps) - len(failed) - len(pending)}개 단계 성공"]
+    if failed:
+        parts.append(f"{len(failed)}개 실패")
+    if pending:
+        parts.append(f"{len(pending)}개 백그라운드에서 진행 중")
+    return failed, pending, ", ".join(parts)
+
+
 def _run_deep_optimization():
     global _optimization_state
     _optimization_state = {
@@ -169,7 +352,8 @@ def _run_deep_optimization():
         "current_task": "시스템 정크 및 임시 파일 정리 중...",
         "freed_mb": 0,
         "error": None,
-        "cancel_requested": False
+        "cancel_requested": False,
+        "cancelled": False,
     }
     _cancel_event.clear()
     
@@ -191,7 +375,7 @@ def _run_deep_optimization():
                       "detail": f"{freed}MB 확보" if junk_ok
                                 else _junk_clean_state.get("error", "실패")})
         _optimization_state["progress_pct"] = 40
-        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        if _cancel_event.is_set(): raise _Cancelled()
 
         # Step 2: RAM Purge
         # 예전 문구 '유휴 프로세스 정리' 는 사실이 아니었다. purge_ram 은 프로세스를 건드리지 않는다.
@@ -205,7 +389,7 @@ def _run_deep_optimization():
             ram_detail = ram_res.get("message") or ram_res.get("error", "관리자 권한이 필요할 수 있습니다")
         steps.append({"name": "대기 메모리 비우기", "ok": bool(ram_res.get("success")), "detail": ram_detail})
         _optimization_state["progress_pct"] = 60
-        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        if _cancel_event.is_set(): raise _Cancelled()
 
         # Step 3: DNS 캐시 초기화
         # 여기서는 캐시만 비운다. Winsock 초기화/TCP 튜닝 같은 영구 변경은
@@ -215,7 +399,7 @@ def _run_deep_optimization():
         steps.append({"name": "DNS 캐시 초기화", "ok": bool(dns_res.get("success")),
                       "detail": "" if dns_res.get("success") else dns_res.get("message", "실패")})
         _optimization_state["progress_pct"] = 80
-        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        if _cancel_event.is_set(): raise _Cancelled()
 
         # Step 4: SSD TRIM
         # run_trim() 은 스레드를 띄우고 바로 반환한다. 기다리지 않으면 defrag 가
@@ -223,6 +407,7 @@ def _run_deep_optimization():
         _optimization_state["current_task"] = "디스크 최적화(TRIM) 중..."
         trim_res = system_repair.run_trim()
         trim_ok = False
+        trim_pending = False
         if not trim_res.get("success"):
             trim_detail = trim_res.get("message") or "시작하지 못했습니다"
         else:
@@ -237,26 +422,41 @@ def _run_deep_optimization():
                     break
                 if _cancel_event.is_set() or time.time() >= trim_deadline:
                     # TRIM·조각 모음은 중간에 끊지 않는다(디스크 작업). 기다리기만 그만둔다.
-                    # 실패가 아니라 '아직 진행 중' 이다. 그대로 알린다.
+                    # 실패가 아니라 '아직 진행 중' 이다. 그대로 알린다. 예전에는 ok=False 만 남아
+                    # HDD PC 에서는 원클릭마다 '1단계 실패' 로 보였다.
+                    trim_pending = True
                     trim_detail = ("아직 진행 중입니다. 백그라운드에서 끝까지 진행되며, "
                                    "저장공간 → 디스크 최적화에서 결과를 확인할 수 있습니다")
                     break
                 time.sleep(1)
-        steps.append({"name": "디스크 최적화(TRIM)", "ok": trim_ok, "detail": trim_detail})
-        if _cancel_event.is_set(): raise Exception("사용자에 의해 최적화가 취소되었습니다.")
+        trim_step = {"name": "디스크 최적화(TRIM)", "ok": trim_ok, "detail": trim_detail}
+        if trim_pending:
+            trim_step["pending"] = True
+        steps.append(trim_step)
+        if _cancel_event.is_set(): raise _Cancelled()
 
-        failed = [s for s in steps if not s["ok"]]
+        failed, pending, summary = _summarize_deep_steps(steps)
         _optimization_state["progress_pct"] = 100
         _optimization_state["eta_seconds"] = 0
         _optimization_state["failedCount"] = len(failed)
-        _optimization_state["current_task"] = (
-            f"완료 — {len(steps) - len(failed)}개 단계 성공"
-            + (f", {len(failed)}개 실패" if failed else "")
-        )
+        _optimization_state["pendingCount"] = len(pending)
+        _optimization_state["current_task"] = f"완료 — {summary}"
 
+    except _Cancelled:
+        # 예전에는 예외 문자열만 남기고 끝내, 이미 영구 삭제한 용량과 계속 도는 디스크 최적화가 화면에 보이지 않았다
+        failed, pending, summary = _summarize_deep_steps(steps)
+        _optimization_state["cancelled"] = True
+        _optimization_state["failedCount"] = len(failed)
+        _optimization_state["pendingCount"] = len(pending)
+        _optimization_state["current_task"] = (
+            f"중지됨 — {len(get_deep_optimization_plan()['steps'])}단계 중 {len(steps)}단계 실행({summary}). "
+            "이미 지운 파일은 되돌아오지 않습니다")
     except Exception as e:
+        failed, pending, _ = _summarize_deep_steps(steps)
         _optimization_state["error"] = str(e)
-        _optimization_state["current_task"] = f"취소/오류: {str(e)}"
+        _optimization_state["failedCount"] = len(failed)
+        _optimization_state["pendingCount"] = len(pending)
+        _optimization_state["current_task"] = f"오류: {str(e)}"
     finally:
         _optimization_state["running"] = False
 
@@ -359,10 +559,13 @@ def _empty_recycle_bin():
     except Exception as e:
         return 0, f"휴지통을 비우지 못했습니다: {e}"
     after = _recycle_bin_bytes()
-    freed = max(0, before - after) if (before is not None and after is not None) else 0
     if hr != 0 and not (after == 0):
+        freed = max(0, before - after) if (before is not None and after is not None) else 0
         return freed, f"휴지통을 비우지 못했습니다 (코드 0x{hr:08X})"
-    return freed, None
+    if before is None or after is None:
+        # 비우기는 됐지만 얼마를 비웠는지 모른다. 0 으로 보고하지 않고 그 사실을 알린다.
+        return 0, "휴지통을 비웠지만 비운 용량은 측정하지 못해 확보 용량에 넣지 않았습니다"
+    return max(0, before - after), None
 
 def get_junk_scan_status():
     return _junk_scan_state
@@ -430,7 +633,8 @@ def scan_junk_background():
         prefetch_size = _get_dir_size_mb(prefetch, _junk_scan_state, max_files=500)
         
         rb = _recycle_bin_bytes()
-        recycle_size = round(rb / (1024 * 1024), 2) if rb else 0.0
+        # 읽지 못하면 None('크기 모름'). 0.0 으로 채우면 되돌릴 수 없는 항목이 비어 있는 것처럼 보였다.
+        recycle_size = round(rb / (1024 * 1024), 2) if rb is not None else None
 
         _junk_scan_state["data"] = [
             {"id": 1, "name": "Windows 임시 파일 (%TEMP%, Windows\\Temp)", "sizeMB": temp_size, "category": "System", "selected": True, "description": "앱 설치·업데이트·실행 중에 만들어진 임시 파일. 사용 중인 파일은 건너뜁니다"},
@@ -449,7 +653,8 @@ def scan_junk_background():
             # 사용자가 직접 체크해야만 실행된다.
             {"id": 5, "name": "휴지통 비우기", "sizeMB": recycle_size, "category": "System",
              "selected": False, "irreversible": True,
-             "description": "휴지통 안의 파일을 완전히 삭제합니다. 되돌릴 수 없습니다."},
+             "description": "휴지통 안의 파일을 완전히 삭제합니다. 되돌릴 수 없습니다."
+                            + ("" if recycle_size is not None else " 지금 휴지통 크기를 읽지 못했습니다.")},
         ]
         _junk_scan_state["progress"] = 100
         _junk_scan_state["eta_seconds"] = 0
@@ -495,8 +700,7 @@ def clean_junk_background(category_ids, cancel_event):
     _junk_clean_state["warnings"] = []
     _junk_clean_state["skipped_log"] = None
     _junk_clean_state["eta_seconds"] = 0      # 남은 시간은 알 수 없다. 지어내지 않는다
-    
-    import stat
+
     try:
         total_freed_bytes = 0
         total_attempt_count = 0
@@ -534,17 +738,24 @@ def clean_junk_background(category_ids, cancel_event):
 
                     total_attempt_count += 1
                     try:
-                        sz = os.path.getsize(file_path)
                         try:
-                            os.remove(file_path)
-                        except OSError:
+                            sz, refused = _delete_junk_file(file_path, root_real)
+                        except _JunkLocked as e:
+                            log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
+                            skipped_files_log.append({"path": file_path, "size_bytes": e.size})
+                            continue
+                        except OSError as e:
+                            # 열지 못했다(사용 중·권한). 크기는 디렉터리 정보로만 읽는다.
                             try:
-                                os.chmod(file_path, stat.S_IWRITE)
-                                os.remove(file_path)
-                            except Exception as e:
-                                log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
-                                skipped_files_log.append({"path": file_path, "size_bytes": sz})
-                                continue
+                                sz = os.path.getsize(file_path)
+                            except OSError:
+                                sz = 0
+                            log.debug(f"[LOCKED/SKIPPED] {file_path} - {e}")
+                            skipped_files_log.append({"path": file_path, "size_bytes": sz})
+                            continue
+                        if refused:
+                            log.info(f"정크 삭제 거부({refused}): {file_path}")
+                            continue
                         local_freed += sz
                         total_freed_bytes += sz
                         file_count += 1
@@ -586,13 +797,18 @@ def clean_junk_background(category_ids, cancel_event):
 
         # 진행률 = 끝낸 정리 대상 수 / 전체 대상 수 (휴지통 비우기 포함). 실제로 끝낸 만큼만 오른다.
         steps_total = len(target_dirs) + (1 if 5 in category_ids else 0)
+        warnings = []
         for i, d in enumerate(target_dirs):
             if cancel_event and cancel_event.is_set():
                 break
-            _clean_dir(d)
+            why = unsafe_junk_root(d) if os.path.isdir(d) else None
+            if why:
+                # _walk_junk_tree 도 막지만, 건너뛴 사실을 결과에 남긴다
+                warnings.append(f"임시 폴더 위치가 안전하지 않아 정리하지 않았습니다: {d} ({why})")
+            else:
+                _clean_dir(d)
             _junk_clean_state["progress"] = min(99, int((i + 1) * 100 / max(steps_total, 1)))
 
-        warnings = []
         recycle_freed = 0
         if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
             recycle_freed, why = _empty_recycle_bin()

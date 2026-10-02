@@ -54,3 +54,41 @@ def test_dashboard_asks_before_starting():
     assert confirm_at < body.index('startDeepOptimization()')
     # 확인을 거절하면 시작하지 않는다
     assert re.search(r'if \(!window\.confirm\([^;]*\)\) return;', body, re.S)
+
+
+def test_stopping_keeps_finished_steps_and_freed_space(recorded, monkeypatch):
+    # 정크 정리를 마친 뒤 중지했다. 예전에는 예외 문자열만 남고 지운 용량·단계가 사라졌다.
+    def clean(categories, cancel_event=None):
+        optimizer._junk_clean_state.update(status='success', freed_mb=12.5)
+        optimizer._cancel_event.set()
+    monkeypatch.setattr(optimizer, 'clean_junk_background', clean)
+
+    optimizer._run_deep_optimization()
+
+    st = optimizer.get_deep_optimization_status()
+    assert st['cancelled'] is True and st['error'] is None and st['running'] is False
+    assert [s['name'] for s in st['steps']] == ['임시 파일·브라우저 캐시 정리']
+    assert st['freed_mb'] == 12.5
+    assert '중지됨' in st['current_task'] and '되돌아오지 않습니다' in st['current_task']
+
+
+def test_disk_optimization_still_running_is_not_counted_as_failure(recorded, monkeypatch):
+    monkeypatch.setattr(system_repair, 'run_trim', lambda: {'success': True})
+    monkeypatch.setattr(system_repair, 'get_trim_status', lambda: {'status': 'running', 'error': None})
+    monkeypatch.setattr(optimizer, 'TRIM_WAIT_SEC', 0)
+
+    optimizer._run_deep_optimization()
+
+    st = optimizer.get_deep_optimization_status()
+    trim = st['steps'][-1]
+    assert trim['ok'] is False and trim['pending'] is True        # 성공으로 보이지도, 실패로 세지도 않는다
+    assert st['failedCount'] == 0 and st['pendingCount'] == 1
+    assert '실패' not in st['current_task'] and '진행 중' in st['current_task']
+
+
+def test_dashboard_shows_steps_even_when_stopped():
+    with open(os.path.join(ROOT, 'src', 'components', 'Dashboard.jsx'), encoding='utf-8') as f:
+        src = f.read()
+    # 중지·오류도 finishOptimization 으로 단계 결과를 보여 주고, 진행 중 단계는 실패로 세지 않는다
+    assert "status.error.includes" not in src
+    assert '!st.ok && !st.pending' in src

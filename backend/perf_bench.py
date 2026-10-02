@@ -44,7 +44,17 @@ def _current_mode():
     except Exception as e:
         return None, f'지금 모드를 읽지 못했습니다: {e}'
     if info.get('boostOverride'):
-        return 'gaming', None
+        # '게임이 끝나면 돌아갈 모드가 기록돼 있다' 는 뜻일 뿐, 게이밍 전환이 성공했다는 뜻은 아니다.
+        # 실제로 게이밍 플랜이 걸려 있을 때만 게이밍 결과로 남긴다.
+        try:
+            from backend import system_state as ss
+            expected, _ = perf_modes._plan_fallback(ss.PLAN_HIGH_PERF)
+        except Exception:
+            expected = None
+        if expected and info.get('activePlan') == expected:
+            return 'gaming', None
+        return None, ("게임 부스트가 게이밍 전원 모드로 바꾸지 못한 상태라 어느 모드의 결과인지 알 수 없습니다. "
+                      "게임이 끝난 뒤 측정해 주세요.")
     if not info.get('inSync', True):
         return None, ("지금 전원 설정이 선택한 모드와 달라 어느 모드의 결과인지 알 수 없습니다. "
                       "성능 모드를 다시 눌러 맞춘 뒤 측정해 주세요.")
@@ -74,16 +84,27 @@ def run(seconds=BENCH_SECONDS):
         _measure(0.3)                                # 부스트가 올라올 시간을 준다
         score = _measure(seconds)
         clock = system_monitor.get_system_stats() or {}
+        # 측정하는 동안 모드가 바뀌었으면(사용자·게임 부스트) 이 점수는 어느 모드의 것도 아니다. 남기지 않는다.
+        after, why_after = _current_mode()
+        if why_after or after != mode:
+            return {'success': False,
+                    'message': '측정하는 동안 성능 모드가 바뀌어 결과를 버렸습니다. 모드를 바꾸지 말고 다시 측정해 주세요.'}
         result = {'score': round(score), 'clockMHz': clock.get('cpuClockMHz'),
                   'at': time.strftime('%Y-%m-%d %H:%M')}
-        results = get_results()
-        results[mode] = result
+
+        def put(cfg):
+            data = cfg.get(_SETTINGS_KEY)
+            data = dict(data) if isinstance(data, dict) else {}
+            data[mode] = result
+            cfg[_SETTINGS_KEY] = data
         try:
             from backend import config_manager
-            if not config_manager.update_config(lambda cfg: cfg.__setitem__(_SETTINGS_KEY, results)):
+            if not config_manager.update_config(put):
                 log.warning('측정 결과를 저장하지 못했습니다')
         except Exception as e:
             log.warning(f'측정 결과를 저장하지 못했습니다: {e}')
+        results = get_results()
+        results.setdefault(mode, result)
         return {'success': True, 'mode': mode, 'result': result, 'results': results,
                 'message': f"{result['score']} MB/s"}
     except Exception as e:

@@ -26,6 +26,13 @@ def get_html_path():
     return "http://localhost:5173"
 
 if __name__ == '__main__':
+    # 한 번에 하나만. 두 번째로 켜면 떠 있는 창을 앞으로 가져오고 끝낸다(Api 를 만들기 전에 —
+    # 생성자가 저장된 모드를 다시 적용하고 게임 부스트를 켠다).
+    from backend import single_instance
+    if not single_instance.acquire():
+        single_instance.focus_existing('APEX CARE')
+        sys.exit(0)
+
     html_path = get_html_path()
     
     api = Api(None)

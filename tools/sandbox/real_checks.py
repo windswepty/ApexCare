@@ -557,6 +557,44 @@ def link_guard():
     return verdict(problems, [])
 
 
+@check('삭제 안전: 휴지통에 들어가지 않는 대상(휴지통 사용 안 함·휴지통보다 큼)은 지우지 않음')
+def recycle_guard():
+    import shutil
+    from backend import safe_delete
+    base = os.path.join(os.environ['LOCALAPPDATA'], 'ApexSbxRecycleCheck')
+    os.makedirs(base, exist_ok=True)
+    target = os.path.join(base, 'keep.bin')
+    with open(target, 'wb') as f:
+        f.write(b'x' * 4096)
+    problems = []
+    dtype, guid, total = safe_delete._volume_info(target)
+    if dtype != safe_delete.DRIVE_FIXED or not guid or not total:
+        problems.append(f'볼륨 정보를 읽지 못했습니다: {(dtype, guid, total)}')
+    key = safe_delete._BITBUCKET + '\\' + (guid or '')
+    old = reg_get('HKCU', key, 'NukeOnDelete')
+    try:
+        if guid:
+            reg_set('HKCU', key, 'NukeOnDelete', 1, winreg.REG_DWORD)     # '휴지통 사용 안 함' 으로 바꿔 본다
+            r = safe_delete.to_recycle_bin([target])
+            if r.get('ok') or not os.path.exists(target):
+                problems.append(f'휴지통을 쓰지 않는 드라이브에서 파일을 지웠습니다(영구 삭제): {r}')
+        # 휴지통보다 큰 대상(크기만 키워 판정)
+        if safe_delete.recycle_block_reason(target, 10 ** 15) is None:
+            problems.append('휴지통보다 큰 대상을 거부하지 않았습니다')
+    finally:
+        if guid:
+            if old is None:
+                reg_del('HKCU', key, 'NukeOnDelete')
+            else:
+                reg_set('HKCU', key, 'NukeOnDelete', old[0] if isinstance(old, tuple) else old, winreg.REG_DWORD)
+    # 원래 설정에서는 휴지통으로 간다(복구 가능)
+    r = safe_delete.to_recycle_bin([target])
+    if not r.get('ok') or os.path.exists(target):
+        problems.append(f'평소 설정에서 휴지통으로 보내지 못했습니다: {r}')
+    shutil.rmtree(base, ignore_errors=True)                          # 이 점검이 만든 폴더만 지운다
+    return verdict(problems, [])
+
+
 @check('프로세스 우선순위: 바꾸고 원래대로, 시스템 프로세스는 거부')
 def priority():
     import psutil
@@ -580,6 +618,15 @@ def priority():
         process_boost.restore(pid)
         if psutil.Process(pid).nice() != before:
             problems.append('원래 우선순위로 돌아오지 않았습니다')
+        # 게임 부스트가 낮춘 채 앱이 비정상 종료된 경우: 파일 기록으로 다음 실행 때 되돌린다
+        r = process_boost.set_priority(pid, 'idle', owner='boost')
+        if not r.get('ok'):
+            problems.append(f'부스트로 낮추지 못했습니다: {r}')
+        process_boost._original.clear()                  # 비정상 종료(메모리 기록이 사라짐)
+        n, bad = process_boost.recover_after_crash()
+        if n != 1 or bad or psutil.Process(pid).nice() != before:
+            problems.append(f'비정상 종료 뒤 원래 우선순위로 되돌리지 못했습니다: {n}건, {bad}, '
+                            f'지금 {psutil.Process(pid).nice()}')
         # 이 점검이 직접 띄운 자식은 앱이 자기 프로세스로 보고 막아야 한다
         child = subprocess.Popen([ping, '-t', '127.0.0.4'], shell=False, stdout=subprocess.DEVNULL,
                                  creationflags=CREATE_NO_WINDOW)

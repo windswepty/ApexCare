@@ -169,7 +169,11 @@ class Api:
     def revertAllSystemChanges(self):
         """이 앱이 바꾼 모든 시스템 설정을 원래대로 되돌린다."""
         game_booster.forget_power_mode_restore()
-        return perf_modes.revert_everything()
+        r = perf_modes.revert_everything()
+        if r.get('success') or r.get('restored'):
+            # 부스트의 Nagle 변경도 저널에서 되돌려졌다. 게이밍 화면이 '적용 중' 으로 계속 보이지 않게 한다.
+            game_booster.after_external_revert()
+        return r
 
     def getPendingSystemChanges(self):
         """아직 되돌리지 않은 변경 목록. UI 가 '되돌리기' 버튼 노출 여부를 판단한다.

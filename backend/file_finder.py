@@ -19,7 +19,43 @@ _BLOCKED_COMPONENTS = {
     'system volume information', '$recycle.bin', 'windowsapps',
     'steamlibrary', 'steamapps', 'origin games', 'riot games', 'epic games',
     'battle.net', 'ubisoft game launcher',
+    # 드라이브 루트에 기본으로 설치하는 런처들. Xbox 앱(게임 패스)은 XboxGames, GOG 단독 설치는 GOG Games,
+    # 아마존은 Amazon Games, 넥슨은 Nexon. 다른 드라이브에 옮겨 설치한 EA·Rockstar 도 같은 이름을 쓴다.
+    'xboxgames', 'gog games', 'amazon games', 'nexon', 'ea games', 'rockstar games',
 }
+
+
+def _read_gaming_root(drive_root):
+    """Xbox 앱이 드라이브 루트에 남기는 .GamingRoot 에 적힌 게임 폴더(절대 경로) 목록.
+
+    사용자가 Xbox 앱에서 설치 폴더 이름을 바꿀 수 있어서 이름 목록만으로는 못 거른다.
+    형식: b'RGBX' + 개수(uint32 LE) + 드라이브 루트 기준 상대 경로(UTF-16LE, 널 종료)들.
+    """
+    marker = os.path.join(drive_root, '.GamingRoot')
+    if not os.path.isfile(marker) or _is_cloud_only(marker):
+        return []
+    try:
+        with open(marker, 'rb') as f:
+            raw = f.read(4096)
+    except OSError:
+        return []
+    if len(raw) < 8 or raw[:4] != b'RGBX':
+        return []
+    count = int.from_bytes(raw[4:8], 'little')
+    names = raw[8:].decode('utf-16-le', errors='ignore').split('\x00')
+    out = []
+    for n in names[:max(count, 0)]:
+        n = n.strip().strip('\\/')
+        if n:
+            out.append(os.path.join(drive_root, n))
+    return out
+
+
+def _gaming_roots():
+    roots = []
+    for d in get_local_drives():
+        roots.extend(_read_gaming_root(d))
+    return roots
 
 
 # OneDrive 같은 클라우드 동기화의 '온라인 전용' 파일 표시. 이 파일은 내용을 읽거나(해시) 쓰기로 열면
@@ -59,7 +95,7 @@ def _system_roots():
     return [os.environ.get(k) for k in _SYSTEM_ENV_ROOTS if os.environ.get(k)]
 
 
-def _blocked_reason(path):
+def _blocked_reason(path, gaming_roots=()):
     """이 파일을 스캔·삭제 대상으로 삼으면 안 되는 이유. 괜찮으면 None.
 
     예전에는 경로 문자열에 'program files' 같은 조각이 들어 있는지만 봤다.
@@ -73,13 +109,16 @@ def _blocked_reason(path):
     parts = {c.lower() for c in re.split(r'[\\/]+', real) if c}
     if parts & _BLOCKED_COMPONENTS:
         return "게임 라이브러리·시스템 폴더"
+    for g in gaming_roots:                     # Xbox 앱이 .GamingRoot 에 적어 둔 설치 폴더(이름을 바꿨어도)
+        if safe_delete.is_inside(real, g):
+            return "게임 라이브러리·시스템 폴더"
     # safe_delete.is_protected 는 쓰지 않는다. 그건 '폴더를 통째로 지워도 되나' 판정이라
     # 문서·다운로드·사용자 폴더 자체를 막는다(스캔이 그 안으로 못 들어간다).
     # 파일 하나를 휴지통으로 보내는 단계(to_recycle_bin)가 그 검사를 따로 한다.
     return None
 
 
-def _walk_user_files(top, exclude_dirs):
+def _walk_user_files(top, exclude_dirs, gaming_roots=()):
     """드라이브를 돈다. 링크·정션인 폴더와 시스템 영역에는 들어가지 않는다.
 
     os.walk 는 정션을 따라간다. 'Documents and Settings' 같은 정션을 따라가면 같은 파일이
@@ -91,7 +130,7 @@ def _walk_user_files(top, exclude_dirs):
             if d in exclude_dirs or d.startswith('.'):
                 continue
             full = os.path.join(root, d)
-            if _is_link_like(full) or _blocked_reason(full):
+            if _is_link_like(full) or _blocked_reason(full, gaming_roots):
                 continue
             kept.append(d)
         dirs[:] = kept
@@ -101,7 +140,9 @@ def get_local_drives():
     import psutil
     drives = []
     for p in psutil.disk_partitions(all=False):
-        if p.fstype and 'cdrom' not in p.opts:
+        # 고정 디스크만. USB 메모리·네트워크 드라이브는 휴지통이 없어 이 화면에서 지울 수 없다
+        # (safe_delete 가 영구 삭제를 막는다). 지울 수 없는 파일을 목록에 올리지 않는다.
+        if p.fstype and 'fixed' in (p.opts or '').split(','):
             drives.append(p.mountpoint)
     return drives if drives else ['C:\\']
 
@@ -110,6 +151,7 @@ def scan_large_files(min_mb=500):
     drives = get_local_drives()
     min_bytes = min_mb * 1024 * 1024
     large_files = []
+    gaming = _gaming_roots()
     
     # Exclude system folders AND game platforms to prevent breaking things
     exclude_dirs = [
@@ -124,7 +166,7 @@ def scan_large_files(min_mb=500):
         if not os.path.exists(target_dir):
             continue
             
-        for root, files in _walk_user_files(target_dir, exclude_dirs):
+        for root, files in _walk_user_files(target_dir, exclude_dirs, gaming):
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 if ext in DANGER_EXTS:
@@ -179,13 +221,14 @@ def scan_duplicates():
     
     file_sizes = {}
     seen_real = set()
+    gaming = _gaming_roots()
     
     # First pass: group files by size
     for target_dir in drives:
         if not os.path.exists(target_dir):
             continue
             
-        for root, files in _walk_user_files(target_dir, exclude_dirs):
+        for root, files in _walk_user_files(target_dir, exclude_dirs, gaming):
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 if ext in DANGER_EXTS:
@@ -254,6 +297,7 @@ def delete_files(paths):
                 "message": "선택된 항목이 없습니다."}
 
     targets, rejected = [], []
+    gaming = _gaming_roots()
     for p in paths:
         if not isinstance(p, str) or not os.path.exists(p):
             rejected.append({"path": p, "reason": "파일이 존재하지 않습니다"})
@@ -266,7 +310,7 @@ def delete_files(paths):
             # 로컬 공간을 쓰지 않는다. 지우면 클라우드(OneDrive 등)의 원본이 지워진다.
             rejected.append({"path": p, "reason": "클라우드에만 있는 파일(이 PC 의 공간을 쓰지 않음)"})
             continue
-        reason = _blocked_reason(p)
+        reason = _blocked_reason(p, gaming)
         if reason:
             rejected.append({"path": p, "reason": reason})
             continue

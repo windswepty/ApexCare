@@ -8,6 +8,7 @@ import {
   HardDrive,
   MemoryStick,
   XCircle,
+  Loader2,
   Monitor
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -225,16 +226,9 @@ export default function Dashboard({ addToast, active = true }) {
                 
                 if (!status.running) {
                   clearInterval(optPollInterval.current);
-                  if (status.error) {
-                    if (status.error.includes("취소")) {
-                      setModalMessage({ title: '작업 취소', text: '사용자에 의해 최적화가 중단되었습니다.', isError: false });
-                    } else {
-                      setModalMessage({ title: '오류 발생', text: status.error, isError: true });
-                    }
-                    setIsScanning(false);
-                  } else {
-                    finishOptimization(status);
-                  }
+                  // 중지·오류여도 그때까지 끝낸 단계(이미 지운 파일, 계속 도는 디스크 최적화)를 그대로 보여 준다.
+                  // 예전에는 '중단되었습니다' 만 띄워, 지운 용량과 이전 실행 결과가 섞여 보였다.
+                  finishOptimization(status);
                 }
               }
             } catch (err) {
@@ -259,28 +253,48 @@ export default function Dashboard({ addToast, active = true }) {
   // 백엔드가 돌려준 단계별 성패를 그대로 보여준다. 부분 실패는 성공이 아니다.
   const finishOptimization = (status) => {
     const steps = Array.isArray(status.steps) ? status.steps : [];
-    const failedCount = steps.filter(st => !st.ok).length;
-    setLastRun({ steps, failedCount });
+    // 백그라운드에서 아직 도는 단계(pending, 예: 오래 걸리는 HDD 조각 모음)는 실패가 아니다
+    const failedCount = steps.filter(st => !st.ok && !st.pending).length;
+    const pendingCount = steps.filter(st => st.pending).length;
+    const cancelled = !!status.cancelled;
+    const error = status.error || null;
+    // 이번 실행 결과로 바꾼다(단계가 하나도 없으면 비운다). 예전 실행 결과를 '최근 실행 결과' 로 남기지 않는다.
+    setLastRun(steps.length ? { steps, failedCount, pendingCount, cancelled, error } : null);
 
+    // 중지·오류여도 이미 지운 용량은 확보한 것이다
     const freedMB = Number(status.freed_mb) || 0;
-    const now = new Date().toLocaleDateString('ko-KR');
-    localStorage.setItem('apex_last_optimized', now);
-    setLastOptimized(now);
+    if (steps.length) {
+      const now = new Date().toLocaleDateString('ko-KR');
+      localStorage.setItem('apex_last_optimized', now);
+      setLastOptimized(now);
+      const newTotalFreed = totalFreed + freedMB;
+      localStorage.setItem('apex_total_freed', newTotalFreed);
+      setTotalFreed(newTotalFreed);
+    }
 
-    const newTotalFreed = totalFreed + freedMB;
-    localStorage.setItem('apex_total_freed', newTotalFreed);
-    setTotalFreed(newTotalFreed);
-
-    if (failedCount === 0 && steps.length > 0) {
-      try {
-        confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
-      } catch {
-        // 장식일 뿐이다. 실패해도 결과 표시는 이어 간다
+    const bg = pendingCount ? ' 디스크 최적화는 백그라운드에서 계속 진행됩니다.' : '';
+    if (cancelled) {
+      setModalMessage({
+        title: '최적화를 중지했습니다',
+        text: `${steps.length}단계까지 실행했습니다. 이미 지운 파일은 되돌아오지 않습니다.${bg} 단계별 결과는 화면에서 확인하세요.`,
+        isError: false,
+      });
+    } else if (error) {
+      setModalMessage({ title: '오류 발생', text: `${error}${steps.length ? ' 그 전까지의 단계 결과는 화면에서 확인하세요.' : ''}`, isError: true });
+    } else if (failedCount === 0 && steps.length > 0) {
+      if (pendingCount === 0) {
+        try {
+          confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
+        } catch {
+          // 장식일 뿐이다. 실패해도 결과 표시는 이어 간다
+        }
+        if (addToast) addToast(`원클릭 최적화를 마쳤습니다 (${steps.length}단계 모두 성공).`, 'success');
+      } else if (addToast) {
+        addToast(`원클릭 최적화: ${steps.length - pendingCount}단계를 마쳤습니다.${bg}`, 'info');
       }
-      if (addToast) addToast(`원클릭 최적화를 마쳤습니다 (${steps.length}단계 모두 성공).`, 'success');
     } else if (addToast) {
       addToast(steps.length
-        ? `원클릭 최적화: ${steps.length}단계 중 ${failedCount}단계 실패. 결과를 확인하세요.`
+        ? `원클릭 최적화: ${steps.length}단계 중 ${failedCount}단계 실패.${bg} 결과를 확인하세요.`
         : '원클릭 최적화 결과를 받지 못했습니다.', 'error');
     }
     setIsScanning(false);
@@ -382,13 +396,17 @@ export default function Dashboard({ addToast, active = true }) {
           {lastRun && !isScanning && (
             <div className="w-full md:w-72 space-y-2">
               <div className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400">
-                최근 실행 결과 — {lastRun.steps.length - lastRun.failedCount}/{lastRun.steps.length} 단계 성공
+                최근 실행 결과{lastRun.cancelled ? ' (중지함)' : lastRun.error ? ' (오류로 멈춤)' : ''} —{' '}
+                {lastRun.steps.length - lastRun.failedCount - (lastRun.pendingCount || 0)}/{lastRun.steps.length} 단계 성공
+                {lastRun.pendingCount > 0 && `, ${lastRun.pendingCount}단계 진행 중`}
               </div>
               {lastRun.steps.map((st, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   {st.ok
                     ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                    : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />}
+                    : st.pending
+                      ? <Loader2 className="w-4 h-4 text-amber-500 flex-shrink-0" aria-label="진행 중" />
+                      : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />}
                   <div className="min-w-0">
                     <div className="font-semibold text-black dark:text-white">{st.name}</div>
                     {st.detail && <div className="text-gray-500 dark:text-gray-400 break-words">{st.detail}</div>}

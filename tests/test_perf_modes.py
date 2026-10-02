@@ -240,3 +240,78 @@ def test_mode_cards_use_registered_plan_names():
     cards = {m['id']: m for m in perf_modes.list_modes()}
     assert cards['gaming']['planName'] == '고성능 (사용자 지정)'
     assert cards['standard']['planName'] == '원래 플랜 유지'
+
+
+# ── 감사에서 나온 것: 플랜 실패·개수·저장 실패·동시 실행 ─────────────
+
+def test_plan_switch_failure_writes_nothing_else_and_says_standard():
+    _seed_plans()
+    assert perf_modes.apply_mode('eco')['success']
+    POWER.fail_set_active = True                     # 정책·제조사 도구가 플랜 전환을 막는다
+
+    r = perf_modes.apply_mode('gaming')
+
+    # 세부값·레지스트리를 쓰지 않는다(예전에는 비활성 플랜과 시스템 레지스트리를 바꿨다)
+    assert REGISTRY.get('HKLM', MM, 'NetworkThrottlingIndex') is None
+    assert not [k for k in ss.pending_changes() if not k.startswith('power:active_plan')]
+    assert r['success'] is False and r['partial'] is False and r['fellBackTo'] == 'standard'
+    assert '표준 상태' in r['message']
+    assert config_manager.get_optimization_mode() == 'standard'      # 화면이 '에코 사용 중' 으로 남지 않는다
+
+
+def test_revert_step_is_not_counted_as_applied():
+    _seed_plans()
+    s = perf_modes.apply_mode('standard')
+    assert s['appliedCount'] == 0 and s['restoredCount'] == 0 and s['failedCount'] == 0
+    g = perf_modes.apply_mode('gaming')
+    work = [x for x in g['steps'] if not x.get('revert')]
+    assert g['appliedCount'] == len([x for x in work if x['ok'] and not x.get('skipped')])
+    assert f"({g['appliedCount']}개 항목" in g['message']
+
+
+def test_registry_items_say_they_need_a_reboot():
+    _seed_plans()
+    g = perf_modes.apply_mode('gaming')
+    mm = [x for x in g['steps'] if 'MMCSS' in x['name']]
+    assert mm and '재부팅' in mm[0]['detail']
+    assert any('재부팅' in n for n in g['notes'])
+
+
+def test_revert_everything_reports_failed_mode_save(monkeypatch):
+    _seed_plans()
+    perf_modes.apply_mode('gaming')
+    monkeypatch.setattr(config_manager, 'set_optimization_mode', lambda *a, **k: False)
+    r = perf_modes.revert_everything()
+    # 저장하지 못하면 다음 실행 때 게이밍이 다시 적용된다. 성공이라고 하지 않는다.
+    assert r['success'] is False
+    assert any(p['name'] == '성능 모드 기록' and not p['ok'] for p in r['parts'])
+
+
+def test_fallback_uses_current_plan_when_balanced_is_missing():
+    custom = '22222222-3333-4444-5555-666666666666'
+    POWER.plans = {custom: '내 플랜', '33333333-4444-5555-6666-777777777777': '다른 플랜'}
+    POWER.active = custom
+    plan, note = perf_modes._plan_fallback(fakewin.PLAN_HIGH_PERF)
+    assert plan == custom and '내 플랜' in note and '찾지 못했습니다' not in note
+
+
+def test_two_mode_changes_at_once_keep_the_original_values():
+    # 앱 시작 때 저장된 모드 재적용과 게임 부스트의 게이밍 전환이 겹친 경우. 잠금이 없으면 한쪽의 되돌리기가
+    # 다른 쪽이 막 기록한 원래 값을 지워, '전부 원래대로' 뒤에도 값이 남았다.
+    import threading
+    _seed_plans()
+    before = _snapshot()
+    for _ in range(15):                     # 경합은 가끔만 드러난다. 여러 번 겹쳐 돌린다.
+        barrier = threading.Barrier(2)
+
+        def run(mode):
+            barrier.wait()
+            perf_modes.apply_mode(mode, user_set=False, persist=False)
+        threads = [threading.Thread(target=run, args=(m,)) for m in ('eco', 'gaming')]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert perf_modes.revert_everything()['success']
+        assert _snapshot() == before and ss.pending_changes() == {}

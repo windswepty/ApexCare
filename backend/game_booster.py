@@ -22,10 +22,10 @@ import logging
 logging.basicConfig(level=logging.INFO, format='[GameBooster] %(message)s')
 log = logging.getLogger('GameBooster')
 
-# 에코·부스트 억제 기준: 이 % 이상 CPU 를 쓰는 프로세스만 건드린다.
-# 유휴 상태인 앱의 우선순위를 낮춰봐야 얻는 것은 없고,
-# 그 앱이 깨어날 때 느려지기만 한다.
-ECO_CPU_THRESHOLD = 5.0
+# 에코·부스트 억제 기준: 작업 관리자 기준으로 전체 CPU 의 이 % 이상을 쓰는 프로세스만 건드린다.
+# 유휴 상태인 앱의 우선순위를 낮춰봐야 얻는 것은 없고, 그 앱이 깨어날 때 느려지기만 한다.
+# 예전 값 5.0 은 코어 하나를 100% 로 보는 단위였다(16스레드 PC 에서 작업 관리자 0.3%).
+ECO_CPU_THRESHOLD = 3.0
 ECO_INTERVAL_SEC = 10
 
 # system_state 저널에서 게임 부스트가 바꾼 레지스트리(Nagle)를 묶는 그룹
@@ -383,7 +383,8 @@ def _boost_game_processes(pids):
         r = process_boost.set_priority(pid, 'high', reason='(게임 부스트)', owner=OWNER)
         if r.get('ok'):
             boosted += 1
-            _set_process_power_throttling(pid, False)
+            if _set_process_power_throttling(pid, False):
+                process_boost.mark_ecoqos(pid)          # 되돌릴 때 시스템 관리로 돌려준다
         else:
             log.warning(f"  ✗ 게임 우선순위를 올리지 못했습니다 (PID {pid}): {r.get('reason')}")
     return boosted
@@ -397,23 +398,29 @@ def _tame_processes(pids, owner=OWNER):
         r = process_boost.set_priority(pid, 'idle', reason='(부스트 억제)', owner=owner)
         if r.get('ok'):
             tamed.append(pid)
-            _set_process_power_throttling(pid, True)
+            if _set_process_power_throttling(pid, True):
+                process_boost.mark_ecoqos(pid)
     if tamed:
         log.info(f"백그라운드 프로세스 {len(tamed)}개의 우선순위를 낮췄습니다")
     return tamed
 
 
 def _restore_processes(pids, owner=OWNER):
-    """기록해둔 원래 우선순위로 되돌리고 EcoQoS 는 시스템에 맡긴다.
+    """기록해둔 원래 우선순위로 되돌리고 EcoQoS 는 시스템에 맡긴다. 되돌리지 못한 것의 설명 목록을 돌려준다.
 
     사용자가 그 사이 게이밍 탭에서 직접 바꾼 프로세스는 건드리지 않는다.
+    EcoQoS 는 process_boost.restore 가 같은 프로세스(생성 시각 확인)일 때만 되돌린다. 예전에는 여기서
+    PID 만 보고 되돌려, 끝난 앱의 PID 를 물려받은 다른 프로세스(시스템 서비스 포함)의 효율 모드를 바꿨다.
     """
     from backend import process_boost
+    failed = []
     for pid in pids:
         if process_boost.owner_of(pid) != owner:
             continue
-        _set_process_power_throttling(pid, None)
-        process_boost.restore(pid)
+        r = process_boost.restore(pid)
+        if not r.get('ok'):
+            failed.append(f"{r.get('name', pid)}: {r.get('reason', '실패')}")
+    return failed
 
 
 def _pick_tame_targets(exclude_pids):
@@ -438,6 +445,11 @@ def _enter_boost_mode():
     from backend import config_manager
     cfg = config_manager.load_config()
     labels = []
+    if config_manager.is_unreadable(cfg):
+        # 사용자가 켜 둔 항목이 무엇인지 모른다. 기본값으로 적용하면 사용자가 끈 항목(양보 등)이 켜진다.
+        log.warning("설정 파일을 읽지 못해 이번 게임에는 부스트를 적용하지 않았습니다")
+        _booster_state['appliedBoosts'] = []
+        return
 
     # 타이머 해상도: 세션 한정. 우리 요청을 거두면 원래대로 돌아간다.
     # Windows 10 2004 부터는 요청한 프로세스에만 적용돼 게임에는 효과가 없다. 그때는 요청하지 않는다.
@@ -508,17 +520,34 @@ def _restore_power_mode():
         log.warning(f"전원 모드 복구 실패: {e}")
 
 
+def _drop_label(prefix):
+    _booster_state['appliedBoosts'] = [x for x in _booster_state.get('appliedBoosts', [])
+                                       if not str(x).startswith(prefix)]
+
+
 def forget_power_mode_restore():
     """사용자가 게임 도중 직접 성능 모드를 고르면 부른다.
 
     그 뒤에 게임이 끝났다고 게임 전 모드로 되돌리면 사용자의 선택을 덮어쓴다.
+    화면의 '적용 중' 목록에서도 뺀다. 예전에는 사용자가 모드를 바꾼 뒤에도 '게이밍 전원 모드' 가 계속 보였다.
     """
     _applied.pop('power_mode_prev', None)
+    _drop_label('게이밍 전원 모드')
     try:
         from backend import config_manager
         config_manager.set_boost_restore_mode(None)
     except Exception:
         pass
+
+
+def after_external_revert():
+    """'전부 원래대로' 가 저널을 되돌린 뒤 부른다. 부스트의 Nagle 기록이 모두 되돌려졌을 때만 '적용 중' 에서 뺀다."""
+    from backend import system_state as ss
+    if any(e.get('group') == BOOST_GROUP for e in ss.pending_changes().values()):
+        return                      # 일부가 남았다. 게임이 끝날 때 다시 되돌리도록 그대로 둔다
+    _applied.pop('nagle', None)
+    _booster_state["nagle_disabled"] = False
+    _drop_label('Nagle 끄기')
 
 
 def power_mode_overridden():
@@ -527,28 +556,41 @@ def power_mode_overridden():
 
 
 def _exit_boost_mode():
-    """부스트에서 '실제로 적용한 것' 만 되돌린다."""
+    """부스트에서 '실제로 적용한 것' 만 되돌린다. 되돌리지 못한 것의 설명 목록을 돌려준다."""
+    failed = []
     if _applied.pop('timer', False):
         _set_timer_resolution(False)
     if _applied.pop('nagle', False):
-        _restore_nagle()
-    _restore_power_mode()
+        r = _restore_nagle()
+        failed += [f"Nagle: {f.get('reason', '실패')}" for f in (r.get('failed') or [])]
+    if 'power_mode_prev' in _applied:
+        prev = _applied.get('power_mode_prev')
+        _restore_power_mode()
+        if 'power_mode_prev' not in _applied:
+            try:
+                from backend import config_manager
+                if config_manager.get_boost_restore_mode():
+                    failed.append(f"게임 전 성능 모드({prev})로 되돌리지 못했습니다")
+            except Exception:
+                pass
     _applied.pop('tame', None)
     _booster_state['appliedBoosts'] = []
-    log.info("부스트 종료: 적용했던 설정을 되돌렸습니다")
+    log.info("부스트 종료: 적용했던 설정을 되돌렸습니다" + (f" (실패 {len(failed)}건)" if failed else ""))
+    return failed
 
 
 def _teardown():
-    """게임 세션을 끝낸다. 루프, 부스터 끄기, 앱 종료가 모두 이 한 곳을 쓴다."""
+    """게임 세션을 끝낸다. 루프, 부스터 끄기, 앱 종료가 모두 이 한 곳을 쓴다. 되돌리지 못한 것의 목록을 돌려준다."""
     global _tamed_pids
     with _teardown_lock:
-        _restore_processes(list(_tamed_pids))
+        failed = _restore_processes(list(_tamed_pids))
         _tamed_pids = set()
-        _restore_processes(_booster_state["boosted_pids"])
-        _exit_boost_mode()
+        failed += _restore_processes(_booster_state["boosted_pids"])
+        failed += _exit_boost_mode()
         _booster_state["active"] = False
         _booster_state["detected_game"] = None
         _booster_state["boosted_pids"] = []
+        return failed
 
 
 # ─────────────────────────────────────────────
@@ -611,8 +653,22 @@ def _booster_loop():
                         _booster_state["boosted_pids"] = current_game_pids
 
                     if _applied.get('tame'):
-                        targets = _pick_tame_targets(set(current_game_pids) | _tamed_pids)
-                        _tamed_pids |= set(_tame_processes(targets))
+                        from backend import config_manager, process_boost
+                        cfg = config_manager.load_config()
+                        if not config_manager.is_unreadable(cfg) and not cfg.get('boost_tame_background', True):
+                            # 게임 도중 사용자가 '양보시키기' 를 껐다. 예전에는 게임이 끝날 때까지 계속 낮췄다.
+                            _restore_processes(list(_tamed_pids))
+                            _tamed_pids = set()
+                            _applied.pop('tame', None)
+                            _drop_label('바쁜 백그라운드 앱 양보')
+                        else:
+                            # 낮춘 앱이 지금 쓰는 창이 되면 바로 돌려준다(게임이 끝날 때까지 기다리지 않는다)
+                            back = _tamed_pids & process_boost.foreground_group(_get_foreground_pid())
+                            if back:
+                                _restore_processes(list(back))
+                                _tamed_pids -= back
+                            targets = _pick_tame_targets(set(current_game_pids) | _tamed_pids)
+                            _tamed_pids |= set(_tame_processes(targets))
 
                 _stop_event.wait(5)
             else:
@@ -649,23 +705,28 @@ def toggle_booster(enabled):
         log.info("✓ Game Booster ENABLED - monitoring for games...")
 
     reverted = False
+    revert_failed = []
     if not enabled:
         # 루프에 맡기지 않고 지금 되돌린다. 그래야 '되돌렸습니다' 가 사실이 된다.
         with _teardown_lock:
             if _booster_state["active"] or _applied or _tamed_pids:
-                _teardown()
+                revert_failed = _teardown()
                 reverted = True
         log.info("✓ Game Booster DISABLED")
 
     if enabled:
         msg = "게임 자동 감지를 켰습니다."
+    elif reverted and revert_failed:
+        msg = (f"게임 자동 감지를 껐습니다. 게임 동안 적용했던 설정 중 {len(revert_failed)}개를 되돌리지 못했습니다: "
+               f"{revert_failed[0]}")
     elif reverted:
         msg = "게임 자동 감지를 껐습니다. 게임 동안 적용했던 설정을 되돌렸습니다."
     else:
         msg = "게임 자동 감지를 껐습니다."
     if not saved:
         msg += " 설정 파일에 저장하지 못해 다음 실행 때는 이전 상태로 시작합니다."
-    return {"success": True, "enabled": enabled, "saved": saved, "reverted": reverted, "message": msg}
+    return {"success": not revert_failed, "enabled": enabled, "saved": saved, "reverted": reverted,
+            "revertFailed": revert_failed, "message": msg}
 
 
 def _recover_after_crash():
@@ -674,7 +735,12 @@ def _recover_after_crash():
     부스트는 세션 한정이 원칙인데 Nagle(레지스트리)과 전원 모드는 프로세스가
     죽어도 남는다. 앱을 막 켠 시점에는 게임 세션이 없으므로 남은 것은 전부 잔여물이다.
     """
-    from backend import config_manager, system_state as ss
+    from backend import config_manager, process_boost, system_state as ss
+    # 낮춰 둔 백그라운드 앱·올려 둔 게임의 우선순위와 효율 모드. 예전에는 메모리에만 기록해 남았고,
+    # 다시 켜면 그 IDLE 이 '원래 값' 으로 굳었다.
+    n, bad = process_boost.recover_after_crash()
+    if n or bad:
+        log.info(f"지난 세션의 프로세스 우선순위 복구: {n}건" + (f", 실패 {len(bad)}건" if bad else ""))
     prev = config_manager.get_boost_restore_mode()
     if prev:
         try:
@@ -698,7 +764,10 @@ def init_booster():
         log.warning(f"지난 세션 정리 실패: {e}")
     try:
         from backend import config_manager
-        if config_manager.get_booster_state():
+        state = config_manager.get_booster_state()
+        if state is None:
+            log.warning("설정 파일을 읽지 못해 게임 부스터를 켜지 않았습니다(저장된 상태를 모름)")
+        elif state:
             toggle_booster(True)
     except Exception as e:
         log.warning(f"Failed to auto-init booster: {e}")

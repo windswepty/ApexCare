@@ -3,6 +3,7 @@
 import pytest
 
 from backend import config_manager, perf_bench, perf_modes
+from tests import fakewin
 from tests.fakewin import POWER, REGISTRY, SERVICES
 
 
@@ -56,9 +57,25 @@ def test_mode_comes_from_backend_not_screen(quick, monkeypatch):
 
 def test_result_goes_to_the_mode_that_is_really_applied(quick, monkeypatch):
     # 저장된 모드는 에코인데 게임 부스트가 게임 동안 게이밍을 쓰는 중이면, 그 측정은 게이밍 결과다
-    _mode_is(monkeypatch, 'eco', boostOverride=True)
+    _mode_is(monkeypatch, 'eco', boostOverride=True, activePlan=fakewin.PLAN_HIGH_PERF)
     assert perf_bench.run(0.05)['mode'] == 'gaming'
     assert 'eco' not in perf_bench.get_results()
+
+
+def test_boost_that_failed_to_switch_plan_is_not_recorded_as_gaming(quick, monkeypatch):
+    # 부스트가 '돌아갈 모드' 만 기록하고 게이밍 전환에는 실패했다(지금은 균형 조정). 게이밍 결과가 아니다.
+    _mode_is(monkeypatch, 'eco', boostOverride=True, activePlan=fakewin.PLAN_BALANCED)
+    r = perf_bench.run(0.05)
+    assert r['success'] is False and perf_bench.get_results() == {}
+
+
+def test_mode_changed_during_measurement_is_discarded(quick, monkeypatch):
+    modes = iter(['standard', 'gaming'])                 # 시작할 때는 표준, 끝날 때는 게이밍
+    monkeypatch.setattr(perf_modes, 'get_mode',
+                        lambda: {'mode': next(modes), 'inSync': True, 'boostOverride': False})
+    r = perf_bench.run(0.05)
+    assert r['success'] is False and '바뀌어' in r['message']
+    assert perf_bench.get_results() == {}
 
 
 def test_no_result_is_recorded_when_the_real_mode_is_unknown(quick, monkeypatch):

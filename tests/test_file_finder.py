@@ -57,7 +57,8 @@ def test_duplicate_scan_never_opens_files_for_writing(disk):
 def test_large_scan_never_opens_files(disk):
     _write(disk.root / 'big.iso', 2 * MB)
     assert _names(file_finder.scan_large_files(min_mb=1)) == ['big.iso']
-    assert disk.opened == []                                 # 크기·시각은 속성으로 읽는다
+    # 드라이브 루트의 .GamingRoot(Xbox 게임 폴더 표식)만 읽는다. 검사 대상 파일은 열지 않는다.
+    assert [o for o in disk.opened if o[0] != '.GamingRoot'] == []       # 크기·시각은 속성으로 읽는다
 
 
 def test_cloud_only_files_are_neither_read_nor_listed(disk):
@@ -121,3 +122,39 @@ def test_unreadable_attributes_count_as_cloud_only(monkeypatch):
         raise PermissionError(5, 'denied')
     monkeypatch.setattr(file_finder.os, 'lstat', fail)
     assert file_finder._is_cloud_only('x') is True           # 모르면 읽지 않는다
+
+
+def _gaming_root_bytes(*names):
+    body = b''.join(n.encode('utf-16-le') + b'\x00\x00' for n in names)
+    return b'RGBX' + len(names).to_bytes(4, 'little') + body
+
+
+def test_xbox_game_folder_is_skipped_even_when_renamed(disk):
+    # Xbox 앱(게임 패스)은 드라이브 루트의 .GamingRoot 에 설치 폴더를 적는다. 사용자가 이름을 바꿀 수 있다.
+    (disk.root / '.GamingRoot').write_bytes(_gaming_root_bytes('MyGames'))
+    for rel in (('MyGames', 'Halo', 'Content', 'data.pak'), ('XboxGames', 'Forza', 'Content', 'big.pak'),
+                ('Nexon', 'Maple', 'Data.wz'), ('Videos', 'trip.mp4')):
+        target = disk.root.joinpath(*rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write(target, 2 * MB)
+
+    assert _names(file_finder.scan_large_files(min_mb=1)) == ['trip.mp4']
+    r = file_finder.delete_files([str(disk.root / 'MyGames' / 'Halo' / 'Content' / 'data.pak')])
+    assert r['deleted'] == 0 and '게임' in r['failed'][0]['reason']
+
+
+def test_broken_gaming_root_is_ignored(disk):
+    (disk.root / '.GamingRoot').write_bytes(b'garbage')
+    assert file_finder._read_gaming_root(str(disk.root)) == []
+
+
+def test_only_fixed_disks_are_scanned(monkeypatch):
+    import types
+    import psutil
+    parts = [types.SimpleNamespace(mountpoint='C:/', fstype='NTFS', opts='rw,fixed'),
+             types.SimpleNamespace(mountpoint='E:/', fstype='FAT32', opts='rw,removable'),
+             types.SimpleNamespace(mountpoint='Z:/', fstype='NTFS', opts='rw,remote'),
+             types.SimpleNamespace(mountpoint='F:/', fstype='', opts='cdrom')]
+    monkeypatch.setattr(psutil, 'disk_partitions', lambda all=False: parts)
+    # USB 메모리·네트워크 드라이브는 휴지통이 없어 이 화면에서 지울 수 없다. 목록에 올리지 않는다.
+    assert file_finder.get_local_drives() == ['C:/']
