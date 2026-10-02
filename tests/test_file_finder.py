@@ -158,3 +158,10 @@ def test_only_fixed_disks_are_scanned(monkeypatch):
     monkeypatch.setattr(psutil, 'disk_partitions', lambda all=False: parts)
     # USB 메모리·네트워크 드라이브는 휴지통이 없어 이 화면에서 지울 수 없다. 목록에 올리지 않는다.
     assert file_finder.get_local_drives() == ['C:/']
+
+
+def test_windows_recovery_folders_are_blocked_only_at_drive_root():
+    # 제조사 PC 의 C:\Recovery\Customizations\*.ppkg 는 '이 PC 초기화' 때 쓰는 복구 패키지다
+    assert file_finder._blocked_reason('C:\\Recovery\\Customizations\\usmt.ppkg')
+    assert file_finder._blocked_reason('D:\\Windows.old\\Users\\a\\big.vhdx')
+    assert file_finder._blocked_reason('C:\\Users\\x\\Videos\\recovery\\clip.mp4') is None   # 사용자 폴더 속 같은 이름은 아니다

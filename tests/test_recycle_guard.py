@@ -71,3 +71,19 @@ def test_unknown_volume_is_refused(monkeypatch, target):
 def test_nuke_warning_flag_is_set_as_last_resort():
     import inspect
     assert 'FOF_WANTNUKEWARNING' in inspect.getsource(safe_delete.to_recycle_bin)
+
+
+def test_shell_gets_the_path_with_its_original_case(volume, tmp_path, monkeypatch):
+    # 대소문자를 구분하는 폴더(WSL 이 만든 폴더)에서는 소문자로 바꾼 경로가 다른 파일이거나 없는 파일이다
+    f = tmp_path / 'MixedCase.MP4'
+    f.write_bytes(b'x' * 10)
+    seen = []
+
+    class Shell:
+        @staticmethod
+        def SHFileOperationW(op_ref):
+            seen.append(op_ref._obj.pFrom)
+            return 0
+    monkeypatch.setattr(safe_delete.ctypes, 'windll', type('W', (), {'shell32': Shell})())
+    safe_delete.to_recycle_bin([str(f)])
+    assert seen and 'MixedCase.MP4' in seen[0]

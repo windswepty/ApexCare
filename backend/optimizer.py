@@ -652,6 +652,7 @@ def scan_junk_background():
             # 사용자가 '나중에 확인하려고' 넣어둔 파일이 영영 사라진다.
             # 사용자가 직접 체크해야만 실행된다.
             {"id": 5, "name": "휴지통 비우기", "sizeMB": recycle_size, "category": "System",
+             "sizeBytes": rb,               # 정리할 때 되돌려 받아, 그 뒤 휴지통에 새로 들어온 것이 있으면 비우지 않는다
              "selected": False, "irreversible": True,
              "description": "휴지통 안의 파일을 완전히 삭제합니다. 되돌릴 수 없습니다."
                             + ("" if recycle_size is not None else " 지금 휴지통 크기를 읽지 못했습니다.")},
@@ -688,7 +689,7 @@ _junk_clean_thread = None
 def get_junk_clean_status():
     return _junk_clean_state
 
-def clean_junk_background(category_ids, cancel_event):
+def clean_junk_background(category_ids, cancel_event, recycle_bytes_seen=None):
     global _junk_clean_state
     _junk_clean_state["status"] = "running"
     _junk_clean_state["freed_mb"] = 0.0
@@ -798,8 +799,13 @@ def clean_junk_background(category_ids, cancel_event):
         # 진행률 = 끝낸 정리 대상 수 / 전체 대상 수 (휴지통 비우기 포함). 실제로 끝낸 만큼만 오른다.
         steps_total = len(target_dirs) + (1 if 5 in category_ids else 0)
         warnings = []
+        # 휴지통 비우기를 확인할 때 본 크기. 화면이 넘겨주지 않았으면 정리를 시작할 때 잰다.
+        recycle_baseline = recycle_bytes_seen if recycle_bytes_seen is not None else (
+            _recycle_bin_bytes() if 5 in category_ids else None)
+        cut_short = False          # 중단 요청으로 실제로 건너뛴 단계가 있었는가
         for i, d in enumerate(target_dirs):
             if cancel_event and cancel_event.is_set():
+                cut_short = True
                 break
             why = unsafe_junk_root(d) if os.path.isdir(d) else None
             if why:
@@ -807,14 +813,31 @@ def clean_junk_background(category_ids, cancel_event):
                 warnings.append(f"임시 폴더 위치가 안전하지 않아 정리하지 않았습니다: {d} ({why})")
             else:
                 _clean_dir(d)
+                if cancel_event and cancel_event.is_set():
+                    cut_short = True          # 이 폴더를 도는 중에 멈췄다
             _junk_clean_state["progress"] = min(99, int((i + 1) * 100 / max(steps_total, 1)))
 
         recycle_freed = 0
-        if 5 in category_ids and not (cancel_event and cancel_event.is_set()):
-            recycle_freed, why = _empty_recycle_bin()
-            if why:
-                log.warning(why)
-                warnings.append(why)
+        if 5 in category_ids:
+            if cancel_event and cancel_event.is_set():
+                cut_short = True
+            else:
+                from backend import safe_delete
+                with safe_delete.RECYCLE_LOCK:
+                    now = _recycle_bin_bytes()
+                    if recycle_baseline is None or now is None:
+                        why = "휴지통 크기를 확인하지 못해 휴지통을 비우지 않았습니다(되돌릴 수 없는 작업이라 확인 없이 하지 않습니다)"
+                    elif now > recycle_baseline:
+                        # 확인한 뒤 다른 화면에서 휴지통으로 보낸 파일이 있다. 그것까지 영구 삭제하지 않는다.
+                        why = ("확인한 뒤 휴지통에 새로 들어온 파일이 있어 휴지통을 비우지 않았습니다. "
+                               "다시 검사한 뒤 정리해 주세요")
+                    else:
+                        recycle_freed, why = _empty_recycle_bin()
+                        if cancel_event and cancel_event.is_set():
+                            warnings.append("중단 요청 전에 휴지통 비우기가 이미 실행되어 되돌릴 수 없습니다")
+                if why:
+                    log.warning(why)
+                    warnings.append(why)
 
         # 확보한 용량 = 실제로 지운 파일 크기 + 비운 휴지통 크기.
         # 예전에는 정리 전후 드라이브 여유 공간 차이를 썼다. 그 사이 다른 프로그램이 쓰거나 지운 것까지
@@ -849,7 +872,8 @@ def clean_junk_background(category_ids, cancel_event):
         print(f"[JunkPurger] 최종 확보 용량: {freed_total_mb} MB, 스킵된 용량(OS 잠금): {skipped_mb} MB")
         sys.stdout.flush()
         
-        if cancel_event and cancel_event.is_set():
+        if cut_short:
+            # 실제로 건너뛴 단계가 있을 때만 '중단' 이다. 모든 단계가 끝난 뒤 도착한 중단 요청은 아무것도 막지 못했다.
             _junk_clean_state["status"] = "cancelled"
             _junk_clean_state["progress"] = 0
             _junk_clean_state["eta_seconds"] = 0
@@ -861,7 +885,7 @@ def clean_junk_background(category_ids, cancel_event):
         _junk_clean_state["status"] = "error"
         _junk_clean_state["error"] = str(e)
 
-def clean_junk(category_ids, cancel_event=None):
+def clean_junk(category_ids, cancel_event=None, recycle_bytes_seen=None):
     global _junk_clean_thread, _junk_clean_state
     
     with _clean_lock:
@@ -874,7 +898,9 @@ def clean_junk(category_ids, cancel_event=None):
         _junk_clean_state["status"] = "running"
     
     _junk_cancel_event.clear()
-    _junk_clean_thread = threading.Thread(target=clean_junk_background, args=(category_ids, _junk_cancel_event), daemon=True)
+    seen = recycle_bytes_seen if isinstance(recycle_bytes_seen, int) and not isinstance(recycle_bytes_seen, bool) else None
+    _junk_clean_thread = threading.Thread(target=clean_junk_background,
+                                          args=(category_ids, _junk_cancel_event, seen), daemon=True)
     _junk_clean_thread.start()
     return {"success": True}
 
@@ -1125,9 +1151,11 @@ def restore_tailored_service_config():
             for svc, saved in backup.items():
                 start = saved.get("start") if isinstance(saved, dict) else None
                 if svc not in _HW_TUNING_SERVICES or start not in (2, 3, 4):
-                    # 읽지 못한 원래 값(None)을 기본값으로 바꿔 쓰지 않는다.
-                    steps.append({"name": f"{svc} 복구(구버전 백업)", "ok": False,
-                                  "detail": "백업에 원래 값이 없어 건드리지 않았습니다"})
+                    # 읽지 못한 원래 값(None)을 기본값으로 바꿔 쓰지 않는다. 그 서비스가 없던 PC 라 구버전도
+                    # 바꾸지 못한 경우다. 남겨 두면 '전부 원래대로'·제거가 매번 실패로 끝나므로 기록만 정리한다.
+                    steps.append({"name": f"{svc} 복구(구버전 백업)", "ok": True,
+                                  "detail": "구버전 기록에 원래 값이 없어(그 버전도 바꾸지 못함) 건드리지 않고 기록만 정리했습니다"})
+                    done.append(svc)
                     continue
                 ok, reason = system_state.restore_service_start(
                     svc, start, bool(saved.get("delayed")))
@@ -1447,6 +1475,20 @@ def _legacy_target(origin):
     return tag, True
 
 
+def _reregistered_tag(raw_name, prefer=None):
+    """구버전이 숨긴 이름이 지금 Run 위치(세 곳 중 어디든)에 다시 등록돼 있으면 그 위치 태그. 없으면 None.
+
+    원래 위치를 모르는 옛 기록은 HKCU 로 보는데, 프로그램이 업데이트·재설치로 HKLM 에 다시 등록했으면
+    HKCU 만 봐서는 몰랐다. 그때 되살리면 같은 명령이 두 번 등록됐다.
+    """
+    order = ([prefer] if prefer else []) + [t for t in RUN_LOCATIONS if t != prefer]
+    for tag in order:
+        loc = RUN_LOCATIONS.get(tag)
+        if loc and loc[2] and _reg_read(loc[1], loc[2], raw_name)[0]:
+            return tag
+    return None
+
+
 def get_startup_apps():
     """Run 키 3곳·시작프로그램 폴더 2곳의 시작 프로그램과 켜짐/꺼짐 상태, 그리고 구버전에서 끈 항목.
 
@@ -1468,8 +1510,8 @@ def get_startup_apps():
 
     for raw_name, value, _, origin in _legacy_entries():
         tag, known = _legacy_target(origin)
-        if tag and _reg_read(RUN_LOCATIONS[tag][1], RUN_LOCATIONS[tag][2], raw_name)[0]:
-            continue                               # 프로그램이 스스로 다시 등록했다
+        if _reregistered_tag(raw_name, tag):
+            continue                               # 프로그램이 스스로 다시 등록했다(어느 Run 위치든)
         apps.append({
             "id": _make_id('LEGACY', raw_name), "name": _clean(raw_name),
             "command": _clean(value) if isinstance(value, str) else str(value),
@@ -1542,10 +1584,12 @@ def _migrate_one_legacy(raw_name):
         return {'ok': False, 'reason': '저장된 명령줄 형식이 올바르지 않습니다'}
     loc = RUN_LOCATIONS[tag]
 
-    if _reg_read(loc[1], loc[2], raw_name)[0]:
-        # 프로그램이 스스로 다시 등록했다. 지금 상태를 존중하고 구버전 기록만 정리한다.
+    again = _reregistered_tag(raw_name, tag)
+    if again:
+        # 프로그램이 스스로 다시 등록했다. 지금 상태(사용자가 작업 관리자에서 끈 표시 포함)를 존중하고
+        # 구버전 기록만 정리한다. 켜짐/꺼짐 표시는 건드리지 않는다.
         _drop_legacy_value(raw_name)
-        return {'ok': True, 'tag': tag}
+        return {'ok': True, 'tag': again, 'reregistered': True}
 
     # 1) 먼저 '꺼짐' 표시. 이게 안 되면 Run 을 되살리지 않는다(되살리는 순간 켜져 버린다).
     if _approved_state(tag, raw_name) != 'disabled':
@@ -1597,6 +1641,13 @@ def toggle_startup_app(app_id, enabled):
             if not m.get('ok'):
                 return {"success": False, "message": f"'{shown}' 을 되살리지 못했습니다: {m.get('reason')}"}
             tag = m['tag']
+            if m.get('reregistered'):
+                # 이 앱이 끈 것이 아니다. 예전에는 여기서 '켜짐' 을 써, 사용자가 작업 관리자에서 끈 항목을
+                # (APEX CARE 를 제거할 때 등) 다시 켜고 되돌릴 기록까지 남겼다.
+                now_on = _approved_state(tag, name) != 'disabled'
+                return {"success": True, "enabled": now_on, "id": _make_id(tag, name), "origin": tag,
+                        "message": (f"'{shown}' 은 프로그램이 이미 다시 등록해 두었습니다(지금 "
+                                    f"{'켜짐' if now_on else '꺼짐'}). 예전 버전의 기록만 정리했습니다.")}
 
         loc = RUN_LOCATIONS[tag]
         if not _entry_exists(tag, name):

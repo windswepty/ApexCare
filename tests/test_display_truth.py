@@ -154,6 +154,49 @@ def test_emptied_recycle_bin_with_unknown_size_says_so(monkeypatch):
     assert freed == 0 and why and '측정하지 못해' in why          # 0 MB 를 확보했다고 조용히 말하지 않는다
 
 
+def _bin(monkeypatch, sizes):
+    seq = iter(sizes)
+    monkeypatch.setattr(optimizer, '_recycle_bin_bytes', lambda: next(seq))
+    emptied = []
+    monkeypatch.setattr(optimizer, '_empty_recycle_bin', lambda: emptied.append(1) or (100, None))
+    return emptied
+
+
+def test_recycle_bin_that_grew_after_confirmation_is_not_emptied(monkeypatch):
+    # 확인 창에는 0 바이트였는데, 그 뒤 '대용량 · 중복' 에서 20GB 를 휴지통으로 보냈다
+    emptied = _bin(monkeypatch, [20 * 1024 ** 3])
+    optimizer.clean_junk_background([5], cancel_event=None, recycle_bytes_seen=0)
+    st = optimizer.get_junk_clean_status()
+    assert emptied == [] and any('새로 들어온' in w for w in st['warnings'])
+
+
+def test_recycle_bin_of_unknown_size_is_not_emptied(monkeypatch):
+    emptied = _bin(monkeypatch, [None, None])
+    optimizer.clean_junk_background([5], cancel_event=None)
+    assert emptied == [] and any('확인하지 못해' in w for w in optimizer.get_junk_clean_status()['warnings'])
+
+
+def test_recycle_bin_as_confirmed_is_emptied(monkeypatch):
+    emptied = _bin(monkeypatch, [4096])
+    optimizer.clean_junk_background([5], cancel_event=None, recycle_bytes_seen=4096)
+    assert emptied == [1] and optimizer.get_junk_clean_status()['status'] == 'success'
+
+
+def test_cancel_that_arrives_after_everything_ran_is_not_reported_as_stopped(monkeypatch):
+    import threading
+    ev = threading.Event()
+
+    def empty():
+        ev.set()                          # 비우는 동안 '중단' 을 눌렀다(이 단계는 멈출 수 없다)
+        return 100, None
+    monkeypatch.setattr(optimizer, '_recycle_bin_bytes', lambda: 4096)
+    monkeypatch.setattr(optimizer, '_empty_recycle_bin', empty)
+    optimizer.clean_junk_background([5], cancel_event=ev, recycle_bytes_seen=4096)
+    st = optimizer.get_junk_clean_status()
+    assert st['status'] == 'success'                              # 예전에는 '정리를 중단했습니다'
+    assert any('되돌릴 수 없습니다' in w for w in st['warnings'])
+
+
 def test_browser_cache_covers_edge_whale_and_every_profile(tmp_path, monkeypatch):
     # 예전에는 Chrome 'Default' 프로필의 Cache 만 정리했다
     local = tmp_path / 'Local'
@@ -339,6 +382,7 @@ def program_files(tmp_path, monkeypatch):
     pf.mkdir()
     monkeypatch.setenv('ProgramFiles', str(pf))
     uninstaller._known_locations.clear()
+    uninstaller._known_publishers.clear()
     return pf
 
 
@@ -427,6 +471,64 @@ def test_leftover_outside_cleanable_roots_is_not_listed(program_files, tmp_path)
     assert uninstaller.scan_leftovers('Foo Game')['items'] == []
 
 
+def test_vendor_folder_registered_by_several_apps_is_not_a_leftover(program_files):
+    # Adobe Premiere·After Effects·Media Encoder 는 InstallLocation 에 'C:\\Program Files\\Adobe' 를 적는다(실제 PC 확인)
+    vendor = program_files / 'Adobe'
+    (vendor / 'Adobe Creative Cloud').mkdir(parents=True)       # 등록 정보에 경로가 없는 다른 제품
+    (vendor / 'Adobe Premiere Pro 2025').mkdir()
+    _register_app('Prem', 'Adobe Premiere Pro 2025', 'u.exe', str(vendor))
+    _register_app('AE', 'Adobe After Effects 2025', 'u.exe', str(vendor))
+    uninstaller.get_installed_apps()
+    _unregister_app('Prem')
+    _unregister_app('AE')                                        # 둘 다 지워져 '설치된 다른 프로그램' 가드에 안 걸린다
+
+    paths = [os.path.normcase(i['path']) for i in uninstaller.scan_leftovers('Adobe Premiere Pro 2025')['items']]
+
+    assert os.path.normcase(str(vendor)) not in paths            # 공용 폴더를 통째로 올리지 않는다
+    assert paths == [os.path.normcase(str(vendor / 'Adobe Premiere Pro 2025'))]   # 이름이 같은 하위 폴더만
+
+
+def test_publisher_named_folder_is_not_taken_whole(program_files):
+    vendor = program_files / 'XPPen'
+    (vendor / 'Driver').mkdir(parents=True)
+    _register_app('Pen', 'Pentablet', 'u.exe', str(vendor))
+    REGISTRY.seed('HKLM', f'{_UNINST}\\Pen', 'Publisher', 'XPPen Technology', REG_SZ)
+    uninstaller.get_installed_apps()
+    _unregister_app('Pen')
+    assert uninstaller.scan_leftovers('Pentablet')['items'] == []
+
+
+def test_product_named_like_its_company_is_still_found(program_files):
+    own = program_files / 'Rainmeter'
+    own.mkdir()
+    _register_app('Rm', 'Rainmeter', 'u.exe', str(own))
+    REGISTRY.seed('HKLM', f'{_UNINST}\\Rm', 'Publisher', 'Rainmeter', REG_SZ)
+    uninstaller.get_installed_apps()
+    _unregister_app('Rm')
+    items = uninstaller.scan_leftovers('Rainmeter')['items']
+    assert [(os.path.normcase(i['path']), i['confidence']) for i in items] == [(os.path.normcase(str(own)), 'certain')]
+
+
+def test_other_version_still_installed_keeps_shared_data_folder(program_files, monkeypatch, tmp_path):
+    appdata = tmp_path / 'Roaming'
+    (appdata / 'Python').mkdir(parents=True)                     # 3.12·3.13 이 함께 쓰는 사용자 패키지
+    monkeypatch.setenv('APPDATA', str(appdata))
+    _register_app('Py312', 'Python 3.12.1 (64-bit)', 'u.exe')
+    _register_app('Py313', 'Python 3.13.7 (64-bit)', 'u.exe')
+    uninstaller.get_installed_apps()
+    _unregister_app('Py312')
+    assert uninstaller.scan_leftovers('Python 3.12.1 (64-bit)')['items'] == []
+
+
+def test_expand_sz_uninstall_string_is_expanded(monkeypatch):
+    monkeypatch.setenv('windir', r'C:\Windows')
+    REGISTRY.seed('HKLM', f'{_UNINST}\\Sdb', 'DisplayName', 'Compat Fix', REG_SZ)
+    REGISTRY.seed('HKLM', f'{_UNINST}\\Sdb', 'UninstallString', r'%windir%\system32\sdbinst.exe -u x.sdb',
+                  fakewin.REG_EXPAND_SZ)
+    app = next(a for a in uninstaller.get_installed_apps() if a['name'] == 'Compat Fix')
+    assert app['uninstallString'].lower().startswith(r'c:\windows\system32\sdbinst.exe')
+
+
 def test_file_delete_with_everything_rejected_is_not_a_success(tmp_path):
     r = file_finder.delete_files([str(tmp_path / 'nope.bin')])
     assert r['success'] is False and r['deleted'] == 0 and r['failed']
@@ -498,9 +600,15 @@ def test_installer_progress_is_real_and_failures_are_reported():
     # 제거 프로그램이 없으면 설치하지 않고, 등록 실패를 삼키지 않는다
     assert 'if missing:' in src
     run = src[src.index('class InstallWorker'):src.index('class LicensePage')]
-    assert 'register_uninstall(install_dir' in run
-    reg = src[src.index('def register_uninstall'):src.index('class InstallWorker')]
+    assert 'register_uninstall(target_dir' in run
+    reg = src[src.index('def register_uninstall'):src.index('def _shortcut_target')]
     assert 'except' not in reg                      # 실패는 부르는 쪽으로 올린다
+    # 관리자 권한으로 도는 exe 는 관리자만 쓸 수 있는 Program Files 에, 모든 사용자용(HKLM)으로 등록한다
+    assert 'HKEY_LOCAL_MACHINE' in reg and 'HKEY_CURRENT_USER' not in reg
+    assert '"ProgramFiles"' in src and "install_dir = os.path.join(os.environ.get(\"LOCALAPPDATA\"" not in src
+    # 복사하는 동안에는 취소·Esc·닫기를 받지 않는다(반쪽 설치가 남았다)
+    assert 'def reject(self)' in src and 'def closeEvent(self, event)' in src
+    assert 'WizardButton.CancelButton]' not in src[src.index('class ProgressPage'):src.index('class FinishPage')]
     # 사용자에게 보이는 화면 이름이 앱과 같다
     un = _read('tools/uninstall.py')
     assert "'Windows 기본 앱 정리'" in un and '디블로터 화면' not in un

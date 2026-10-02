@@ -871,7 +871,28 @@ def _wait(cond, seconds):
 
 
 def _desktop_shortcut():
-    return os.path.join(os.environ['USERPROFILE'], 'Desktop', 'APEX CARE.lnk')
+    return os.path.join(os.environ.get('PUBLIC') or r'C:\Users\Public', 'Desktop', 'APEX CARE.lnk')
+
+
+def _start_menu_shortcut():
+    return os.path.join(os.environ.get('ProgramData') or r'C:\ProgramData',
+                        'Microsoft', 'Windows', 'Start Menu', 'Programs', 'APEX CARE.lnk')
+
+
+def _program_files_dir():
+    return os.path.join(os.environ.get('ProgramW6432') or os.environ['ProgramFiles'], 'APEX CARE')
+
+
+def _plant_legacy_install():
+    """예전 버전(사용자 폴더 설치)을 흉내 낸다. 새 설치가 이것을 정리하는지 본다."""
+    old = os.path.join(os.environ['LOCALAPPDATA'], 'APEX CARE')
+    os.makedirs(old, exist_ok=True)
+    for name in ('APEX CARE.exe', 'APEX CARE Uninstaller.exe'):
+        with open(os.path.join(old, name), 'wb') as f:          # 내용은 상관없다(정리되는지만 본다)
+            f.write(b'MZ placeholder')
+    reg_set('HKCU', UNINSTALL_KEY, 'DisplayName', 'APEX CARE')
+    reg_set('HKCU', UNINSTALL_KEY, 'InstallLocation', old)
+    return old
 
 
 @check('설치 마법사 → 제거 프로그램: 설치, 제거 전 되돌리기(빌드한 exe), 흔적 정리')
@@ -880,13 +901,14 @@ def install_uninstall():
     if not os.path.isfile(setup):
         return 'SKIP', f'설치 파일이 없습니다: {setup} (build_all.bat 로 만든 뒤 다시 돌리세요)', []
     from backend import optimizer, perf_modes, uninstall_prep
-    install_dir = os.path.join(os.environ['LOCALAPPDATA'], 'APEX CARE')
+    install_dir = _program_files_dir()
     app_exe = os.path.join(install_dir, 'APEX CARE.exe')
     uninst_exe = os.path.join(install_dir, 'APEX CARE Uninstaller.exe')
-    if os.path.exists(install_dir) or reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is not None:
+    if os.path.exists(install_dir) or reg_get('HKLM', UNINSTALL_KEY, 'DisplayName') is not None:
         return 'FAIL', '점검 전에 이미 설치돼 있습니다(샌드박스가 깨끗하지 않음)', []
     built = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(setup)))
     problems = []
+    legacy_dir = _plant_legacy_install()
 
     # ── 설치: 사용권 동의 → 다음 → 다음(설치) → 완료 화면에서 '실행하기' 끄고 종료
     win = '설치 - APEX CARE'
@@ -909,11 +931,19 @@ def install_uninstall():
 
     installed = {
         'exe': os.path.isfile(app_exe), 'uninstaller': os.path.isfile(uninst_exe),
-        'DisplayVersion': reg_get('HKCU', UNINSTALL_KEY, 'DisplayVersion'),
-        'InstallLocation': reg_get('HKCU', UNINSTALL_KEY, 'InstallLocation'),
-        'UninstallString': reg_get('HKCU', UNINSTALL_KEY, 'UninstallString'),
+        'DisplayVersion': reg_get('HKLM', UNINSTALL_KEY, 'DisplayVersion'),
+        'InstallLocation': reg_get('HKLM', UNINSTALL_KEY, 'InstallLocation'),
+        'UninstallString': reg_get('HKLM', UNINSTALL_KEY, 'UninstallString'),
         'shortcut': os.path.exists(_desktop_shortcut()),
+        'startMenu': os.path.exists(_start_menu_shortcut()),
     }
+    # 예전 버전의 사용자 폴더 설치는 정리됐어야 한다(그 exe 가 바꿔치기 대상으로 남지 않게)
+    if os.path.exists(os.path.join(legacy_dir, 'APEX CARE.exe')) or os.path.isdir(legacy_dir):
+        problems.append(f'예전 사용자 폴더 설치가 남았습니다: {legacy_dir}')
+    if reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is not None:
+        problems.append('예전 버전의 프로그램 목록 항목(HKCU)이 남았습니다')
+    if not (installed['shortcut'] and installed['startMenu']):
+        problems.append(f'모든 사용자용 바로 가기가 없습니다: {installed}')
     if not (installed['exe'] and installed['uninstaller']):
         problems.append(f'설치 폴더에 파일이 없습니다: {installed}')
     if installed['DisplayVersion'] != _app_version():
@@ -958,16 +988,37 @@ def install_uninstall():
 
         # 제거 프로그램이 띄운 배치 파일이 2초 뒤 폴더·바로 가기·프로그램 목록 키를 지운다
         gone = _wait(lambda: not os.path.exists(install_dir)
-                     and reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is None, 90)
+                     and reg_get('HKLM', UNINSTALL_KEY, 'DisplayName') is None, 90)
+        # 결과 창(모든 에디션에서 뜨는 PowerShell 메시지 상자)이 떠야 한다. 예전 'msg *' 는 Home 에 없었다.
+        if gone:
+            if _ui_step(problems, "제거 완료 안내 창", 'APEX CARE', 'wait', '제거되었습니다', 60):
+                # 메시지 상자의 '확인' 은 UI Automation 에 Pane 으로 보여 누를 수 없다. 사용자가 확인을 누른 것처럼
+                # 그 창을 띄운 PowerShell(배치가 띄운 것)만 끝낸다. 그래야 배치가 이어서 자기 폴더를 지운다.
+                import psutil
+                for p in psutil.process_iter(['name', 'cmdline']):
+                    try:
+                        cmd = ' '.join(p.info['cmdline'] or [])
+                        if (p.info['name'] or '').lower() == 'powershell.exe' and '-EncodedCommand' in cmd:
+                            p.terminate()
+                    except psutil.Error:
+                        pass
         if not gone:
             import psutil
             left = sorted(os.listdir(install_dir)) if os.path.isdir(install_dir) else []
             alive = sorted({p.info['name'] for p in psutil.process_iter(['name'])
                             if (p.info['name'] or '').lower().startswith(('apex care', 'cmd.exe'))})
             problems.append(f"제거 뒤에도 남았습니다: 폴더={os.path.exists(install_dir)} 남은 파일={left} "
-                            f"목록 키={reg_get('HKCU', UNINSTALL_KEY, 'DisplayName') is not None} 실행 중={alive}")
-        if os.path.exists(_desktop_shortcut()):
-            problems.append('바탕 화면 바로 가기가 남았습니다')
+                            f"목록 키={reg_get('HKLM', UNINSTALL_KEY, 'DisplayName') is not None} 실행 중={alive}")
+        if os.path.exists(_desktop_shortcut()) or os.path.exists(_start_menu_shortcut()):
+            problems.append('바로 가기가 남았습니다')
+        # 정리 배치는 %SystemRoot%\Temp 아래 자기 폴더째 지워져야 한다
+        temp_root = os.path.join(os.environ['SystemRoot'], 'Temp')
+        def bat_dirs():
+            return [n for n in os.listdir(temp_root) if n.startswith('apexcare-uninst-')]
+        _wait(lambda: not bat_dirs(), 20)
+        left_bat = bat_dirs()
+        if left_bat:
+            problems.append(f'정리 배치 폴더가 남았습니다: {left_bat}')
         changes = diff(before, snapshot('install_after_uninstall'))
     finally:
         reg_del('HKCU', RUN_U, 'ApexSbxInstalled')

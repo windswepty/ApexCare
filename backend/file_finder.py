@@ -95,6 +95,12 @@ def _system_roots():
     return [os.environ.get(k) for k in _SYSTEM_ENV_ROOTS if os.environ.get(k)]
 
 
+# 드라이브 루트 바로 아래의 Windows 관리 폴더(이름 정확 일치). '이 PC 초기화' 용 복구 이미지·제조사 패키지,
+# 업그레이드 임시 폴더 등이다. 숨김·시스템 폴더라 사용자가 만든 파일이 아니다.
+_OS_ROOT_DIRS = {'recovery', '$windows.~bt', '$windows.~ws', '$winreagent', '$sysreset', 'windows.old',
+                 'msocache', 'config.msi', 'boot', 'efi', 'perflogs', '$getcurrent'}
+
+
 def _blocked_reason(path, gaming_roots=()):
     """이 파일을 스캔·삭제 대상으로 삼으면 안 되는 이유. 괜찮으면 None.
 
@@ -106,7 +112,10 @@ def _blocked_reason(path, gaming_roots=()):
     for root in _system_roots():
         if safe_delete.is_inside(real, root):
             return "보호된 시스템·프로그램 폴더"
-    parts = {c.lower() for c in re.split(r'[\\/]+', real) if c}
+    comps = [c for c in re.split(r'[\\/]+', real) if c]
+    if len(comps) >= 2 and comps[1].lower() in _OS_ROOT_DIRS:      # comps[0] 은 드라이브('c:')
+        return "Windows 복구·업그레이드 폴더"
+    parts = {c.lower() for c in comps}
     if parts & _BLOCKED_COMPONENTS:
         return "게임 라이브러리·시스템 폴더"
     for g in gaming_roots:                     # Xbox 앱이 .GamingRoot 에 적어 둔 설치 폴더(이름을 바꿨어도)

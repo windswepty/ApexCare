@@ -188,7 +188,9 @@ function JunkSection({ addToast, onDone }) {
     setCleaning(true);
     setResult(null);
     try {
-      const started = await a.cleanJunk([...selected]);
+      // 확인 창에 보인 휴지통 크기를 함께 넘긴다. 그 뒤 다른 화면에서 휴지통으로 보낸 파일이 있으면 백엔드가 비우지 않는다.
+      const bin = chosen.find((i) => i.id === 5);
+      const started = await a.cleanJunk([...selected], bin && Number.isInteger(bin.sizeBytes) ? bin.sizeBytes : null);
       if (started && started.success === false) {
         addToast?.(started.message || '정리를 시작하지 못했습니다.', 'error');
       } else {

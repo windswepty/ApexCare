@@ -201,7 +201,8 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
               ))}
               {/* 서비스 시작 유형은 system_state 저널의 hw_tuning 그룹에 기록된다. 전원 플랜은 맞춤 튜닝이 바꾸지 않는다 */}
               <p className="text-xs pt-2 text-gray-500">
-                바꾼 설정은 '변경 내역 · 되돌리기' 탭의 '하드웨어 맞춤 튜닝' 에서 되돌릴 수 있습니다. 전원 플랜은 성능 모드에서 고릅니다.
+                바꾼 설정은 '변경 내역 · 되돌리기' 의 '전부 원래대로' 로 되돌릴 수 있습니다(이 앱이 바꾼 다른 설정도 함께
+                되돌아갑니다). 전원 플랜은 성능 모드에서 고릅니다.
               </p>
             </div>
             <div className={`p-6 border-t flex justify-end ${band}`}>

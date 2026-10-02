@@ -19,6 +19,7 @@ import ctypes.wintypes
 import logging
 import os
 import stat
+import threading
 
 log = logging.getLogger('SafeDelete')
 
@@ -214,6 +215,11 @@ def recycle_block_reason(path, size_bytes):
     return None
 
 
+# 휴지통으로 보내기와 휴지통 비우기를 한 번에 하나만 한다. 정크 정리가 휴지통을 비우는 순간 다른 화면이
+# 파일을 휴지통으로 보내면, '휴지통에서 복구할 수 있습니다' 라고 알린 파일이 곧바로 영구 삭제됐다.
+RECYCLE_LOCK = threading.RLock()
+
+
 def to_recycle_bin(paths):
     """파일/폴더를 휴지통으로 보낸다.
 
@@ -241,7 +247,9 @@ def to_recycle_bin(paths):
                 failed.append({"path": p, "reason": "보호된 시스템/사용자 폴더"})
                 log.warning(f"보호 경로 삭제 거부: {p}")
                 continue
-            t = norm(p)
+            # 셸에 넘기는 경로는 대소문자를 그대로 둔 실경로다. norm() 은 소문자로 바꾼 비교용이라, 대소문자를 구분하는
+            # 폴더(WSL 이 만든 폴더 등)에서는 다른 파일을 가리키거나 아무것도 가리키지 않았다.
+            t = os.path.realpath(os.path.abspath(p)).rstrip('\\')
             # 삭제 전에 크기를 재 둔다. 지운 뒤에는 잴 수 없고, 휴지통에 들어가는지도 크기로 가른다.
             try:
                 size = _size_of(t)
@@ -271,7 +279,8 @@ def to_recycle_bin(paths):
     op.fAnyOperationsAborted = False
 
     try:
-        res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        with RECYCLE_LOCK:
+            res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
     except Exception as e:
         return {"ok": [], "failed": failed + [{"path": t, "reason": str(e)} for t in targets], "bytes": 0}
 

@@ -392,10 +392,10 @@ def ConnectRegistry(computer_name, key):
 
 
 def ExpandEnvironmentStrings(s):
-    out = s
-    for name, val in os.environ.items():
-        out = out.replace(f'%{name}%', val)
-    return out
+    """진짜처럼 변수 이름의 대소문자를 가리지 않는다(%windir% 와 WINDIR). 없는 변수는 그대로 둔다."""
+    import re
+    env = {k.upper(): v for k, v in os.environ.items()}
+    return re.sub(r'%([^%]+)%', lambda m: env.get(m.group(1).upper(), m.group(0)), s)
 
 
 def _make_winreg_module():

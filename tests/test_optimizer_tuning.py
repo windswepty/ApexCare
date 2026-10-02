@@ -117,9 +117,10 @@ def test_legacy_backup_restores_only_recorded_values():
     assert SERVICES.start_of('SysMain')[0] == 2
     assert SERVICES.start_of('WSearch')[0] == 4                   # 추측한 기본값을 쓰지 않는다
     assert [c[0] for c in SERVICES.calls] == ['SysMain']
-    assert r['success'] is False                                  # 되돌리지 못한 항목이 있다
-    left = config_manager.load_config().get('service_start_backup')
-    assert left == {'WSearch': {'start': None}}
+    # 원래 값이 없는 기록은 구버전도 바꾸지 못한 것(그 서비스가 없던 PC)이다. 건드리지 않고 기록만 정리한다.
+    # 예전에는 실패로 남겨, '전부 원래대로'·제거가 매번 실패로 끝나고 사용자가 해결할 방법이 없었다.
+    assert r['success'] is True
+    assert 'service_start_backup' not in config_manager.load_config()
 
 
 def test_legacy_backup_kept_when_restore_fails():

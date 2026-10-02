@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import subprocess
 from PyQt6.QtWidgets import (QApplication, QWizard, QWizardPage, QVBoxLayout, 
                              QLabel, QRadioButton, QTextEdit, QMessageBox, 
                              QProgressBar, QCheckBox)
@@ -12,6 +13,44 @@ from PyQt6.QtGui import QIcon
 APP_VERSION = '1.0.1'
 
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE"
+APP_EXE = "APEX CARE.exe"
+UNINSTALLER_EXE = "APEX CARE Uninstaller.exe"
+CREATE_NO_WINDOW = 0x08000000
+
+
+def install_dir():
+    """설치 위치: %ProgramFiles%\\APEX CARE (모든 사용자).
+
+    APEX CARE 는 실행할 때마다 관리자 권한으로 돈다. 예전에는 일반 권한 프로그램도 쓸 수 있는 %LOCALAPPDATA% 에
+    설치해, 악성 프로그램이 exe 를 바꿔치기하면 사용자가 다음에 UAC 를 누를 때 관리자 권한을 얻을 수 있었다.
+    Program Files 는 관리자만 쓸 수 있다.
+    """
+    base = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles") or r"C:\Program Files"
+    return os.path.join(base, "APEX CARE")
+
+
+def legacy_install_dir():
+    """예전 버전(1.0.1 이전 빌드)이 설치하던 사용자 폴더."""
+    local = os.environ.get("LOCALAPPDATA")
+    return os.path.join(local, "APEX CARE") if local else ""
+
+
+def _system32(name):
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return os.path.join(root, "System32", name)
+
+
+def app_running():
+    """APEX CARE 가 실행 중인지. 확인하지 못하면 실행 중으로 본다(안전 쪽)."""
+    try:
+        r = subprocess.run([_system32("tasklist.exe"), "/FI", f"IMAGENAME eq {APP_EXE}", "/FO", "CSV", "/NH"],
+                           shell=False, capture_output=True, text=True, errors="replace",
+                           creationflags=CREATE_NO_WINDOW, timeout=30)
+    except Exception:
+        return True
+    if r.returncode != 0:
+        return True
+    return f'"{APP_EXE.lower()}"' in (r.stdout or "").lower()
 
 
 def copy_with_progress(src, dst, on_bytes):
@@ -40,10 +79,12 @@ def copy_with_progress(src, dst, on_bytes):
 
 
 def register_uninstall(install_dir, app_exe, size_bytes):
-    """'앱 및 기능' 에 등록한다. 실패하면 예외를 올린다(등록 없이 '설치 완료' 라고 하지 않는다)."""
+    """'앱 및 기능' 에 모든 사용자용으로 등록한다(HKLM, 64비트 보기). 실패하면 예외를 올린다
+    (등록 없이 '설치 완료' 라고 하지 않는다)."""
     import winreg
-    uninstaller_exe = os.path.join(install_dir, "APEX CARE Uninstaller.exe")
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
+    uninstaller_exe = os.path.join(install_dir, UNINSTALLER_EXE)
+    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, UNINSTALL_KEY, 0,
+                            winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY) as key:
         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "APEX CARE")
         winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, f'"{uninstaller_exe}"')
         winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, install_dir)
@@ -53,6 +94,70 @@ def register_uninstall(install_dir, app_exe, size_bytes):
         winreg.SetValueEx(key, "EstimatedSize", 0, winreg.REG_DWORD, max(1, size_bytes // 1024))
         winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
         winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
+
+
+def _shortcut_target(lnk):
+    try:
+        import win32com.client
+        return win32com.client.Dispatch("WScript.Shell").CreateShortCut(lnk).Targetpath or ""
+    except Exception:
+        return ""
+
+
+def remove_legacy_install(new_dir):
+    """예전 버전이 사용자 폴더에 설치한 것을 정리한다. 남겨 두면 그 exe 가 여전히 바꿔치기 대상이다.
+
+    그 폴더의 우리 exe 두 개, 그 폴더를 가리키는 프로그램 목록 항목(HKCU)과 바로 가기만 지운다.
+    폴더는 비었을 때만 지운다. 설정·변경 기록(%APPDATA%\\APEX_CARE_DATA)은 그대로 이어 쓴다.
+    반환: 지우지 못한 것의 설명 목록.
+    """
+    import winreg
+    old = legacy_install_dir()
+    problems = []
+    if not old or os.path.normcase(os.path.abspath(old)) == os.path.normcase(os.path.abspath(new_dir)):
+        return problems
+    if os.path.isdir(old) and not os.path.islink(old):
+        for name in (APP_EXE, UNINSTALLER_EXE):
+            path = os.path.join(old, name)
+            if os.path.isfile(path) and not os.path.islink(path):
+                try:
+                    os.remove(path)                       # 우리 프로그램 파일만 지운다
+                except OSError as e:
+                    problems.append(f"{path}: {e}")
+        try:
+            os.rmdir(old)                                 # 비었을 때만 지워진다
+        except OSError:
+            pass
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as k:
+            loc = winreg.QueryValueEx(k, "InstallLocation")[0]
+        if os.path.normcase(os.path.abspath(str(loc))) == os.path.normcase(os.path.abspath(old)):
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        problems.append(f"예전 프로그램 목록 항목: {e}")
+    old_exe = os.path.normcase(os.path.join(old, APP_EXE))
+    for desk in _user_desktops():
+        lnk = os.path.join(desk, "APEX CARE.lnk")
+        if os.path.isfile(lnk) and os.path.normcase(_shortcut_target(lnk)) == old_exe:
+            try:
+                os.remove(lnk)                            # 예전 위치를 가리키는 우리 바로 가기만
+            except OSError as e:
+                problems.append(f"{lnk}: {e}")
+    return problems
+
+
+def _user_desktops():
+    out = []
+    try:
+        import win32com.client
+        out.append(win32com.client.Dispatch("WScript.Shell").SpecialFolders("Desktop"))
+    except Exception:
+        pass
+    out.append(os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면"))
+    out.append(os.path.join(os.path.expanduser("~"), "Desktop"))
+    return [d for d in dict.fromkeys(out) if d]
 
 
 class InstallWorker(QThread):
@@ -74,10 +179,14 @@ class InstallWorker(QThread):
                 self.finished_install.emit(False, f"설치 패키지가 손상되었습니다(없는 파일: {', '.join(missing)}).")
                 return
 
-            install_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "APEX CARE")
-            os.makedirs(install_dir, exist_ok=True)
-            target_path = os.path.join(install_dir, "APEX CARE.exe")
-            uninst_target = os.path.join(install_dir, "APEX CARE Uninstaller.exe")
+            if app_running():
+                self.finished_install.emit(False, "APEX CARE 가 실행 중입니다(또는 실행 여부를 확인하지 못했습니다).\n"
+                                                  "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.")
+                return
+            target_dir = install_dir()
+            os.makedirs(target_dir, exist_ok=True)
+            target_path = os.path.join(target_dir, APP_EXE)
+            uninst_target = os.path.join(target_dir, UNINSTALLER_EXE)
 
             sizes = [os.path.getsize(payload_path), os.path.getsize(uninstaller_path)]
             grand = sum(sizes) or 1
@@ -94,11 +203,12 @@ class InstallWorker(QThread):
                 return
 
             try:
-                register_uninstall(install_dir, target_path, sum(sizes))
+                register_uninstall(target_dir, target_path, sum(sizes))
             except OSError as e:
                 self.finished_install.emit(False, f"'앱 및 기능' 에 등록하지 못했습니다: {e}\n"
                                                   "파일은 복사됐지만 제거 목록에 나오지 않습니다. 다시 설치해 주세요.")
                 return
+            self.legacy_problems = remove_legacy_install(target_dir)
             self.progress_update.emit(100)
             self.finished_install.emit(True, target_path)
         except Exception as e:
@@ -142,7 +252,10 @@ class ReadyPage(QWizardPage):
         desc = QLabel("계속하려면 [설치]를 클릭하십시오. 설정을 검토하거나 변경하려면 [뒤로]를 클릭하십시오.")
         layout.addWidget(desc)
         
-        info = QLabel("\n대상 위치:\n사용자 로컬 앱 데이터 폴더 (AppData\\Local\\APEX CARE)\n\n설치 마법사가 APEX CARE를 설치합니다.")
+        info = QLabel(f"\n대상 위치:\n{install_dir()} (이 PC 의 모든 사용자)\n\n"
+                      "예전 버전이 사용자 폴더(AppData\\Local\\APEX CARE)에 설치돼 있으면 그 프로그램 파일은 정리하고,\n"
+                      "설정과 변경 기록은 그대로 이어 씁니다.")
+        info.setWordWrap(True)
         layout.addWidget(info)
 
 class ProgressPage(QWizardPage):
@@ -166,9 +279,9 @@ class ProgressPage(QWizardPage):
         return self.is_done
         
     def initializePage(self):
-        self.wizard().setButtonLayout(
-            [QWizard.WizardButton.Stretch, QWizard.WizardButton.CancelButton]
-        ) # Hide back/next buttons during progress
+        # 복사하는 동안에는 취소를 받지 않는다. 예전에는 '취소'·Esc·창 닫기가 복사 스레드를 기다리지 않고 끝내,
+        # 반쯤 복사된 파일과 제거 목록에 없는 설치가 남았다.
+        self.wizard().setButtonLayout([QWizard.WizardButton.Stretch])
         
         self.worker = InstallWorker(self.wizard().resource_path)
         self.worker.progress_update.connect(self.progress.setValue)
@@ -238,6 +351,22 @@ class SetupWizard(QWizard):
         self.load_eula()
         self.finished.connect(self.on_finished)
 
+    def _copying(self):
+        w = getattr(self.progress_page, "worker", None)
+        return bool(w is not None and w.isRunning())
+
+    def reject(self):
+        if self._copying():
+            return                                 # 설치를 마칠 때까지 닫지 않는다(Esc 포함)
+        super().reject()
+
+    def closeEvent(self, event):
+        if self._copying():
+            event.ignore()
+            QMessageBox.information(self, "설치 중", "설치를 마칠 때까지 기다려 주세요.")
+            return
+        super().closeEvent(event)
+
     def load_eula(self):
         eula_path = self.resource_path("eula.txt")
         if os.path.exists(eula_path):
@@ -256,36 +385,35 @@ class SetupWizard(QWizard):
     def on_finished(self, result):
         # '앱 및 기능' 등록은 설치 단계(InstallWorker)에서 이미 끝났다. 실패했으면 완료 화면까지 오지 않는다.
         if result == 1 and self.installed_path: # Accepted/Finished
-            if self.finish_page.chk_shortcut.isChecked() and not self.create_shortcut():
+            if not self.create_shortcut("AllUsersPrograms"):
+                QMessageBox.warning(self, "바로 가기", "시작 메뉴에 바로 가기를 만들지 못했습니다.\n"
+                                    f"APEX CARE 는 설치되었습니다: {self.installed_path}")
+            if self.finish_page.chk_shortcut.isChecked() and not self.create_shortcut("AllUsersDesktop"):
                 QMessageBox.warning(self, "바로 가기", "바탕 화면에 바로 가기를 만들지 못했습니다.\n"
                                     f"APEX CARE 는 설치되었습니다: {self.installed_path}")
+            legacy = getattr(self.progress_page.worker, "legacy_problems", None) or []
+            if legacy:
+                QMessageBox.warning(self, "예전 버전 정리", "예전 버전(사용자 폴더 설치)의 일부를 정리하지 못했습니다.\n"
+                                    "새 버전은 설치되었습니다. 아래 항목은 직접 지워 주세요:\n" + "\n".join(legacy[:5]))
             if self.finish_page.chk_run.isChecked():
                 try:
                     os.startfile(self.installed_path)
                 except OSError:
                     pass                     # 관리자 권한 확인 창에서 '아니요' 를 눌렀다. 설치는 끝났다.
 
-    def create_shortcut(self):
-        """바탕 화면 바로 가기를 만든다. 만들었으면 True."""
+    def create_shortcut(self, folder):
+        """모든 사용자용 바로 가기를 만든다(folder: 'AllUsersPrograms' 시작 메뉴, 'AllUsersDesktop' 공용 바탕 화면).
+
+        모든 사용자용으로 만든다. 표준 사용자가 관리자 암호로 설치하면 설치 프로그램은 관리자 계정으로 돌아서,
+        예전처럼 '현재 사용자' 바탕 화면에 만들면 정작 설치한 사람에게는 바로 가기가 보이지 않았다.
+        """
         try:
             import win32com.client
-            desktop_path = None
-            try:
-                import winreg
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
-                val, _ = winreg.QueryValueEx(key, "Desktop")
-                winreg.CloseKey(key)
-                desktop_path = os.path.expandvars(val)
-            except Exception:
-                pass
-                
-            if not desktop_path or not os.path.exists(desktop_path):
-                desktop_path = os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면")
-            if not os.path.exists(desktop_path):
-                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-            
-            shortcut_path = os.path.join(desktop_path, "APEX CARE.lnk")
             shell = win32com.client.Dispatch("WScript.Shell")
+            base = shell.SpecialFolders(folder)
+            if not base or not os.path.isdir(base):
+                return False
+            shortcut_path = os.path.join(base, "APEX CARE.lnk")
             shortcut = shell.CreateShortCut(shortcut_path)
             shortcut.Targetpath = self.installed_path
             shortcut.WorkingDirectory = os.path.dirname(self.installed_path)

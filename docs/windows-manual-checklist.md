@@ -60,9 +60,12 @@ Compare-Object (Get-Content C:\apex\A.txt) (Get-Content C:\apex\B.txt)
 ## 1. 설치와 첫 실행 — 아무것도 바꾸지 않아야 한다
 
 - [ ] 1-1. 설치 전 **스냅숏** `00-before-install`
-- [ ] 1-2. 설치 파일 실행 → 설치 경로가 `%LOCALAPPDATA%\APEX CARE`, 바탕화면 바로가기, 설정 → 앱 목록에 "APEX CARE" 가
+- [ ] 1-2. 설치 파일 실행 → 설치 경로가 `C:\Program Files\APEX CARE`(관리자만 쓸 수 있는 곳), 공용 바탕 화면·시작 메뉴 바로 가기,
+      설정 → 앱 목록에 "APEX CARE" 가
       크기(약 수십 MB)와 함께 보인다. 진행 막대는 파일 복사량만큼만 움직인다(멈칫거리는 가짜 진행 없음)
-- [ ] 1-2a. APEX CARE 를 켜 둔 채 설치 파일을 다시 실행 → "APEX CARE 가 실행 중이라 파일을 바꿀 수 없습니다" 가 나오고
+- [ ] 1-2b. 예전 버전(사용자 폴더 `%LOCALAPPDATA%\APEX CARE` 설치)이 있는 PC 에 설치 → 그 폴더의 exe 두 개·예전 바로 가기·
+      예전 프로그램 목록 항목이 정리되고, 설정과 '변경 내역' 은 그대로 이어진다. 복사 중에는 취소·Esc·닫기가 먹지 않는다
+- [ ] 1-2a. APEX CARE 를 켜 둔 채 설치 파일을 다시 실행 → "APEX CARE 가 실행 중" 안내가 나오고
       설치 폴더의 exe 가 깨지지 않는다(반쯤 쓴 파일이 남지 않음)
 - [ ] 1-3. APEX CARE 실행 → UAC 창이 뜬다(관리자 권한)
 - [ ] 1-3a. 대시보드: 켜자마자 CPU·GPU 는 "측정 중" 이다가 수 초 안에 숫자가 된다. 작업 관리자 성능 탭의 CPU %·GPU '3D'·
@@ -307,7 +310,7 @@ $lock = [IO.File]::Open("$env:TEMP\apex_locked.tmp", 'OpenOrCreate', 'ReadWrite'
       꺼 둔 두 시작 프로그램이 **원래 Run 키**(HKCU 는 HKCU, HKLM 은 HKLM)에 돌아오고, `HKCU\Software\APEXCARE` 키가 없다.
       `[APEX CARE]` 부분은 달라도 된다(`optimization_mode = standard`, 저널 항목 0개)
 - [ ] 13-4. `uninstall_revert.json` 의 `success` 가 `true`, `failed` 가 빈 목록이다
-- [ ] 13-5. 되돌리기 실패 경로: 재설치 → 게이밍 적용 → 앱을 닫고 `%LOCALAPPDATA%\APEX CARE\APEX CARE.exe` 이름을
+- [ ] 13-5. 되돌리기 실패 경로: 재설치 → 게이밍 적용 → 앱을 닫고 `C:\Program Files\APEX CARE\APEX CARE.exe` 이름을
       잠깐 `APEX CARE.exe.bak` 으로 바꾼다 → 제거 → "설정을 되돌리지 못했습니다" 와 함께 **기본 선택이 '아니요'** 인 질문이 뜬다 →
       Enter('아니요') → 설치 폴더가 그대로다 → 이름을 되돌리고 앱을 열면 '변경 내역 · 되돌리기'에 게이밍 모드 항목이 남아 있다
 - [ ] 13-6. 서비스 `DelayedAutostart` 가 `<없음>` 에서 `0` 으로 바뀐 것만 보이면 같은 뜻(지연 시작 아님)이다. 4·5절도 같다

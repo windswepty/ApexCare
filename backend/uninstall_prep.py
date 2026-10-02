@@ -98,6 +98,16 @@ def revert_for_uninstall():
 
     steps.extend(_restore_disabled_startup())
 
+    # 앱이 비정상 종료돼 남은 프로세스 우선순위·효율 모드(게임 부스트·에코). 앱이 지워지면 되돌릴 주체가 없다.
+    try:
+        from backend import process_boost
+        n, bad = process_boost.recover_after_crash()
+        if n or bad:
+            steps.append({'name': '낮춰 둔 앱의 우선순위·효율 모드 되돌리기', 'ok': not bad,
+                          'detail': (f'{n}개 되돌림' if not bad else '; '.join(bad[:5]))})
+    except Exception as e:
+        steps.append({'name': '낮춰 둔 앱의 우선순위·효율 모드 되돌리기', 'ok': False, 'detail': str(e)})
+
     # 복귀할 '게임 전 모드' 는 더 없다. revert_everything 이 모드를 표준으로 기록했다.
     if config_manager.get_boost_restore_mode() is not None:
         saved = config_manager.set_boost_restore_mode(None)

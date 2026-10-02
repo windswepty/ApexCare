@@ -1,14 +1,23 @@
+import base64
 import json
 import ntpath
 import os
 import subprocess
 import sys
+import tempfile
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 import win32com.client
 
 CREATE_NO_WINDOW = 0x08000000
 APP_EXE = "APEX CARE.exe"
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE"
+
+
+def install_dir_expected():
+    """설치 마법사(tools/setup_wizard.install_dir)와 같은 위치: %ProgramFiles%\\APEX CARE."""
+    base = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles") or r"C:\Program Files"
+    return os.path.join(base, "APEX CARE")
 REVERT_TIMEOUT_SEC = 300
 # backend/uninstall_prep.py 의 RESULT_NAME 과 같아야 한다
 RESULT_PATH = os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "uninstall_revert.json")
@@ -114,13 +123,12 @@ def main():
 
     install_dir = os.path.dirname(os.path.abspath(sys.executable))
 
-    # STRICT SAFETY CHECK: Only delete if running EXACTLY from LOCALAPPDATA\APEX CARE
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    expected_dir = os.path.join(local_app_data, "APEX CARE")
-
+    # 엄격한 위치 확인: 설치 마법사가 설치하는 곳(%ProgramFiles%\APEX CARE)에서 실행될 때만 지운다
+    expected_dir = install_dir_expected()
     if os.path.normcase(install_dir) != os.path.normcase(expected_dir):
         _message(QMessageBox.Icon.Critical, "제거 오류",
-                 f"정상적인 설치 경로가 아닙니다.\n이 프로그램은 실제 설치된 위치(AppData)에서만 실행 가능합니다.\n현재 경로: {install_dir}")
+                 f"정상적인 설치 경로가 아닙니다.\n이 프로그램은 설치된 위치({expected_dir})에서만 실행할 수 있습니다.\n"
+                 f"현재 경로: {install_dir}")
         sys.exit(1)
 
     # 실행 중인 앱을 강제 종료하지 않는다. 강제 종료하면 게임 부스트·우선순위 정리가 돌지 않고,
@@ -147,13 +155,18 @@ def main():
                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             sys.exit(1)
 
-    temp_dir = os.environ.get("TEMP") or os.path.join(local_app_data, "Temp")
-    bat_path = os.path.join(temp_dir, "uninstall_apex.bat")
+    # 정리 배치는 관리자만 고칠 수 있는 곳에 무작위 이름으로 만든다. 예전에는 사용자 %TEMP% 의 고정 이름
+    # (uninstall_apex.bat)이라, 관리자 권한 cmd 가 줄 단위로 다시 읽는 수십 초 동안 일반 권한 프로그램이
+    # 내용을 바꿔 관리자 권한으로 실행시킬 수 있었다.
+    temp_dir = _secure_temp_root()
     try:
+        work_dir = tempfile.mkdtemp(prefix="apexcare-uninst-", dir=temp_dir)
+        bat_path = os.path.join(work_dir, "cleanup.bat")
         _write_cleanup_bat(bat_path, install_dir)
     except (OSError, UnicodeEncodeError) as e:
+        first = ("설정은 되돌렸지만" if reverted else "설정 일부를 되돌리지 못한 채로")
         _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
-                 f"설정은 되돌렸지만 설치 폴더를 지우는 준비를 하지 못했습니다: {e}\n"
+                 f"{first} 설치 폴더를 지우는 준비를 하지 못했습니다: {e}\n"
                  f"아래 폴더를 직접 지워 주세요.\n{install_dir}")
         sys.exit(1)
 
@@ -163,6 +176,12 @@ def main():
     subprocess.Popen([_system32("cmd.exe"), "/d", "/c", bat_path], shell=False, cwd=temp_dir,
                      creationflags=CREATE_NO_WINDOW, close_fds=True)
     sys.exit(0)
+
+
+def _secure_temp_root():
+    """%SystemRoot%\\Temp. 사용자는 여기 새 파일을 만들 수 있어도, 관리자가 만든 파일은 고칠 수 없다."""
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return os.path.join(root, "Temp")
 
 
 def _bat_encoding():
@@ -178,19 +197,34 @@ def _fits(text):
         return False
 
 
-def _cleanup_bat_lines(bat_path, install_dir, shortcuts, start_menu):
+def _message_line(text):
+    """배치에서 결과 창을 띄우는 한 줄. 모든 Windows 에디션에 있는 PowerShell 로 이 세션에만 띄운다.
+
+    예전에는 'msg *' 를 썼는데, msg.exe 는 Home 에디션에 없어 성공도 실패도 보이지 않았고, Pro 에서는
+    PC 의 모든 세션(다른 로그인 사용자 포함)에 설치 경로가 담긴 안내를 보냈다. 문구는 Base64(UTF-16) 로 넘겨
+    콘솔 코드 페이지와 상관없이 한국어 그대로 보인다.
+    """
+    quoted = text.replace("'", "''")
+    script = ("Add-Type -AssemblyName PresentationFramework; "
+              f"[void][System.Windows.MessageBox]::Show('{quoted}', 'APEX CARE')")
+    b64 = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return ('"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" '
+            f'-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {b64}')
+
+
+def _cleanup_bat_lines(bat_path, install_dir, shortcuts):
     """설치 폴더·바로 가기·프로그램 목록 키를 지우는 배치 파일 내용.
 
     제거 프로그램(PyInstaller 부트로더 포함)이 끝나 exe 잠금이 풀릴 때까지 폴더 삭제를 최대 30번 다시 시도하고,
     끝에 실제로 지워졌는지에 따라 다른 메시지를 띄운다(지우지 못했는데 '제거되었습니다' 라고 하지 않는다).
+    작업 폴더는 배치가 든 폴더의 상위(%SystemRoot%\\Temp)다. 배치 폴더를 작업 폴더로 두면 끝에 그 폴더를 지울 수 없다.
     """
     ok_msg = "APEX CARE가 제거되었습니다."
-    fail_msg = "APEX CARE 설치 폴더를 지우지 못했습니다. 이 폴더를 직접 지워 주세요:"
-    if not (_fits(ok_msg) and _fits(fail_msg)):
-        ok_msg, fail_msg = "APEX CARE has been removed.", "Could not delete the APEX CARE folder. Please delete it:"
+    fail_msg = f"APEX CARE 설치 폴더를 지우지 못했습니다. 이 폴더를 직접 지워 주세요:\n{install_dir}"
+    work_dir = ntpath.dirname(bat_path)
     lines = [
         '@echo off',
-        f'cd /d "{ntpath.dirname(bat_path)}"',
+        f'cd /d "{ntpath.dirname(work_dir)}"',
         'set /a tries=0',
         ':retry',
         'ping -n 2 127.0.0.1 > NUL',          # 창 없이 돌면 timeout 은 입력 리디렉션 오류로 바로 끝난다
@@ -203,28 +237,45 @@ def _cleanup_bat_lines(bat_path, install_dir, shortcuts, start_menu):
     ]
     lines += [f'del /q "{p}" > NUL 2>&1' for p in shortcuts]
     lines += [
-        f'rmdir /s /q "{start_menu}" > NUL 2>&1',
-        'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\APEX CARE" /f > NUL 2>&1',
-        f'msg * {ok_msg}',
+        f'reg delete "HKLM\\{UNINSTALL_KEY}" /f /reg:64 > NUL 2>&1',
+        _message_line(ok_msg),
         'goto end',
         ':cleanup',
-        f'msg * {fail_msg} {install_dir}',
+        _message_line(fail_msg),
         ':end',
-        'del "%~f0"',
+        # 배치 파일과 그 폴더(이 제거 프로그램이 만든 것)만 지운다. (goto) 로 배치 문맥을 먼저 빠져나와야 지울 수 있다.
+        f'(goto) 2>nul & del "%~f0" & rmdir "{work_dir}"',
     ]
     return lines
 
 
-def _write_cleanup_bat(bat_path, install_dir):
+def _shortcut_paths():
+    """지울 바로 가기: 이 버전(모든 사용자 시작 메뉴·공용 바탕 화면)과 예전 버전(사용자 바탕 화면)의 'APEX CARE.lnk'.
+
+    배치에 쓸 수 없는(코드 페이지로 나타낼 수 없는) 경로는 뺀다. 예전에는 그런 바로 가기 경로 하나 때문에
+    배치를 만들지 못해 설치 폴더 정리 전체가 취소됐다.
+    """
     shell = win32com.client.Dispatch("WScript.Shell")
-    shortcuts = [os.path.join(shell.SpecialFolders("Desktop"), "APEX CARE.lnk")]
-    onedrive_desktop = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "바탕 화면")
-    if os.path.exists(onedrive_desktop):
-        shortcuts.append(os.path.join(onedrive_desktop, "APEX CARE.lnk"))
-    start_menu = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "APEX CARE")
-    lines = _cleanup_bat_lines(bat_path, install_dir, shortcuts, start_menu)
-    # 경로를 코드 페이지로 나타낼 수 없으면 errors 없이 실패시킨다. 깨진 경로로 rmdir 을 부르지 않는다.
-    with open(bat_path, "w", encoding=_bat_encoding()) as f:
+    folders = []
+    for name in ("AllUsersPrograms", "AllUsersDesktop", "Desktop"):
+        try:
+            folders.append(shell.SpecialFolders(name))
+        except Exception:
+            pass
+    folders.append(os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "바탕 화면"))
+    out = []
+    for f in dict.fromkeys(x for x in folders if x):
+        lnk = os.path.join(f, "APEX CARE.lnk")
+        if os.path.exists(lnk) and _fits(lnk):
+            out.append(lnk)
+    return out
+
+
+def _write_cleanup_bat(bat_path, install_dir):
+    lines = _cleanup_bat_lines(bat_path, install_dir, _shortcut_paths())
+    # 설치 경로를 코드 페이지로 나타낼 수 없으면 errors 없이 실패시킨다. 깨진 경로로 rmdir 을 부르지 않는다.
+    # 'x' 모드: 이미 있는 파일(미리 만들어 둔 것)에는 쓰지 않는다.
+    with open(bat_path, "x", encoding=_bat_encoding()) as f:
         f.write("\n".join(lines) + "\n")
 
 if __name__ == "__main__":

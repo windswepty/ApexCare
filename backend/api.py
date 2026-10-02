@@ -56,8 +56,9 @@ class Api:
     def getJunkCleanStatus(self):
         return optimizer.get_junk_clean_status()
 
-    def cleanJunk(self, selectedIds):
-        return optimizer.clean_junk(selectedIds)
+    def cleanJunk(self, selectedIds, recycleBytesSeen=None):
+        # recycleBytesSeen: 확인 창에 보인 휴지통 크기(바이트). 그 뒤 휴지통이 커졌으면 비우지 않는다.
+        return optimizer.clean_junk(selectedIds, recycle_bytes_seen=recycleBytesSeen)
 
     def cancelJunkClean(self):
         return optimizer.cancel_junk_clean()

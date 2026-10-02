@@ -130,6 +130,40 @@ def test_legacy_hidden_startup_apps_come_back_before_uninstall():
     assert not REGISTRY.has_key('HKCU', r'Software\APEXCARE')
     assert ss.pending_changes() == {}
 
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_reregistered_legacy_item_turned_off_by_user_stays_off():
+    # 프로그램이 HKLM Run 에 스스로 다시 등록했고, 사용자가 작업 관리자에서 껐다. 원래 위치 기록은 없다(아주 옛 버전).
+    _seed_pc()
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup', 'OldTool', r'C:\apps\old.exe', fakewin.REG_SZ)
+    REGISTRY.seed('HKLM', RUN_MACHINE, 'OldTool', r'C:\apps\old.exe', fakewin.REG_SZ)
+    disabled = b'\x03\x00\x00\x00' + b'\x11' * 8
+    REGISTRY.seed('HKLM', r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', 'OldTool',
+                  disabled, fakewin.REG_BINARY)
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    assert res['success'], res['failed']
+    assert REGISTRY.get('HKCU', RUN_USER, 'OldTool') is None                  # HKCU 에 중복 등록하지 않는다
+    assert REGISTRY.value('HKLM', r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+                          'OldTool') == disabled                              # 사용자가 끈 상태 그대로
+    assert ss.pending_changes() == {} and res['remaining'] == 0               # 되돌릴 주체 없는 기록을 남기지 않는다
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_priorities_left_by_a_crash_are_restored_before_uninstall(procs, monkeypatch):
+    from backend import game_booster, process_boost
+    monkeypatch.setattr(game_booster, '_set_process_power_throttling', lambda pid, v: True)
+    procs.add(900, 'chrome.exe', nice=fakewin.BELOW_NORMAL_PRIORITY_CLASS)
+    game_booster._tame_processes([900])
+    process_boost._original.clear()                                           # 앱이 비정상 종료됐다
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    assert res['success'], res['failed']
+    assert procs.procs[900].nice == fakewin.BELOW_NORMAL_PRIORITY_CLASS
+    assert any('우선순위' in s['name'] for s in res['steps'])
+
 def test_without_admin_nothing_is_changed_and_it_fails():
     _seed_pc()
     before = _state()
@@ -242,44 +276,81 @@ def _load_uninstaller(monkeypatch):
     return mod
 
 
-INSTALL = r'C:\Users\u\AppData\Local\APEX CARE'
-BAT = r'C:\Users\u\AppData\Local\Temp\uninstall_apex.bat'
+INSTALL = r'C:\Program Files\APEX CARE'
+BAT = r'C:\Windows\Temp\apexcare-uninst-ab12\cleanup.bat'
+
+
+def _shown_text(line):
+    """결과 창 줄(PowerShell -EncodedCommand)에서 보여 줄 문구를 꺼낸다."""
+    import base64
+    b64 = line.rsplit(' ', 1)[-1]
+    return base64.b64decode(b64).decode('utf-16-le')
 
 
 def test_cleanup_runs_outside_install_dir_and_retries(monkeypatch):
     un = _load_uninstaller(monkeypatch)
-    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\u\Desktop\APEX CARE.lnk'], r'C:\sm\APEX CARE')
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\Public\Desktop\APEX CARE.lnk'])
     body = [l for l in lines if l != '@echo off']
-    # 배치 파일이 설치 폴더를 작업 폴더로 물려받으면 그 폴더는 지워지지 않는다
-    assert body[0] == r'cd /d "C:\Users\u\AppData\Local\Temp"'
+    # 배치 파일이 설치 폴더나 자기 폴더를 작업 폴더로 두면 그 폴더는 지워지지 않는다
+    assert body[0] == r'cd /d "C:\Windows\Temp"'
     retry = lines.index(':retry')
     rmdir = lines.index(f'if exist "{INSTALL}" rmdir /s /q "{INSTALL}"')
     assert retry < rmdir < lines.index('if %tries% lss 30 goto retry')
     assert not any(l.startswith('timeout') for l in lines)   # 창 없이 돌면 바로 끝나 기다리지 못한다
+    # 끝에 자기 자신과 이 제거 프로그램이 만든 폴더만 지운다(/s 없이: 비었을 때만)
+    assert lines[-1] == r'(goto) 2>nul & del "%~f0" & rmdir "C:\Windows\Temp\apexcare-uninst-ab12"'
 
 
 def test_cleanup_reports_success_only_when_folder_is_gone(monkeypatch):
     un = _load_uninstaller(monkeypatch)
-    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\u\Desktop\APEX CARE.lnk'], r'C:\sm\APEX CARE')
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [r'C:\Users\Public\Desktop\APEX CARE.lnk'])
     removed, failed = lines.index(':removed'), lines.index(':cleanup')
     reg = next(i for i, l in enumerate(lines) if l.startswith('reg delete'))
-    ok = next(i for i, l in enumerate(lines) if l.startswith('msg *') and '제거되었습니다' in l)
-    fail = next(i for i, l in enumerate(lines) if l.startswith('msg *') and '지우지 못했습니다' in l)
+    shown = [(i, _shown_text(l)) for i, l in enumerate(lines) if '-EncodedCommand' in l]
+    ok = next(i for i, t in shown if '제거되었습니다' in t)
+    fail = next(i for i, t in shown if '지우지 못했습니다' in t)
     # 폴더를 지웠을 때만 프로그램 목록에서 빼고 '제거되었습니다' 라고 한다. 못 지우면 경로를 알려 준다.
     assert lines.index(f'if not exist "{INSTALL}" goto removed') < removed < reg < ok < failed < fail
-    assert INSTALL in lines[fail]
+    assert INSTALL in _shown_text(lines[fail])
     assert lines[ok + 1] == 'goto end'
+    assert 'HKLM' in lines[reg] and '/reg:64' in lines[reg]
 
 
-def test_cleanup_bat_never_writes_a_mangled_path(monkeypatch, tmp_path):
+def test_result_message_works_on_every_edition_and_only_this_session(monkeypatch):
+    # msg.exe 는 Home 에디션에 없고, 'msg *' 는 PC 의 모든 세션에 보낸다
+    un = _load_uninstaller(monkeypatch)
+    lines = un._cleanup_bat_lines(BAT, INSTALL, [])
+    assert not any(l.startswith('msg') for l in lines)
+    assert any('powershell.exe' in l and 'MessageBox' in _shown_text(l) for l in lines if '-EncodedCommand' in l)
+    assert all(l.isascii() for l in lines)                          # 한국어 문구도 코드 페이지와 상관없이
+
+
+def test_cleanup_bat_never_writes_a_mangled_path_and_skips_odd_shortcuts(monkeypatch, tmp_path):
     un = _load_uninstaller(monkeypatch)
     monkeypatch.setattr(un, '_bat_encoding', lambda: 'ascii')
-    lines = un._cleanup_bat_lines(BAT, INSTALL, [], r'C:\sm')
-    assert 'msg * APEX CARE has been removed.' in lines            # 코드 페이지에 없는 안내문은 영어로
     # 경로가 코드 페이지로 나타나지 않으면 '?' 로 바꿔 쓰지 않고 실패한다(깨진 경로로 rmdir 을 부르지 않는다)
     with pytest.raises(UnicodeEncodeError):
         un._write_cleanup_bat(str(tmp_path / 'x.bat'), r'C:\Users\라브\AppData\Local\APEX CARE')
     assert not os.path.exists(tmp_path / 'x.bat') or os.path.getsize(tmp_path / 'x.bat') == 0
+    # 선택 항목(바로 가기)은 나타낼 수 없으면 빼고 진행한다. 예전에는 그 하나 때문에 정리 전체가 취소됐다
+    desk = tmp_path / '바탕 화면'
+    desk.mkdir()
+    (desk / 'APEX CARE.lnk').write_bytes(b'')
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
+    (tmp_path / 'OneDrive').mkdir()
+    (tmp_path / 'OneDrive' / '바탕 화면').mkdir()
+    (tmp_path / 'OneDrive' / '바탕 화면' / 'APEX CARE.lnk').write_bytes(b'')
+    assert un._shortcut_paths() == []
+
+
+def test_cleanup_bat_is_never_written_over_an_existing_file(monkeypatch, tmp_path):
+    # 미리 만들어 둔 파일에 덮어쓰지 않는다('x' 모드)
+    un = _load_uninstaller(monkeypatch)
+    bat = tmp_path / 'cleanup.bat'
+    bat.write_text('echo planted')
+    with pytest.raises(FileExistsError):
+        un._write_cleanup_bat(str(bat), INSTALL)
+    assert bat.read_text() == 'echo planted'
 
 
 def test_uninstaller_starts_cleanup_with_its_own_working_dir():

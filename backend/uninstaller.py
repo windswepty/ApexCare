@@ -44,15 +44,27 @@ def _clean(s):
 
 
 def _read(subkey, name, default=''):
+    """값을 읽는다. REG_EXPAND_SZ 는 %windir% 같은 환경 변수를 펼친다(Windows '앱 및 기능' 과 같다).
+
+    예전에는 펼치지 않아 '%windir%\\system32\\sdbinst.exe' 같은 제거 명령이 실행되지 않았고,
+    '제거 프로그램을 찾을 수 없습니다' 라는 틀린 안내가 떴다.
+    """
     try:
-        return _clean(winreg.QueryValueEx(subkey, name)[0])
+        value, vtype = winreg.QueryValueEx(subkey, name)
     except Exception:
         return default
+    if vtype == getattr(winreg, 'REG_EXPAND_SZ', 2) and isinstance(value, str):
+        try:
+            value = winreg.ExpandEnvironmentStrings(value)
+        except Exception:
+            value = os.path.expandvars(value)
+    return _clean(value)
 
 
-# 표시 이름 → 프로그램이 등록한 InstallLocation. 목록을 읽을 때마다 채운다(이 프로세스 동안 유지).
+# 표시 이름 → 프로그램이 등록한 InstallLocation·게시자. 목록을 읽을 때마다 채운다(이 프로세스 동안 유지).
 # 제거가 끝나면 등록 정보가 지워지므로, 잔여물 탐색은 제거 전에 읽어 둔 이 값을 쓴다.
 _known_locations = {}
+_known_publishers = {}
 
 
 def _format_install_date(raw):
@@ -98,6 +110,9 @@ def get_installed_apps():
                             if isinstance(location, str) and location.strip():
                                 # 제거가 끝나면 레지스트리에서 사라진다. 잔여물 탐색이 쓰도록 기억해 둔다.
                                 _known_locations[name] = location.strip().strip('"')
+                            pub = _read(sub, "Publisher")
+                            if isinstance(pub, str) and pub.strip():
+                                _known_publishers[name] = pub.strip()
                             apps.append({
                                 "id": str(app_id),
                                 "name": name,
@@ -247,6 +262,35 @@ def _folder_size(path, cap_bytes=FOLDER_SIZE_CAP):
         return 0, False
 
 
+_COMPANY_SUFFIX = re.compile(r'\b(inc|incorporated|corp|corporation|co|company|ltd|limited|llc|gmbh|ag|sa|bv|'
+                             r'pty|plc|srl|software|technologies|technology)\b\.?', re.I)
+
+
+def _shared_folder_reason(location, app_name, publisher):
+    """등록된 설치 경로가 이 프로그램만의 폴더가 아니면 그 이유. 이 프로그램만의 폴더면 None.
+
+    Adobe Premiere Pro·After Effects·Media Encoder 는 InstallLocation 에 자기 폴더가 아니라
+    'C:\\Program Files\\Adobe' 를 적는다(이 개발 PC 에서 확인). 그대로 믿으면 Creative Cloud·Acrobat 까지
+    '확실한 잔여물' 로 휴지통에 갔다. 제조사 폴더, 다른 프로그램도 등록한 폴더, 다른 프로그램의 설치 경로를
+    품은 폴더는 통째로 올리지 않는다.
+    """
+    loc = safe_delete.norm(location)
+    for other, oloc in _known_locations.items():
+        if other == app_name or not oloc:
+            continue
+        o = safe_delete.norm(oloc)
+        if o == loc:
+            return f"다른 프로그램('{other}')도 같은 폴더를 설치 경로로 등록함"
+        if o.startswith(loc + os.sep):
+            return f"다른 프로그램('{other}')의 설치 폴더를 품고 있음"
+    folder = _normalize(os.path.basename(loc))
+    company = _normalize(_COMPANY_SUFFIX.sub(' ', publisher or ''))
+    # 제품 이름이 회사 이름과 같으면(Discord, Rainmeter) 그 폴더가 제품 폴더다. 다를 때만 제조사 폴더로 본다.
+    if folder and company and folder == company and folder != _normalize(app_name):
+        return f"게시자({publisher}) 이름의 제조사 공용 폴더"
+    return None
+
+
 def find_leftovers(app_name, install_location='', publisher=''):
     """제거 후 남은 폴더를 찾는다.
 
@@ -295,14 +339,33 @@ def find_leftovers(app_name, install_location='', publisher=''):
             "reason": why,
         })
 
+    target = _normalize(app_name)
+
     # 1순위 — 프로그램이 신고한 설치 경로(인자로 받지 않았으면 제거 전에 읽어 둔 값)
     install_location = install_location or _known_locations.get(app_name, '')
+    publisher = publisher or _known_publishers.get(app_name, '')
     if install_location and os.path.isdir(install_location):
-        add(install_location, 'certain', '프로그램이 등록한 설치 경로')
+        shared = _shared_folder_reason(install_location, app_name, publisher)
+        if not shared:
+            add(install_location, 'certain', '프로그램이 등록한 설치 경로')
+        else:
+            log.info(f"등록된 설치 경로를 통째로 올리지 않음({shared}): {install_location}")
+            # 공용 폴더 안에서 프로그램 이름과 정확히 같은 하위 폴더만 후보로 본다
+            if len(target) >= 4:
+                try:
+                    for item in os.listdir(install_location):
+                        full = os.path.join(install_location, item)
+                        if os.path.isdir(full) and _normalize(item) == target:
+                            add(full, 'likely', '프로그램 이름과 폴더명이 일치(공용 설치 폴더 안)')
+                except OSError:
+                    pass
 
-    target = _normalize(app_name)
     if len(target) < 4:
         # 너무 짧은 이름은 오탐이 많다. 추측 탐색을 하지 않는다.
+        return out
+    if any(_normalize(n) == target for n in installed_now if n != app_name):
+        # 버전만 다른 같은 제품이 아직 설치돼 있다(Python 3.12 를 지우는데 3.13 이 남음).
+        # 이름이 같은 폴더(%APPDATA%\\Python 등)는 그 버전도 쓰는 공용 데이터다. 이름으로 찾지 않는다.
         return out
 
     search_dirs = [os.environ.get(v, '') for v in
