@@ -247,11 +247,11 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <Cpu className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
+                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.cpuModel}>{stats?.cpuModel || '알 수 없음'}</div>
-                      <div className={`text-[10px] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
+                      <div className={`text-[0.625rem] font-mono mt-0.5 ${isDarkMode ? 'text-cyan-400/70' : 'text-cyan-600'}`}>
                         {stats?.cpuCores || '?'}코어 / {stats?.cpuThreads || '?'}스레드
                       </div>
                     </div>
@@ -260,7 +260,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <Monitor className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>그래픽 (GPU)</div>
+                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>그래픽 (GPU)</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.gpuModel || '알 수 없음'}>{stats?.gpuModel || '알 수 없음'}</div>
@@ -270,7 +270,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <MemoryStick className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
+                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate">
@@ -284,7 +284,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <HardDrive className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[10px] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>{stats?.systemDrive || '시스템'} 드라이브</div>
+                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>{stats?.systemDrive || '시스템'} 드라이브</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate">{Number(stats?.diskTotalGB) > 0 ? `전체 ${stats.diskTotalGB} GB` : '알 수 없음'}</div>
@@ -306,7 +306,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                     <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                       {TierInfo.desc}
                     </p>
-                    <p className={`text-[10px] font-mono mt-3 ${muted}`}>
+                    <p className={`text-[0.625rem] font-mono mt-3 ${muted}`}>
                       기준: 코어 4개 이하 또는 RAM 8 GB 미만이면 저사양 · 이 PC 코어 {stats.cpuCores}개, RAM {ramForTier(stats)} GB
                     </p>
                   </div>

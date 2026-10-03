@@ -94,7 +94,7 @@ export default function Header() {
         <div className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300">
           <Clock className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           <div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 font-sans">시스템 가동 시간</div>
+            <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">시스템 가동 시간</div>
             <div className="font-bold">{uptimeLabel(uptimeSec)}</div>
           </div>
         </div>
@@ -109,10 +109,10 @@ export default function Header() {
             >
               <Cpu className="w-4 h-4 text-gray-600 dark:text-gray-400" />
               <div>
-                <div className="text-[10px] text-gray-500 dark:text-gray-400 font-sans">CPU 실제 속도</div>
+                <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">CPU 실제 속도</div>
                 <div className="font-bold">
                   {c.text}
-                  {c.state && <span className={`ml-1.5 text-[10px] font-sans ${c.stateClass}`}>{c.state}</span>}
+                  {c.state && <span className={`ml-1.5 text-[0.625rem] font-sans ${c.stateClass}`}>{c.state}</span>}
                 </div>
               </div>
             </div>

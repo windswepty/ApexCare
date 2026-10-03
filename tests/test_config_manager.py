@@ -176,3 +176,34 @@ def test_unreadable_settings_apply_no_optional_boosts(monkeypatch):
     game_booster._applied.clear()
     game_booster._enter_boost_mode()
     assert game_booster._applied == {} and game_booster.get_booster_status()['appliedBoosts'] == []
+
+
+# ── 화면 설정(배경색·크기·움직임 줄이기) ─────────────────────
+
+def test_ui_background_scale_and_motion_are_validated_and_saved():
+    assert cm.set_ui_background('#2E1065')['success'] and cm.get_ui_background() == '#2e1065'
+    assert cm.set_ui_background('red')['success'] is False and cm.get_ui_background() == '#2e1065'
+    assert cm.set_ui_background('')['success'] and cm.get_ui_background() is None
+    assert cm.set_ui_scale(125)['success'] and cm.get_ui_scale() == 125
+    for bad in (300, 0, '110', True, None):                 # 정해 둔 크기만(True 는 1 로 통과하면 안 된다)
+        assert cm.set_ui_scale(bad)['success'] is False
+    assert cm.get_ui_scale() == 125
+    assert cm.set_ui_reduce_motion(True)['success'] and cm.get_ui_reduce_motion() is True
+    assert cm.set_ui_reduce_motion('yes')['success'] is False and cm.get_ui_reduce_motion() is True
+    # 손으로 고친 이상한 값은 기본값으로 읽는다
+    cm.update_config(lambda c: c.update(ui_scale=9999, ui_background='#zzzzzz', ui_reduce_motion='1'))
+    assert cm.get_ui_appearance() == {'theme': 'cyan', 'accent': None, 'background': None,
+                                      'scale': 100, 'reduceMotion': False}
+
+
+def test_reset_ui_appearance_puts_everything_back_at_once(monkeypatch):
+    cm.set_ui_theme('violet')
+    cm.set_ui_accent('#22d3ee')
+    cm.set_ui_background('#2e1065')
+    cm.set_ui_scale(110)
+    cm.set_ui_reduce_motion(True)
+    r = cm.reset_ui_appearance()
+    assert r['success'] and r['theme'] == 'cyan' and r['accent'] is None and r['background'] is None
+    assert r['scale'] == 100 and r['reduceMotion'] is False
+    monkeypatch.setattr(cm, 'save_config', lambda c: False)
+    assert cm.reset_ui_appearance()['success'] is False and cm.set_ui_scale(90)['success'] is False

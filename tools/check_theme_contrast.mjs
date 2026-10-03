@@ -58,6 +58,26 @@ report(resemblesWarningColor(readableAccent('cyan', '#7f1d1d')), `어두운 빨�
 report(resemblesWarningColor('#ef4444') && resemblesWarningColor('#f59e0b') && !resemblesWarningColor('#3b82f6') && !resemblesWarningColor('#a3a3a3'),
   '빨강·주황 계열 경고 판정');
 
+// 4
+console.log('\n[배경색 직접 지정]');
+const { fitBackground, composeTheme } = T;
+const bgSamples = [];
+for (let h = 0; h < 360; h += 20) for (const s of [0.3, 0.7, 1]) for (const l of [0.1, 0.5, 0.9]) bgSamples.push(hsl(h, s, l));
+bgSamples.push('#000000', '#ffffff', '#808080');
+let bgOk = 0, bgTotal = 0, bgNull = 0;
+for (const t of THEMES) for (const hex of bgSamples) {
+  bgTotal++;
+  if (!fitBackground(t.id, hex)) { bgNull++; continue; }
+  if (checkContrast(composeTheme(t.id, null, hex)).every(r => r.ok)) bgOk++;
+}
+report(bgNull === 0, `모든 배경색을 읽을 수 있게 맞춤 (못 맞춘 수 ${bgNull})`);
+report(bgOk === bgTotal, `맞춘 배경에서 모든 글자 대비 통과 (${bgOk}/${bgTotal})`);
+const purple = fitBackground('cyan', '#7c3aed');
+report(Boolean(purple) && purple.scale[9] !== base.zinc[9], `배경색이 실제로 패널 색을 바꿈 (보라 → 패널 ${purple && purple.scale[9]})`);
+// 배경색을 바꿔도 직접 고른 강조색 검사는 그 배경 위에서 한다
+const onPurple = readableAccent('cyan', '#1d4ed8', '#7c3aed');
+report(accentProblems('cyan', onPurple, '#7c3aed').length === 0, `보라 배경에서 고친 강조색도 통과 (${onPurple})`);
+
 console.log(failed ? `\n실패 ${failed}건` : '\n모든 검사 통과');
 process.exit(failed ? 1 : 0);
 

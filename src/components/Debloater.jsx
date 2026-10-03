@@ -257,7 +257,7 @@ export default function Debloater({ addToast }) {
             </button>
           </div>
           {installState === null && items.some(x => x.kind === 'appx') && (
-            <p className="px-2 text-[11px] text-gray-500 flex items-center gap-1.5">
+            <p className="px-2 text-[0.6875rem] text-gray-500 flex items-center gap-1.5">
               <Loader2 className="w-3 h-3 animate-spin" /> 이 PC 에 설치된 앱을 확인하는 중…
             </p>
           )}
@@ -291,16 +291,16 @@ export default function Debloater({ addToast }) {
                   <div className="font-bold text-sm text-black dark:text-white flex items-center gap-2 flex-wrap">
                     {item.name}
                     {state === 'installed' && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-500">설치됨</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-500">설치됨</span>
                     )}
                     {state === 'not_installed' && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-500/15 text-gray-500">설치되어 있지 않음</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-gray-500/15 text-gray-500">설치되어 있지 않음</span>
                     )}
                     {state === 'unknown' && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">설치 여부 확인 못 함</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">설치 여부 확인 못 함</span>
                     )}
                   </div>
-                  <div className={`text-[11px] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500'
+                  <div className={`text-[0.6875rem] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500'
                     : restorable[item.id] === false ? 'text-red-500' : 'text-amber-500'}`}>
                     {item.reversible
                       ? "되돌리기 가능 ('변경 내역 · 되돌리기')"
@@ -312,7 +312,7 @@ export default function Debloater({ addToast }) {
                             ? "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기"
                             : "이 계정에서 제거 · 설치 파일이 남으면 아래 '제거한 앱' 에서 되살리기"}
                   </div>
-                  {item.note && <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{item.note}</div>}
+                  {item.note && <div className="text-[0.6875rem] text-gray-500 mt-0.5 leading-snug">{item.note}</div>}
                 </div>
               </button>
               );
@@ -405,8 +405,8 @@ export default function Debloater({ addToast }) {
                   <p className="font-bold text-sm text-black dark:text-white">
                     {app.appName ? `${app.appName} · ` : ''}{app.label || app.name}
                   </p>
-                  <p className="text-[11px] text-gray-500 font-mono truncate">{app.name}</p>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-[0.6875rem] text-gray-500 font-mono truncate">{app.name}</p>
+                  <p className="text-[0.6875rem] text-gray-500">
                     {app.removedAt} 제거{app.account ? ` · 계정 ${app.account}` : ''}
                     {app.manifestFound === false && ' · 설치 파일이 남아 있지 않아 Microsoft Store 에서 다시 설치해야 합니다'}
                   </p>

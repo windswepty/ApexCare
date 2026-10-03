@@ -76,7 +76,7 @@ export default function StorageCenter({ addToast, active = true }) {
                 <div className="flex justify-between items-baseline text-sm mb-1.5">
                   <span className="font-bold text-black dark:text-white">
                     {d.label}
-                    <span className="ml-2 text-[11px] font-mono text-gray-500 uppercase">
+                    <span className="ml-2 text-[0.6875rem] font-mono text-gray-500 uppercase">
                       {d.fstype}{d.mediaType !== 'unknown' && ` · ${d.mediaType.toUpperCase()}`}
                     </span>
                   </span>
@@ -283,7 +283,7 @@ function JunkSection({ addToast, onDone, visible = true }) {
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-sm text-black dark:text-white truncate">{it.name}</p>
                     {it.irreversible && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 shrink-0">
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 shrink-0">
                         되돌릴 수 없음
                       </span>
                     )}
@@ -495,7 +495,7 @@ function FileSection({ addToast, onDone }) {
         {mode === 'large' && rows.map(fileRow)}
         {mode === 'dup' && groups.map((g, gi) => (
           <div key={g.key} className="rounded-xl border border-black/10 dark:border-slate-700 p-2 space-y-1.5">
-            <div className="flex items-center gap-2 px-1 text-[11px] text-gray-500">
+            <div className="flex items-center gap-2 px-1 text-[0.6875rem] text-gray-500">
               <Copy className="w-3.5 h-3.5" />
               <span>묶음 {gi + 1} · 같은 파일 {g.files.length}개 · 각 {fmtMB(g.files[0]?.sizeMB)}</span>
               {allCopiesChosen.includes(g) && <span className="text-amber-500 font-bold">모든 사본 선택됨</span>}
@@ -509,9 +509,9 @@ function FileSection({ addToast, onDone }) {
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-1">
           <p className="text-xs font-bold text-amber-500">건너뛴 파일 {failures.length}개</p>
           {failures.slice(0, 20).map((f, i) => (
-            <p key={i} className="text-[11px] text-gray-500 break-all">· {String(f.path)} — {f.reason}</p>
+            <p key={i} className="text-[0.6875rem] text-gray-500 break-all">· {String(f.path)} — {f.reason}</p>
           ))}
-          {failures.length > 20 && <p className="text-[11px] text-gray-500">· 외 {failures.length - 20}개</p>}
+          {failures.length > 20 && <p className="text-[0.6875rem] text-gray-500">· 외 {failures.length - 20}개</p>}
         </div>
       )}
 

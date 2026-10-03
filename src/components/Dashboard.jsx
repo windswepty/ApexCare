@@ -30,12 +30,12 @@ const renderLineGraph = (history, state) => {
 
   // 이 PC 에서 잴 수 없는 값이면 기록이 모일 일도 없다. 예전에는 '기록을 모으는 중…' 이 끝나지 않았다.
   if (state === 'unavailable') {
-    return <p className="text-[11px] text-gray-500 font-mono">이 PC 에서는 잴 수 없습니다</p>;
+    return <p className="text-[0.6875rem] text-gray-500 font-mono">이 PC 에서는 잴 수 없습니다</p>;
   }
   // 잰 칸만 잇는다. 재지 않은 칸(null)은 그리지 않는다.
   const measured = history.map((val, i) => ({ val, i })).filter((p) => isNum(p.val));
   if (measured.length < 2) {
-    return <p className="text-[11px] text-gray-500 font-mono">기록을 모으는 중…</p>;
+    return <p className="text-[0.6875rem] text-gray-500 font-mono">기록을 모으는 중…</p>;
   }
   const points = measured.map(({ val, i }) => {
     const x = (i / (HISTORY_POINTS - 1)) * width;

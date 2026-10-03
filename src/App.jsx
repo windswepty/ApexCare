@@ -18,7 +18,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
-import { applyTheme, cachedAppearance } from './theme';
+import { applyTheme, applyDisplay, cachedAppearance } from './theme';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -98,15 +98,14 @@ export default function App() {
             setSystemStats(stats.error ? {} : stats);
             setIsBackendReady(true);
             // 저장된 색 설정을 기준으로 다시 맞춘다(캐시와 다를 수 있다).
-            if (typeof window.pywebview.api.getUiTheme === 'function') {
+            if (typeof window.pywebview.api.getUiAppearance === 'function') {
               try {
-                const savedTheme = await window.pywebview.api.getUiTheme();
-                const savedAccent = typeof window.pywebview.api.getUiAccent === 'function'
-                  ? await window.pywebview.api.getUiAccent() : null;
-                const applied = applyTheme(savedTheme, savedAccent);
-                setAppearance({ id: applied.id, accent: savedAccent || null });
+                const saved = await window.pywebview.api.getUiAppearance();
+                const applied = applyTheme(saved?.theme, saved?.accent, saved?.background);
+                const display = applyDisplay({ scale: saved?.scale, reduceMotion: saved?.reduceMotion });
+                setAppearance({ id: applied.id, accent: saved?.accent || null, background: saved?.background || null, ...display });
               } catch (e) {
-                console.error('Error loading UI theme:', e);
+                console.error('Error loading UI appearance:', e);
               }
             }
             // Sync current active power plan mode from backend
@@ -176,8 +175,7 @@ export default function App() {
             onClose={() => setIsSettingsOpen(false)} 
             addToast={addToast}
             onOpenSetupWizard={() => { setIsSettingsOpen(false); setShowInitialWizard(true); }}
-            themeId={appearance.id}
-            accent={appearance.accent}
+            appearance={appearance}
             onAppearanceChange={setAppearance}
           />
 

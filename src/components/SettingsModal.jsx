@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw } from 'lucide-react';
+import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor } from 'lucide-react';
 import {
-  THEMES, HEX_RE, applyTheme, swatch, findTheme, composeTheme,
-  accentProblems, readableAccent, resemblesWarningColor,
+  THEMES, HEX_RE, DEFAULT_THEME_ID, UI_SCALES, applyTheme, applyDisplay, swatch, findTheme, composeTheme,
+  accentProblems, readableAccent, resemblesWarningColor, fitBackground,
 } from '../theme';
 
 // 키보드로 갈 수 있는 것(Tab 이 창 안에서만 돌게 할 때 쓴다)
@@ -11,10 +11,13 @@ const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabi
 // 예전 '저장하기' 버튼은 아무것도 저장하지 않고 "설정이 저장되었습니다" 를 띄웠다.
 // 이제 고르면 바로 적용하고, 백엔드가 저장에 성공했을 때만 성공을 알린다.
 // 저장에 실패하면 화면도 이전 색으로 되돌린다. 다음 실행 때 보일 색과 어긋나지 않게.
-export default function SettingsModal({ isOpen, onClose, addToast, themeId, accent, onAppearanceChange, onOpenSetupWizard }) {
-  const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent'
+export default function SettingsModal({ isOpen, onClose, addToast, appearance, onAppearanceChange, onOpenSetupWizard }) {
+  const { id: themeId, accent = null, background = null, scale = 100, reduceMotion = false } = appearance || {};
+  const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent' | 'background' | 'scale' | 'motion' | 'reset'
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
+  const [bgDraft, setBgDraft] = useState('');   // 편집 중인 배경색
+  const [bgText, setBgText] = useState('');
 
   // 대화상자: 열면 닫기 버튼으로 초점을 옮기고, Tab 은 창 안에서만 돌고, Esc 로 닫는다. 닫으면 열었던 곳으로 돌려준다.
   // 예전에는 초점이 오버레이 뒤에 남아 Tab 이 가려진 창 닫기 버튼으로 갔다.
@@ -56,70 +59,114 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
   // 창을 열 때와 색 조합을 바꿨을 때 지금 쓰는 강조색으로 맞춘다(색 조합을 바꾸면 직접 지정한 색은 해제된다)
   useEffect(() => {
     if (!isOpen) return;
-    const current = accent || findTheme(themeId).accent[5];
+    const current = accent || composeTheme(themeId, null, background).accent[5];
     setDraft(current);
     setHexText(current);
+    const bg = background || findTheme(themeId).zinc[9];
+    setBgDraft(bg);
+    setBgText(bg);
   }, [isOpen, themeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const api = window.pywebview && window.pywebview.api;
+  const current = { id: themeId, accent, background, scale, reduceMotion };
 
-  // 적용 → 저장 → 실패 시 되돌림. next/prev: { id, accent }
-  const commit = async (key, next, prev, save, okMessage) => {
+  // 적용 → 저장 → 실패 시 되돌림. patch: 바꿀 화면 설정 일부
+  const commit = async (key, patch, save, okMessage) => {
     if (!api || typeof save !== 'function') {
-      if (addToast) addToast('API가 준비되지 않아 색 설정을 저장할 수 없습니다.', 'error');
+      if (addToast) addToast('API가 준비되지 않아 화면 설정을 저장할 수 없습니다.', 'error');
       return;
     }
-    applyTheme(next.id, next.accent);
-    onAppearanceChange(next);
+    const prev = current;
+    const next = { ...prev, ...patch };
+    const show = (a) => {
+      const applied = applyTheme(a.id, a.accent, a.background);
+      onAppearanceChange({ ...a, id: applied.id, ...applyDisplay(a) });
+    };
+    show(next);
     setSaving(key);
     try {
       const res = await save();
       if (!res?.success) throw new Error(res?.message || '저장 실패');
       if (addToast) addToast(okMessage, 'success');
     } catch (e) {
-      applyTheme(prev.id, prev.accent);
-      onAppearanceChange(prev);
-      if (addToast) addToast(`색 설정을 저장하지 못했습니다: ${e.message || e}`, 'error');
+      show(prev);
+      if (addToast) addToast(`화면 설정을 저장하지 못했습니다: ${e.message || e}`, 'error');
     } finally {
       setSaving(null);
     }
   };
 
-  // 색 조합을 고르면 직접 지정한 강조색은 해제한다. 예전에는 강조색이 남아 모든 색 조합에 덮어씌워져,
+  // 색 조합을 고르면 직접 지정한 강조색·배경색은 해제한다. 예전에는 강조색이 남아 모든 색 조합에 덮어씌워져,
   // 색 조합을 바꿔도 화면이 거의 그대로였다.
   const chooseTheme = (id) => {
     if (saving || id === themeId) return;
-    commit(`theme:${id}`, { id, accent: null }, { id: themeId, accent },
+    const cleared = [accent && '강조색', background && '배경색'].filter(Boolean);
+    commit(`theme:${id}`, { id, accent: null, background: null },
       api && (async () => {
         const res = await api.setUiTheme(id);
-        if (!res?.success || !accent) return res;
-        const cleared = await api.setUiAccent('');
-        return cleared?.success ? res
-          : { success: false, message: `색 조합은 저장했지만 직접 지정한 강조색을 해제하지 못했습니다(${cleared?.message || '저장 실패'})` };
+        if (!res?.success) return res;
+        for (const [has, clear, what] of [[accent, () => api.setUiAccent(''), '강조색'],
+          [background, () => api.setUiBackground(''), '배경색']]) {
+          if (!has) continue;
+          const r = await clear();
+          if (!r?.success) {
+            return { success: false, message: `색 조합은 저장했지만 직접 지정한 ${what}을 해제하지 못했습니다(${r?.message || '저장 실패'})` };
+          }
+        }
+        return res;
       }),
-      accent ? '색 조합을 저장했습니다. 직접 지정했던 강조색은 해제했습니다.' : '색 조합을 저장했습니다.');
+      cleared.length ? `색 조합을 저장했습니다. 직접 지정했던 ${cleared.join('·')}은 해제했습니다.` : '색 조합을 저장했습니다.');
   };
 
   const saveAccent = (value) => {
     if (saving) return;
-    commit('accent', { id: themeId, accent: value }, { id: themeId, accent },
-      api && (() => api.setUiAccent(value || '')),
+    commit('accent', { accent: value }, api && (() => api.setUiAccent(value || '')),
       value ? '강조색을 저장했습니다.' : '색 조합의 기본 강조색으로 되돌렸습니다.');
+  };
+
+  const saveBackground = (value) => {
+    if (saving) return;
+    commit('background', { background: value }, api && (() => api.setUiBackground(value || '')),
+      value ? '배경색을 저장했습니다.' : '색 조합의 기본 배경색으로 되돌렸습니다.');
+  };
+
+  const saveScale = (value) => {
+    if (saving || value === scale) return;
+    commit('scale', { scale: value }, api && (() => api.setUiScale(value)), `글자·화면 크기를 ${value}% 로 저장했습니다.`);
+  };
+
+  const saveMotion = (value) => {
+    if (saving) return;
+    commit('motion', { reduceMotion: value }, api && (() => api.setUiReduceMotion(value)),
+      value ? '움직임 줄이기를 켰습니다.' : '움직임 줄이기를 껐습니다.');
+  };
+
+  const resetAll = () => {
+    if (saving) return;
+    commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false },
+      api && (() => api.resetUiAppearance()), '화면 설정을 모두 기본값으로 되돌렸습니다.');
   };
 
   if (!isOpen) return null;
 
   const draftValid = HEX_RE.test(draft);
-  const problems = draftValid ? accentProblems(themeId, draft) : [];
-  const preview = composeTheme(themeId, draftValid ? draft : null);
-  const fixed = draftValid && problems.length ? readableAccent(themeId, draft) : null;
-  // 저장된 강조색이 지금 색 조합에서는 읽기 어려워 쓰이지 않는 경우
-  const savedButUnused = accent && accentProblems(themeId, accent).length > 0;
+  const problems = draftValid ? accentProblems(themeId, draft, background) : [];
+  const preview = composeTheme(themeId, draftValid ? draft : null, background);
+  const fixed = draftValid && problems.length ? readableAccent(themeId, draft, background) : null;
+  // 저장된 강조색이 지금 색 조합·배경에서는 읽기 어려워 쓰이지 않는 경우
+  const savedButUnused = accent && accentProblems(themeId, accent, background).length > 0;
   const isStored = draftValid && accent === draft.toLowerCase();
   // '적용됨' 은 지금 화면에 실제로 쓰이고 있을 때만. 저장은 됐지만 이 색 조합에서는 쓰이지 않으면 그렇게 말한다.
   const isSaved = isStored && problems.length === 0;
 
   const setBoth = (hex) => { setDraft(hex); setHexText(hex); };
+
+  const bgValid = HEX_RE.test(bgDraft);
+  const bgFit = bgValid ? fitBackground(themeId, bgDraft) : null;
+  const bgPreview = composeTheme(themeId, accent, bgValid ? bgDraft : null);
+  const bgSaved = bgValid && background === bgDraft.toLowerCase();
+  const setBg = (hex) => { setBgDraft(hex); setBgText(hex); };
+  const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
@@ -144,7 +191,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                 색 조합
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                고르면 배경·패널·강조색이 함께 바뀌고 다음 실행 때도 유지됩니다. 직접 지정한 강조색은 해제됩니다.
+                고르면 배경·패널·강조색이 함께 바뀌고 다음 실행 때도 유지됩니다. 직접 지정한 강조색·배경색은 해제됩니다.
                 경고·위험을 알리는 빨강·주황은 색 조합과 관계없이 그대로입니다.
               </p>
             </div>
@@ -179,7 +226,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                       <span className="text-xs font-bold text-gray-900 dark:text-slate-100 truncate">{theme.name}</span>
                       {selected && <Check className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />}
                     </div>
-                    <span className="text-[10px] text-gray-500 dark:text-slate-400">
+                    <span className="text-[0.625rem] text-gray-500 dark:text-slate-400">
                       {saving === `theme:${theme.id}` ? '저장 중…' : theme.description}
                     </span>
                   </button>
@@ -246,7 +293,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                   <AlertTriangle className="w-3.5 h-3.5" />
                   이 색은 지금 색 조합에서 읽기 어렵습니다
                 </p>
-                <ul className="text-[11px] text-gray-600 dark:text-slate-300 space-y-0.5 font-mono">
+                <ul className="text-[0.6875rem] text-gray-600 dark:text-slate-300 space-y-0.5 font-mono">
                   {problems.map(p => (
                     <li key={p.name}>{p.name}: {p.ratio.toFixed(2)}:1 (필요 {p.floor.toFixed(1)}:1)</li>
                   ))}
@@ -292,6 +339,142 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                 </button>
               )}
             </div>
+          </section>
+
+          {/* ── 배경색 직접 지정 ── */}
+          <section className="space-y-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
+                <PaintBucket className="w-4 h-4 text-cyan-400" />
+                배경색 직접 지정
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+                고른 색으로 배경·패널·테두리를 물들입니다. 글자가 잘 보이도록 밝기는 어두운 화면에 맞추고, 색만 반영합니다.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                aria-label="배경색 고르기"
+                value={bgValid ? bgDraft : '#000000'}
+                onChange={(e) => setBg(e.target.value)}
+                className="w-11 h-11 rounded-lg border border-black/10 dark:border-slate-700 bg-transparent cursor-pointer p-0.5"
+              />
+              <input
+                type="text"
+                aria-label="배경색 코드"
+                value={bgText}
+                maxLength={7}
+                spellCheck={false}
+                onChange={(e) => {
+                  const v = e.target.value.trim();
+                  setBgText(v);
+                  if (HEX_RE.test(v)) setBgDraft(v.toLowerCase());
+                }}
+                className={`w-28 px-3 py-2 rounded-lg font-mono text-sm bg-gray-50 dark:bg-slate-800 border text-gray-900 dark:text-slate-100 ${
+                  HEX_RE.test(bgText) ? 'border-black/10 dark:border-slate-700' : 'border-rose-500'
+                }`}
+              />
+              {/* 미리보기: 배경 위의 패널, 그 안의 본문·흐린 글자·강조 글자 */}
+              <div className="flex-1 min-w-0 rounded-lg p-1.5" style={{ background: bgPreview.black }}>
+                <div className="rounded-md px-2.5 py-1.5 border" style={{ background: bgPreview.zinc[9], borderColor: bgPreview.zinc[8] }}>
+                  <div className="text-xs font-bold truncate" style={{ color: bgPreview.slate[2] }}>본문 글자</div>
+                  <div className="text-[0.625rem] truncate" style={{ color: bgPreview.slate[5] }}>
+                    흐린 글자 · <span style={{ color: bgPreview.accent[4] }}>강조</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {!HEX_RE.test(bgText) && (
+              <p className="text-xs text-rose-400">#과 16진수 6자리로 입력하세요. 예: #2e1065</p>
+            )}
+            {bgFit?.softened && (
+              <p className="text-xs text-amber-400 flex gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                이 색 그대로는 글자를 읽기 어려워 조금 옅게(채도를 낮춰) 적용합니다.
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={!bgValid || !bgFit || bgSaved || saving !== null}
+                onClick={() => saveBackground(bgDraft.toLowerCase())}
+                className="flex-1 px-4 py-2 rounded-lg font-bold text-sm bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {saving === 'background' ? '저장 중…' : bgSaved ? '적용됨' : '이 배경색 적용'}
+              </button>
+              {background && (
+                <button
+                  type="button"
+                  disabled={saving !== null}
+                  onClick={() => { saveBackground(null); setBg(findTheme(themeId).zinc[9]); }}
+                  className="px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 disabled:opacity-40 flex items-center gap-1.5 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  기본 배경색
+                </button>
+              )}
+            </div>
+          </section>
+
+          {/* ── 화면 (크기·움직임) ── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
+              <Monitor className="w-4 h-4 text-cyan-400" />
+              화면
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">글자·화면 크기</div>
+              <div role="radiogroup" aria-label="글자·화면 크기" className="grid grid-cols-4 gap-2">
+                {UI_SCALES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="radio"
+                    aria-checked={scale === s}
+                    disabled={saving !== null}
+                    onClick={() => saveScale(s)}
+                    className={`py-2 rounded-lg text-sm font-bold border transition-colors disabled:cursor-wait ${
+                      scale === s
+                        ? 'border-cyan-400 bg-cyan-500/10 text-cyan-400'
+                        : 'border-black/10 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {s}%{s === 100 ? ' (기본)' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={reduceMotion}
+              disabled={saving !== null}
+              onClick={() => saveMotion(!reduceMotion)}
+              className="w-full flex items-center justify-between gap-3 rounded-lg border border-black/10 dark:border-slate-700 px-3 py-2.5 text-left hover:border-slate-500 transition-colors disabled:cursor-wait"
+            >
+              <span>
+                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">움직임 줄이기</span>
+                <span className="block text-[0.6875rem] text-gray-500 dark:text-slate-400">화면 전환 애니메이션과 부드러운 스크롤을 끕니다</span>
+              </span>
+              <span className={`relative w-10 h-6 rounded-full flex-shrink-0 transition-colors ${reduceMotion ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-slate-700'}`}>
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${reduceMotion ? 'left-5' : 'left-1'}`} />
+              </span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isDefault || saving !== null}
+              onClick={resetAll}
+              className="w-full px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              {saving === 'reset' ? '되돌리는 중…' : isDefault ? '화면 설정이 모두 기본값입니다' : '화면 설정 모두 기본값으로'}
+            </button>
           </section>
 
           {/* ── 초기 설정 마법사 ── 첫 실행 때만 뜨므로 사양별 설정을 다시 보려면 여기서 연다 */}

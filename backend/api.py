@@ -320,6 +320,21 @@ class Api:
     def setUiAccent(self, accent):
         return config_manager.set_ui_accent(accent)
 
+    def getUiAppearance(self):
+        return config_manager.get_ui_appearance()
+
+    def setUiBackground(self, background):
+        return config_manager.set_ui_background(background)
+
+    def setUiScale(self, scale):
+        return config_manager.set_ui_scale(scale)
+
+    def setUiReduceMotion(self, enabled):
+        return config_manager.set_ui_reduce_motion(enabled)
+
+    def resetUiAppearance(self):
+        return config_manager.reset_ui_appearance()
+
     # --- 초기 설정 마법사 (첫 실행 때만) ---
     def getSetupWizardDone(self):
         return config_manager.get_setup_wizard_done()

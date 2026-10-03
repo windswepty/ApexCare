@@ -161,9 +161,24 @@ def test_debloater_says_which_apps_cannot_be_restored():
 def test_choosing_a_theme_changes_the_whole_ui():
     # 직접 지정한 강조색이 남아 모든 색 조합을 덮어써, 색 조합을 바꿔도 화면이 그대로였다(사용자 보고).
     modal = _read('src/components/SettingsModal.jsx')
-    assert "{ id, accent: null }" in modal and "api.setUiAccent('')" in modal
+    assert "{ id, accent: null, background: null }" in modal
+    assert "api.setUiAccent('')" in modal and "api.setUiBackground('')" in modal
     assert '[isOpen, themeId]' in modal                        # 입력 칸도 새 색 조합의 강조색으로
     # 배경·패널(무채색 어두운 단계)도 색 조합마다 물든다. 예전에는 거의 같은 검정·회색이었다
     theme = _read('src/theme.js')
     assert 'tinted(TW.zinc, TW.violet' in theme and 'tinted(TW.slate, TW.blue' in theme
     assert "black: '#000000',\n  },\n  {\n    id: 'graphite'" in theme       # 기본(시안)은 그대로
+
+
+def test_display_settings_are_applied_everywhere():
+    # 배경색·글자 크기·움직임 줄이기: 첫 화면(main.jsx 캐시)과 저장 값(App.jsx) 모두에 적용한다
+    main = _read('src/main.jsx')
+    app = _read('src/App.jsx')
+    assert 'applyTheme(cached.id, cached.accent, cached.background)' in main and 'applyDisplay(cached)' in main
+    assert 'getUiAppearance()' in app and 'applyDisplay({ scale: saved?.scale' in app
+    # 글자 크기는 rem 으로 바뀐다. 픽셀로 고정한 글자는 크기 설정을 따르지 않는다
+    for f in os.listdir(os.path.join(ROOT, 'src', 'components')):
+        assert 'text-[10px]' not in _read(os.path.join('src', 'components', f)), f
+        assert 'text-[11px]' not in _read(os.path.join('src', 'components', f)), f
+    assert '.reduce-motion' in _read('src/index.css')
+    assert "classList.contains('reduce-motion')" in _read('src/smoothScroll.js')

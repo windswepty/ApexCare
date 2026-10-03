@@ -224,7 +224,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                   {c.text}
                   {c.state && <span className={`ml-2 text-sm font-sans ${c.stateClass}`}>{c.state}</span>}
                 </p>
-                <p className="text-[11px] text-gray-500 font-mono">
+                <p className="text-[0.6875rem] text-gray-500 font-mono">
                   {live.base ? `기본 ${(live.base / 1000).toFixed(2)} GHz` : '기본 클럭 알 수 없음'}
                   {pct !== null && ` · 기본의 ${pct}%`}
                   {typeof live.usage === 'number' && ` · 사용률 ${live.usage}%`}
@@ -248,7 +248,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               {(() => {
                 const rows = ['gaming', 'standard', 'eco'].filter((m) => bench[m]);
                 if (rows.length === 0) {
-                  return <p className="text-[11px] text-gray-500 mt-2 leading-snug">모드마다 한 번씩 측정하면 여기서 비교됩니다. 측정은 계산만 하고 설정은 바꾸지 않습니다.</p>;
+                  return <p className="text-[0.6875rem] text-gray-500 mt-2 leading-snug">모드마다 한 번씩 측정하면 여기서 비교됩니다. 측정은 계산만 하고 설정은 바꾸지 않습니다.</p>;
                 }
                 const best = Math.max(...rows.map((m) => bench[m].score || 0)) || 1;
                 return (
@@ -343,7 +343,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               aria-disabled={!!applying || benching}
             >
               {isActive && (
-                <div className="absolute top-4 right-4 flex items-center gap-1 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-gray-50 dark:bg-slate-800 border border-black/10 dark:border-slate-700">
+                <div className="absolute top-4 right-4 flex items-center gap-1 text-[0.625rem] font-mono font-bold px-2.5 py-1 rounded-full bg-gray-50 dark:bg-slate-800 border border-black/10 dark:border-slate-700">
                   <CheckCircle2 className={`w-3.5 h-3.5 ${accent.text}`} />
                   사용 중
                 </div>
@@ -363,18 +363,18 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                   <span className="font-mono font-bold text-black dark:text-white">{mode.planName}</span>
                 </div>
                 {!mode.planAvailable && (
-                  <p className="text-[11px] text-amber-500 leading-snug">{mode.note}</p>
+                  <p className="text-[0.6875rem] text-amber-500 leading-snug">{mode.note}</p>
                 )}
                 {mode.changes.length > 0 ? (
                   <ul className="pt-1 space-y-1">
                     {mode.changes.map((c, i) => (
-                      <li key={i} className="text-[11px] text-gray-500 dark:text-gray-400 flex gap-1.5">
+                      <li key={i} className="text-[0.6875rem] text-gray-500 dark:text-gray-400 flex gap-1.5">
                         <ChevronRight className="w-3 h-3 mt-0.5 shrink-0 opacity-50" />{c}
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1 leading-snug">
+                  <p className="text-[0.6875rem] text-gray-500 dark:text-gray-400 pt-1 leading-snug">
                     성능 모드가 바꾼 전원·CPU 설정을 원래대로 돌려놓습니다. 새로 바꾸는 것은 없습니다.
                   </p>
                 )}

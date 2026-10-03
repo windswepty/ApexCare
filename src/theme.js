@@ -86,6 +86,9 @@ export const THEMES = [
 
 const CACHE_KEY = 'apexcare.uiTheme';
 const ACCENT_CACHE_KEY = 'apexcare.uiAccent';
+const BG_CACHE_KEY = 'apexcare.uiBackground';
+const SCALE_CACHE_KEY = 'apexcare.uiScale';
+const MOTION_CACHE_KEY = 'apexcare.uiReduceMotion';
 export const HEX_RE = /^#[0-9a-f]{6}$/i;
 
 export function findTheme(id) {
@@ -156,16 +159,63 @@ export function checkContrast(theme, { accentOnly = false } = {}) {
   });
 }
 
-// 테마 + 직접 고른 강조색
-export function composeTheme(id, accentHex) {
+// ── 직접 고른 배경색 ────────────────────────────────────
+// 고른 색의 색상·채도로 배경·패널·테두리·흐린 글자(무채색 11단계)를 다시 만든다. 밝기는 기본 무채색(zinc)의 단계별
+// 밝기를 그대로 써서 어두운 화면의 명암 구조와 글자 대비를 유지한다. 그래서 밝은 색을 골라도 화면이 밝아지지는 않는다.
+// 어두운 단계(배경·패널)일수록 채도를 많이, 글자에 쓰는 밝은 단계는 조금만 준다.
+const ZINC_L = TW.zinc.map(h => hslOf(h)[2]);
+const BG_SAT = [0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 0.85, 0.9, 0.95];
+const BG_SAT_CAPS = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0];
+const BG_LIFTS = [0, 0.02, 0.04, 0.06, 0.08];
+
+function backgroundScale(hex, satCap, lift) {
+  const [h, s] = hslOf(hex);
+  const sat = Math.min(s, satCap);
+  // lift: 흐린 글자(400·500)가 물든 배경 위에서 대비가 모자랄 때만 조금 밝힌다
+  const scale = STEPS.map((_, i) => hexOfHsl(h, sat * BG_SAT[i], Math.min(1, ZINC_L[i] + (i === 4 || i === 5 ? lift : 0))));
+  return { scale, black: hexOfHsl(h, sat * 0.9, 0.03) };
+}
+
+function withBackground(theme, bg) {
+  return { ...theme, slate: bg.scale, gray: bg.scale, zinc: bg.scale, black: bg.black };
+}
+
+// 고른 배경색을 이 색 조합(의 기본 강조색)에서 모든 글자 대비를 통과하도록 맞춘다.
+// 채도를 줄이고, 그래도 모자라면 흐린 글자만 밝힌다. softened: 채도를 고른 색보다 줄였는지. 끝까지 안 되면 null.
+const fitCache = new Map();
+export function fitBackground(id, bgHex) {
+  if (!bgHex || !HEX_RE.test(bgHex)) return null;
+  const key = `${id}|${bgHex.toLowerCase()}`;
+  if (fitCache.has(key)) return fitCache.get(key);
   const theme = findTheme(id);
+  const wanted = Math.min(hslOf(bgHex.toLowerCase())[1], BG_SAT_CAPS[0]);
+  let found = null;
+  for (const cap of BG_SAT_CAPS) {
+    for (const lift of BG_LIFTS) {
+      const bg = backgroundScale(bgHex.toLowerCase(), cap, lift);
+      if (checkContrast(withBackground(theme, bg)).every(r => r.ok)) {
+        found = { ...bg, softened: cap < wanted - 1e-9 };
+        break;
+      }
+    }
+    if (found) break;
+  }
+  fitCache.set(key, found);
+  return found;
+}
+
+// 테마 + 직접 고른 배경색 + 직접 고른 강조색
+export function composeTheme(id, accentHex, bgHex = null) {
+  let theme = findTheme(id);
+  const bg = fitBackground(theme.id, bgHex);
+  if (bg) theme = withBackground(theme, bg);
   if (!accentHex || !HEX_RE.test(accentHex)) return theme;
   return { ...theme, accent: accentScale(accentHex) };
 }
 
-// 이 테마에서 읽기 어려운 짝 목록. 비어 있으면 써도 된다.
-export function accentProblems(id, accentHex) {
-  return checkContrast(composeTheme(id, accentHex), { accentOnly: true }).filter(r => !r.ok);
+// 이 테마(와 배경색)에서 읽기 어려운 짝 목록. 비어 있으면 써도 된다.
+export function accentProblems(id, accentHex, bgHex = null) {
+  return checkContrast(composeTheme(id, accentHex, bgHex), { accentOnly: true }).filter(r => !r.ok);
 }
 
 // HSL 변환. h: 0~360, s·l: 0~1
@@ -185,13 +235,13 @@ function hexOfHsl(h, s, l) {
 
 // 고른 색의 색상·채도는 두고 밝기만 올려, 처음으로 모든 짝을 통과하는 색을 찾는다.
 // 검사하는 짝은 모두 '강조색이 밝을수록 좋아지는' 짝이고 밝기 1 은 흰색이라 반드시 통과한다.
-export function readableAccent(id, accentHex) {
+export function readableAccent(id, accentHex, bgHex = null) {
   const hex = accentHex.toLowerCase();
-  if (accentProblems(id, hex).length === 0) return hex;
+  if (accentProblems(id, hex, bgHex).length === 0) return hex;
   const [h, s, l] = hslOf(hex);
   for (let step = Math.ceil(l * 100) + 1; step <= 100; step++) {
     const candidate = hexOfHsl(h, s, step / 100);
-    if (accentProblems(id, candidate).length === 0) return candidate;
+    if (accentProblems(id, candidate, bgHex).length === 0) return candidate;
   }
   return '#ffffff';
 }
@@ -209,14 +259,16 @@ function channels(hex) {
   return rgbOf(hex).join(' ');
 }
 
-// 테마(와 직접 고른 강조색)를 문서에 적용한다. 알 수 없는 id 는 기본 테마로 적용한다.
-// 강조색이 이 테마에서 읽기 어려우면 쓰지 않고 테마 기본 강조색을 쓴다. 설정 파일을 손으로 고친 경우 등.
-// 돌려주는 값: { id, accent(실제로 쓴 직접 지정 색 또는 null), rejectedAccent(거부한 색 또는 null) }
-export function applyTheme(id, accentHex = null) {
+// 테마(와 직접 고른 배경색·강조색)를 문서에 적용한다. 알 수 없는 id 는 기본 테마로 적용한다.
+// 배경색은 읽을 수 있게 맞춰 쓰고(fitBackground), 강조색이 이 배경에서 읽기 어려우면 쓰지 않고 테마 기본 강조색을 쓴다.
+// 돌려주는 값: { id, accent(실제로 쓴 강조색 또는 null), rejectedAccent, background(실제로 쓴 배경색 또는 null) }
+export function applyTheme(id, accentHex = null, bgHex = null) {
   const base = findTheme(id);
+  const wantedBg = bgHex && HEX_RE.test(bgHex) ? bgHex.toLowerCase() : null;
+  const usableBg = wantedBg && fitBackground(base.id, wantedBg) ? wantedBg : null;
   const wanted = accentHex && HEX_RE.test(accentHex) ? accentHex.toLowerCase() : null;
-  const usable = wanted && accentProblems(base.id, wanted).length === 0 ? wanted : null;
-  const theme = composeTheme(base.id, usable);
+  const usable = wanted && accentProblems(base.id, wanted, usableBg).length === 0 ? wanted : null;
+  const theme = composeTheme(base.id, usable, usableBg);
 
   const style = document.documentElement.style;
   for (const family of ['accent', 'slate', 'gray', 'zinc']) {
@@ -229,8 +281,26 @@ export function applyTheme(id, accentHex = null) {
     localStorage.setItem(CACHE_KEY, base.id);
     if (wanted) localStorage.setItem(ACCENT_CACHE_KEY, wanted);
     else localStorage.removeItem(ACCENT_CACHE_KEY);
+    if (wantedBg) localStorage.setItem(BG_CACHE_KEY, wantedBg);
+    else localStorage.removeItem(BG_CACHE_KEY);
   } catch { /* 무시 */ }
-  return { id: base.id, accent: usable, rejectedAccent: wanted && !usable ? wanted : null };
+  return { id: base.id, accent: usable, rejectedAccent: wanted && !usable ? wanted : null, background: usableBg };
+}
+
+// ── 글자·화면 크기, 움직임 줄이기 ─────────────────────────
+// 크기는 문서 글자 크기(rem 기준)를 바꾼다. 화면의 글자·여백·아이콘 대부분이 rem 이라 함께 커진다.
+export const UI_SCALES = [90, 100, 110, 125];     // backend/config_manager.py 의 UI_SCALES 와 같아야 한다
+
+export function applyDisplay({ scale = 100, reduceMotion = false } = {}) {
+  const s = UI_SCALES.includes(Number(scale)) ? Number(scale) : 100;
+  const root = document.documentElement;
+  root.style.fontSize = s === 100 ? '' : `${s}%`;
+  root.classList.toggle('reduce-motion', Boolean(reduceMotion));
+  try {
+    localStorage.setItem(SCALE_CACHE_KEY, String(s));
+    localStorage.setItem(MOTION_CACHE_KEY, reduceMotion ? '1' : '0');
+  } catch { /* 무시 */ }
+  return { scale: s, reduceMotion: Boolean(reduceMotion) };
 }
 
 export function cachedAppearance() {
@@ -238,9 +308,12 @@ export function cachedAppearance() {
     return {
       id: localStorage.getItem(CACHE_KEY) || DEFAULT_THEME_ID,
       accent: localStorage.getItem(ACCENT_CACHE_KEY) || null,
+      background: localStorage.getItem(BG_CACHE_KEY) || null,
+      scale: Number(localStorage.getItem(SCALE_CACHE_KEY)) || 100,
+      reduceMotion: localStorage.getItem(MOTION_CACHE_KEY) === '1',
     };
   } catch {
-    return { id: DEFAULT_THEME_ID, accent: null };
+    return { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false };
   }
 }
 

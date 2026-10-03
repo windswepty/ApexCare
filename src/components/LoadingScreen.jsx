@@ -50,11 +50,11 @@ export default function LoadingScreen({ isAppReady, onComplete, isDarkMode }) {
           )}
         </div>
 
-        <p className="w-full px-1 text-[11px] font-mono text-gray-500 dark:text-gray-400 text-center">
+        <p className="w-full px-1 text-[0.6875rem] font-mono text-gray-500 dark:text-gray-400 text-center">
           {isAppReady ? '준비됐습니다' : '시스템 정보를 읽는 중…'}
         </p>
         {slow && !isAppReady && (
-          <p className="mt-3 text-[11px] text-amber-500 text-center leading-relaxed">
+          <p className="mt-3 text-[0.6875rem] text-amber-500 text-center leading-relaxed">
             {SLOW_AFTER_MS / 1000}초가 넘도록 응답이 없습니다. 계속 기다리고 있으며,
             오래 걸리면 앱을 닫았다가 다시 실행해 보세요.
           </p>

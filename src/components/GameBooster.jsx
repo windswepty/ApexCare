@@ -209,7 +209,7 @@ export default function GameBooster({ addToast, active = true }) {
             {!status ? '…' : status.detected_game_label || status.detected_game || '없음'}
           </p>
           {status && !status.enabled && (
-            <p className="text-[11px] text-gray-500 mt-1">자동 감지가 꺼져 있어 게임을 찾지 않습니다.</p>
+            <p className="text-[0.6875rem] text-gray-500 mt-1">자동 감지가 꺼져 있어 게임을 찾지 않습니다.</p>
           )}
         </div>
         <div className="glass-panel p-5">
@@ -220,7 +220,7 @@ export default function GameBooster({ addToast, active = true }) {
             {!status ? '…' : status.active ? '적용 중' : '대기 중'}
           </p>
           {status?.appliedBoosts?.length > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1">{status.appliedBoosts.join(' · ')}</p>
+            <p className="text-[0.6875rem] text-gray-500 mt-1">{status.appliedBoosts.join(' · ')}</p>
           )}
         </div>
         <div className="glass-panel p-5">
@@ -271,9 +271,9 @@ export default function GameBooster({ addToast, active = true }) {
                     <p className="font-bold text-sm text-black dark:text-white">{opt.title}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{opt.desc}</p>
                     {opt.unsupportedNote && status && status.timer_effective === false && (
-                      <p className="text-[11px] text-amber-500 mt-1 leading-relaxed">{opt.unsupportedNote}</p>
+                      <p className="text-[0.6875rem] text-amber-500 mt-1 leading-relaxed">{opt.unsupportedNote}</p>
                     )}
-                    <p className={`text-[11px] mt-1.5 font-mono ${RISK_STYLE[opt.risk]}`}>{opt.scope}</p>
+                    <p className={`text-[0.6875rem] mt-1.5 font-mono ${RISK_STYLE[opt.risk]}`}>{opt.scope}</p>
                   </div>
                 </div>
               </button>
@@ -317,7 +317,7 @@ export default function GameBooster({ addToast, active = true }) {
               className="flex items-center gap-3 p-2.5 rounded-lg border border-black/5 dark:border-slate-800 hover:border-black/10 dark:hover:border-slate-700">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-black dark:text-white truncate">{p.name}</p>
-                <p className="text-[11px] text-gray-500 font-mono">
+                <p className="text-[0.6875rem] text-gray-500 font-mono">
                   PID {p.pid} · CPU {p.cpuPct ?? '측정 중'} · {p.memoryMB ?? '?'}MB · 우선순위 {p.priority || '알 수 없음'}
                 </p>
               </div>
@@ -342,7 +342,7 @@ export default function GameBooster({ addToast, active = true }) {
           ))}
         </div>
         {matched.length > visible.length && (
-          <p className="text-[11px] text-gray-500 mt-2">
+          <p className="text-[0.6875rem] text-gray-500 mt-2">
             {matched.length}개 중 메모리를 많이 쓰는 {visible.length}개만 보입니다. 이름으로 찾아 좁혀 주세요.
           </p>
         )}

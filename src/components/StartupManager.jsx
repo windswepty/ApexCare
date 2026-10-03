@@ -136,7 +136,7 @@ export default function StartupManager({ addToast, active = true }) {
           </h3>
           <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">이름 순</span>
         </div>
-        <p className="text-[11px] text-gray-500 dark:text-slate-400">
+        <p className="text-[0.6875rem] text-gray-500 dark:text-slate-400">
           각 프로그램이 부팅 시간에 주는 영향은 측정하지 않으므로 표시하지 않습니다.
           작업 스케줄러·서비스로 시작되는 프로그램은 이 목록에 나오지 않습니다.
         </p>
@@ -171,7 +171,7 @@ export default function StartupManager({ addToast, active = true }) {
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{app.name}</span>
                     {(app.locationLabel || LOCATION_LABEL[app.location]) && (
-                      <span className="text-[10px] font-mono flex-shrink-0 px-1.5 py-0.5 rounded bg-black/5 dark:bg-slate-800 text-gray-600 dark:text-slate-400">
+                      <span className="text-[0.625rem] font-mono flex-shrink-0 px-1.5 py-0.5 rounded bg-black/5 dark:bg-slate-800 text-gray-600 dark:text-slate-400">
                         {app.locationLabel || LOCATION_LABEL[app.location]}
                       </span>
                     )}

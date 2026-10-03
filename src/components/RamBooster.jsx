@@ -198,19 +198,19 @@ export default function RamBooster({ addToast, active = true }) {
         <div className="glass-panel p-4 border-l-4 border-l-cyan-400">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">사용 중</span>
           <div className="text-2xl font-black font-mono text-black dark:text-white mt-1">{waiting || fmtGB(ram.inUseGB)}</div>
-          <span className="text-[10px] text-slate-500 font-mono">프로그램과 Windows 가 쓰는 메모리</span>
+          <span className="text-[0.625rem] text-slate-500 font-mono">프로그램과 Windows 가 쓰는 메모리</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-purple-500">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">대기 (Standby)</span>
           <div className="text-2xl font-black font-mono text-purple-400 mt-1">{waiting || fmtGB(ram.standbyGB)}</div>
-          <span className="text-[10px] text-slate-500 font-mono">최근 파일 캐시 · 필요하면 자동 반환</span>
+          <span className="text-[0.625rem] text-slate-500 font-mono">최근 파일 캐시 · 필요하면 자동 반환</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-emerald-400">
           <span className="text-xs font-mono text-gray-500 dark:text-slate-400">여유 (Free)</span>
           <div className="text-2xl font-black font-mono text-emerald-400 mt-1">{waiting || fmtGB(ram.freeGB)}</div>
-          <span className="text-[10px] text-slate-500 font-mono">아무것도 담기지 않은 메모리</span>
+          <span className="text-[0.625rem] text-slate-500 font-mono">아무것도 담기지 않은 메모리</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-slate-500">
@@ -218,7 +218,7 @@ export default function RamBooster({ addToast, active = true }) {
           <div className="text-2xl font-black font-mono text-gray-800 dark:text-slate-200 mt-1">
             {waiting || (typeof ram.pct === 'number' ? `${ram.pct}%` : '알 수 없음')}
           </div>
-          <span className="text-[10px] text-slate-500 font-mono">
+          <span className="text-[0.625rem] text-slate-500 font-mono">
             {loading ? '' : `전체 ${fmtGB(ram.totalGB)} · 사용 가능 ${fmtGB(ram.availableGB)}`}
           </span>
         </div>
@@ -252,7 +252,7 @@ export default function RamBooster({ addToast, active = true }) {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-slate-500 text-center">
+            <p className="text-[0.625rem] text-slate-500 text-center">
               수정됨: 디스크에 기록되기를 기다리는 메모리입니다. 기록이 끝나면 대기로 옮겨집니다.
             </p>
           </>
@@ -296,7 +296,7 @@ export default function RamBooster({ addToast, active = true }) {
                     <td className="py-3 px-2 text-purple-400 font-bold">{proc.memoryMB} MB</td>
                     <td className="py-3 px-2 text-cyan-400">{proc.cpuPct ?? <span className="text-slate-500">측정 중</span>}</td>
                     <td className="py-3 px-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] ${
+                      <span className={`px-2 py-0.5 rounded text-[0.625rem] ${
                         proc.priority === '높음' || proc.priority === '실시간'
                           ? 'bg-amber-500/20 text-amber-300'
                           : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300'
@@ -307,7 +307,7 @@ export default function RamBooster({ addToast, active = true }) {
                     <td className="py-3 px-2 text-right">
                       {confirmPid === proc.pid ? (
                         <div className="flex items-center justify-end gap-2">
-                          <span className="text-[10px] text-rose-300 text-right">저장하지 않은 작업은 사라집니다</span>
+                          <span className="text-[0.625rem] text-rose-300 text-right">저장하지 않은 작업은 사라집니다</span>
                           <button
                             onClick={() => killProcess(proc)}
                             className="text-white bg-rose-600 hover:bg-rose-500 px-2 py-1 rounded font-bold"

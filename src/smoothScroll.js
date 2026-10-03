@@ -30,7 +30,15 @@ export function attachSmoothScroll(wrapper, content) {
   };
   const off = lenis.on('virtual-scroll', start);
 
+  // 환경 설정의 '움직임 줄이기' 가 켜지면 부드러운 스크롤을 끄고 휠 그대로 움직인다.
+  const root = document.documentElement;
+  const syncMotion = () => { lenis.options.smoothWheel = !root.classList.contains('reduce-motion'); };
+  syncMotion();
+  const observer = new MutationObserver(syncMotion);
+  observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+
   return () => {
+    observer.disconnect();
     if (frameId !== null) cancelAnimationFrame(frameId);
     if (typeof off === 'function') off();
     lenis.destroy();

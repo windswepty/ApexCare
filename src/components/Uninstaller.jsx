@@ -360,8 +360,8 @@ export default function Uninstaller({ addToast }) {
                           <span className={`w-4 h-4 rounded shrink-0 border ${chosen.has(l.path) ? 'bg-rose-500 border-rose-500' : 'border-gray-400'}`} />
                           <span className="min-w-0 flex-1">
                             <span className="block font-mono text-gray-700 dark:text-slate-300 truncate" title={l.path}>{l.path}</span>
-                            <span className={`block text-[11px] ${l.confidence === 'likely' ? 'text-amber-500' : 'text-gray-500'}`}>{CONFIDENCE_LABEL[l.confidence] || l.reason}</span>
-                            {l.failReason && <span className="block text-[11px] text-rose-400">보내지 못함: {l.failReason}</span>}
+                            <span className={`block text-[0.6875rem] ${l.confidence === 'likely' ? 'text-amber-500' : 'text-gray-500'}`}>{CONFIDENCE_LABEL[l.confidence] || l.reason}</span>
+                            {l.failReason && <span className="block text-[0.6875rem] text-rose-400">보내지 못함: {l.failReason}</span>}
                           </span>
                           <span className="text-rose-400 flex-shrink-0 font-mono">{leftoverSize(l)}</span>
                         </button>

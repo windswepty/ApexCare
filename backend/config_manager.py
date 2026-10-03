@@ -31,11 +31,18 @@ DEFAULT_CONFIG = {
     # 직접 고른 강조색("#rrggbb"). 빈 문자열이면 색 조합의 기본 강조색을 쓴다.
     # 대비 검사는 UI(src/theme.js)가 한다. 읽기 어려운 값이 들어 있으면 UI 가 쓰지 않는다.
     "ui_accent": "",
+    # 직접 고른 배경색("#rrggbb"). 색상·채도만 쓰고 밝기는 어두운 화면 기준으로 맞춘다(src/theme.js). 빈 문자열이면 색 조합 그대로.
+    "ui_background": "",
+    # 글자·화면 크기(%). UI_SCALES 중 하나.
+    "ui_scale": 100,
+    # 움직임 줄이기(애니메이션·부드러운 스크롤 끄기)
+    "ui_reduce_motion": False,
     # 초기 설정 마법사를 한 번 닫았는지. 예전에는 앱을 켤 때마다 마법사가 떴다.
     "setup_wizard_done": False,
 }
 
 UI_THEMES = ('cyan', 'graphite', 'stone', 'midnight', 'violet')
+UI_SCALES = (90, 100, 110, 125)          # src/theme.js 의 UI_SCALES 와 같아야 한다
 
 # pywebview 는 JS 호출마다 새 스레드를 쓰고, 게임 부스터 감시도 따로 돈다. 읽고-고치고-쓰기를
 # 한 번에 하나만 하게 한다. 예전에는 두 스레드가 같은 임시 파일에 동시에 써서 파일이 깨질 수 있었고,
@@ -339,6 +346,69 @@ def set_ui_accent(value):
     if not update_config(lambda c: c.__setitem__("ui_accent", value)) or load_config().get("ui_accent") != value:
         return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색으로 열립니다."}
     return {"success": True, "accent": value or None}
+
+
+def get_ui_background():
+    """직접 고른 배경색. 없거나 형식이 틀리면 None."""
+    value = load_config().get("ui_background") or ""
+    return value.lower() if isinstance(value, str) and _HEX_RE.match(value) else None
+
+
+def set_ui_background(value):
+    """배경색을 저장한다. None 이나 빈 문자열이면 지정을 해제한다. 다시 읽어 확인한다."""
+    if value in (None, ""):
+        value = ""
+    elif not (isinstance(value, str) and _HEX_RE.match(value)):
+        return {"success": False, "message": f"색 형식이 올바르지 않습니다: {value}"}
+    value = value.lower()
+    if not update_config(lambda c: c.__setitem__("ui_background", value)) or load_config().get("ui_background") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 배경색으로 열립니다."}
+    return {"success": True, "background": value or None}
+
+
+def get_ui_scale():
+    value = load_config().get("ui_scale", DEFAULT_CONFIG["ui_scale"])
+    return value if value in UI_SCALES else DEFAULT_CONFIG["ui_scale"]
+
+
+def set_ui_scale(value):
+    """글자·화면 크기(%)를 저장한다. 정해 둔 값만 받는다."""
+    if isinstance(value, bool) or value not in UI_SCALES:
+        return {"success": False, "message": f"지원하지 않는 크기입니다: {value}"}
+    if not update_config(lambda c: c.__setitem__("ui_scale", value)) or load_config().get("ui_scale") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 크기로 열립니다."}
+    return {"success": True, "scale": value}
+
+
+def get_ui_reduce_motion():
+    return load_config().get("ui_reduce_motion") is True
+
+
+def set_ui_reduce_motion(value):
+    if not isinstance(value, bool):
+        return {"success": False, "message": f"켜기·끄기 값이 아닙니다: {value}"}
+    if not update_config(lambda c: c.__setitem__("ui_reduce_motion", value)) or load_config().get("ui_reduce_motion") is not value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 설정으로 열립니다."}
+    return {"success": True, "reduceMotion": value}
+
+
+def get_ui_appearance():
+    """화면 설정 전부(색 조합·강조색·배경색·크기·움직임 줄이기)."""
+    return {"theme": get_ui_theme(), "accent": get_ui_accent(), "background": get_ui_background(),
+            "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion()}
+
+
+_UI_DEFAULTS = {k: DEFAULT_CONFIG[k] for k in ("ui_theme", "ui_accent", "ui_background", "ui_scale", "ui_reduce_motion")}
+
+
+def reset_ui_appearance():
+    """화면 설정을 한 번에 기본값으로 되돌린다(하나만 바뀐 채 남지 않게 한 번에 쓴다). 다시 읽어 확인한다."""
+    if not update_config(lambda c: c.update(_UI_DEFAULTS)):
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다."}
+    cfg = load_config()
+    if any(cfg.get(k) != v for k, v in _UI_DEFAULTS.items()):
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다."}
+    return {"success": True, **get_ui_appearance()}
 
 
 def get_setup_wizard_done():
