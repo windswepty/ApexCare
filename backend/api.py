@@ -257,6 +257,15 @@ class Api:
         """드라이브별 용량과 매체 종류(SSD/HDD). 읽기만 한다."""
         return storage.get_overview()
 
+    # --- PC 건강 진단 (읽기만 한다) ---
+    def getDiskHealth(self):
+        from backend import health
+        return health.disk_health()
+
+    def getBootHistory(self):
+        from backend import health
+        return health.boot_history()
+
     # --- File Finder Features ---
     def findLargeFiles(self, min_mb=500):
         return file_finder.scan_large_files(min_mb)

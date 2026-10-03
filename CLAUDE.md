@@ -146,6 +146,8 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 | `system_repair.py` · `system_monitor.py` | TRIM·SFC·DISM·네트워크, 시스템 상태·프로세스 목록 |
 | `config_manager.py` | 설정 파일 |
 | `uninstall_prep.py` | APEX CARE 제거 전 되돌리기 (`main.py --revert-for-uninstall`) |
+| `health.py` | PC 건강 진단: 디스크 상태(Get-PhysicalDisk·신뢰성 카운터)·부팅 시간 기록. 읽기만 한다 |
+| `window_icon.py` | 앱 아이콘 색을 실행 중인 창 아이콘(작업 표시줄)에 건다(WM_SETICON, 기본이면 처음 아이콘으로) |
 
 UI 탭은 `src/components/Sidebar.jsx` 에 정의되고 `src/App.jsx` 가 라우팅합니다.
 설치·제거 프로그램 소스는 `tools/setup_wizard.py` 와 `tools/uninstall.py` 입니다.

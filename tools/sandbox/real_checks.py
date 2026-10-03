@@ -1539,6 +1539,69 @@ def other_account_signed_in():
     return verdict(problems, diff(before, snapshot('signed_in_after')))
 
 
+@check('PC 건강 진단: 디스크 상태·부팅 기록·네트워크 속도를 관리자 권한으로 읽고 아무것도 바꾸지 않음')
+def health_read_only():
+    from backend import health, system_monitor
+    before = snapshot('health_before')
+    problems, info = [], []
+    r = health.disk_health()
+    if not r['ok']:
+        problems.append(f"디스크 상태를 읽지 못했습니다: {r.get('error')}")
+    elif not r['disks']:
+        # 샌드박스의 가상 디스크는 Windows 저장소 관리(Get-PhysicalDisk)에 보이지 않는다(26회차 확인).
+        # 조회는 오류 없이 끝났고, 화면은 '알려 준 디스크가 없습니다' 로 보여 준다.
+        info.append('샌드박스는 물리 디스크를 알려 주지 않아 디스크 값은 실제 PC 에서만 볼 수 있습니다')
+    for d in r.get('disks', []):
+        info.append(f"{d['name']}: {d['health']} 온도={d['temperatureC']} 수명={d['wearPct']} 시간={d['powerOnHours']}")
+        if d['health'] not in ('정상', '주의', '위험', '알 수 없음'):
+            problems.append(f'건강 상태 표시가 이상합니다: {d}')
+    b = health.boot_history()
+    if not b['ok']:
+        problems.append(f"부팅 기록을 읽지 못했습니다: {b.get('error')}")
+    info.append(f"부팅 기록 {len(b.get('boots', []))}건 {b.get('note') or ''}")
+    system_monitor.net_rates()
+    time.sleep(1.2)
+    down, up = system_monitor.net_rates()
+    if not (isinstance(down, (int, float)) and isinstance(up, (int, float)) and down >= 0 and up >= 0):
+        problems.append(f'네트워크 속도를 재지 못했습니다: {down}, {up}')
+    status, why, changes = verdict(problems, diff(before, snapshot('health_after')))
+    return status, (why + ' ' + ' / '.join(info)).strip(), changes
+
+
+@check('앱 아이콘 색: 진짜 창의 아이콘을 바꾸고, 기본으로 돌리면 처음 아이콘으로')
+def window_icon_real():
+    """샌드박스의 진짜 창(tkinter)에 WM_SETICON 을 걸어 본다. 이 앱의 창 대신 같은 Win32 창을 쓴다."""
+    import tkinter
+    from backend import window_icon
+    root = tkinter.Tk()
+    problems = []
+    try:
+        root.title('APEXSBX icon')
+        root.update()
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.GetParent.restype = ctypes.c_void_p
+        user32.GetParent.argtypes = [ctypes.c_void_p]
+        hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
+        u = window_icon._user32()
+        get = lambda which: u.SendMessageW(hwnd, window_icon._WM_GETICON, which, 0)   # noqa: E731
+        first = (get(1), get(0))
+        with open(os.path.join(REPO, 'public', 'icon.png'), 'rb') as f:
+            png = f.read()
+        if not window_icon.apply(hwnd, png):
+            problems.append('PNG 로 창 아이콘을 바꾸지 못했습니다')
+        changed = (get(1), get(0))
+        if changed == first or not all(changed):
+            problems.append(f'창 아이콘이 바뀌지 않았습니다: {first} → {changed}')
+        if not window_icon.apply(hwnd, png) or (get(1), get(0)) == changed:
+            problems.append('두 번째로 바꾸지 못했습니다(앞서 만든 아이콘을 지우고 새로 걸어야 한다)')
+        window_icon.apply(hwnd, None)
+        if (get(1), get(0)) != first:
+            problems.append(f'기본으로 돌려도 처음 아이콘이 아닙니다: {first} → {(get(1), get(0))}')
+    finally:
+        root.destroy()
+    return verdict(problems, [])
+
+
 @check('원클릭 최적화: Windows Update 캐시·Prefetch 는 건드리지 않음')
 def one_click():
     from backend import optimizer

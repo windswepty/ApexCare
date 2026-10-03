@@ -11,6 +11,7 @@ import RamBooster from './components/RamBooster';
 import StartupManager from './components/StartupManager';
 import PerformanceModes from './components/PerformanceModes';
 import DriverUpdater from './components/DriverUpdater';
+import HealthCenter from './components/HealthCenter';
 import Uninstaller from './components/Uninstaller';
 import Debloater from './components/Debloater';
 import GameBooster from './components/GameBooster';
@@ -219,6 +220,9 @@ export default function App() {
               </div>
               <div style={{ display: activeTab === 'drivers' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('drivers') && <ErrorBoundary compact><DriverUpdater addToast={addToast} /></ErrorBoundary>}
+              </div>
+              <div style={{ display: activeTab === 'health' ? 'block' : 'none', height: '100%' }}>
+                {isMounted('health') && <ErrorBoundary compact><HealthCenter active={activeTab === 'health'} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'uninstaller' ? 'block' : 'none', height: '100%' }}>
                 {isMounted('uninstaller') && <ErrorBoundary compact><Uninstaller addToast={addToast} /></ErrorBoundary>}

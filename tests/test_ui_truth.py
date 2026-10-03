@@ -187,7 +187,7 @@ def test_display_settings_are_applied_everywhere():
 def test_one_broken_tab_does_not_take_down_the_app():
     # 예전에는 한 탭의 오류(예: 성능 모드 목록이 null)가 앱 전체를 오류 화면으로 바꿔 '되돌리기' 탭에도 갈 수 없었다
     app = _read('src/App.jsx')
-    assert app.count('<ErrorBoundary compact>') == 10
+    assert app.count('<ErrorBoundary compact>') == 11
     assert 'this.props.compact' in _read('src/components/ErrorBoundary.jsx')
     assert 'Array.isArray(list) ? list : []' in _read('src/components/PerformanceModes.jsx')
 

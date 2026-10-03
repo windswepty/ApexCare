@@ -11,7 +11,8 @@ import {
   PackageMinus,
   ServerCrash,
   Crosshair,
-  History
+  History,
+  HeartPulse
 } from 'lucide-react';
 // 버전은 package.json 한 곳에서 온다(설치 마법사 APP_VERSION 과 테스트가 맞춰 본다).
 // 예전에는 여기에 버전 번호를 직접 적어, 버전을 올려도 화면에는 옛 번호가 남을 수 있었다.
@@ -37,6 +38,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'modes', label: '성능 부스트 모드', icon: Zap },
     { id: 'gamebooster', label: '스마트 게임 부스터', icon: Crosshair },
     { id: 'drivers', label: '시스템 파일 복구', icon: ShieldCheck },
+    { id: 'health', label: 'PC 건강 진단', icon: HeartPulse },
     // 예전 이름 '윈도우 하드코어 적출' 은 과장이었다. 기본 앱을 이 계정에서 제거하고 정책 두 개를 바꾼다.
     { id: 'debloater', label: 'Windows 기본 앱 정리', icon: ServerCrash },
     // 이 프로그램이 바꾼 모든 것을 확인하고 되돌리는 곳.

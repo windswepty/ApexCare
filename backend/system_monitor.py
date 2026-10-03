@@ -410,6 +410,36 @@ def system_drive():
     return d if re.fullmatch(r'[A-Za-z]:', d) else 'C:'
 
 
+_net_last = {}          # 직전 표본: {'t', 'recv', 'sent', 'down', 'up'}
+
+
+def net_rates():
+    """지금 네트워크 속도(바이트/초). (받기, 보내기). 첫 호출은 비교할 표본이 없어 (None, None) — 화면은 '측정 중'.
+
+    루프백(자기 자신과의 통신)은 뺀다. 여러 화면이 서로 다른 주기로 불러도 직전 표본과의 차이를 시간으로 나눠 맞다.
+    0.5초보다 짧은 간격이면 직전 값을 그대로 준다(너무 짧은 간격은 값이 튄다).
+    """
+    try:
+        counters = psutil.net_io_counters(pernic=True) or {}
+    except Exception as e:
+        log.debug(f"네트워크 통계를 읽지 못했습니다: {e}")
+        return None, None
+    recv = sum(c.bytes_recv for n, c in counters.items() if 'loopback' not in n.lower())
+    sent = sum(c.bytes_sent for n, c in counters.items() if 'loopback' not in n.lower())
+    now = time.monotonic()
+    last = dict(_net_last)
+    if last and now - last['t'] < 0.5:
+        return last.get('down'), last.get('up')
+    down = up = None
+    if last:
+        dt = now - last['t']
+        # 어댑터가 빠지거나 카운터가 다시 시작되면 줄어들 수 있다. 음수는 버린다
+        down = max(recv - last['recv'], 0) / dt
+        up = max(sent - last['sent'], 0) / dt
+    _net_last.update(t=now, recv=recv, sent=sent, down=down, up=up)
+    return down, up
+
+
 def _all_drives():
     """대시보드용 드라이브 목록(문자 순). 매체 종류(SSD/HDD)는 느려서 묻지 않는다. 읽지 못하면 None."""
     try:
@@ -480,6 +510,8 @@ def get_system_stats():
             'diskPct': round(disk.percent) if disk else None,
             # 연결된 모든 드라이브(꽂거나 빼면 다음 갱신 때 반영). 읽지 못하면 None — 화면은 위의 시스템 드라이브만 보여 준다
             'drives': _all_drives(),
+            # 네트워크 속도(바이트/초). None = 아직 비교할 표본이 없음('측정 중')
+            **dict(zip(('netDownBps', 'netUpBps'), net_rates())),
             'gpuUsage': _fresh_gpu_usage(),       # None = 측정 중 또는 측정 불가(gpuUsageState 로 구분)
             'gpuUsageState': _gpu_state,
             'gpuModel': _get_gpu_model(),
