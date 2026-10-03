@@ -36,9 +36,18 @@ function withStep(scale, step, hex) {
   out[STEPS.indexOf(step)] = hex;
   return out;
 }
-const STONE_NEUTRAL = withStep(TW.stone, '500', '#837c77');
-const MIDNIGHT_NEUTRAL = withStep(TW.slate, '500', '#6e7e95');
-const VIOLET_NEUTRAL = withStep(TW.zinc, '500', '#77777f');
+// 무채색을 테마 색으로 물들인다. 예전에는 배경·패널이 거의 같은 검정·회색이라 색 조합을 바꿔도 강조색 말고는
+// 달라 보이지 않았다. 배경·패널·테두리에 쓰는 어두운 단계는 많이, 글자에 쓰는 밝은 단계는 조금만 섞는다.
+const TINT_WEIGHT = [0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.16, 0.24, 0.30, 0.34, 0.38];
+function tinted(neutral, hue, k = 1) {
+  return neutral.map((hex, i) => mix(hex, hue[i], TINT_WEIGHT[i] * k));
+}
+const AMBER = ['#fffbeb', '#fef3c7', '#fde68a', '#fcd34d', '#fbbf24', '#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f', '#451a03'];
+const STONE_NEUTRAL = withStep(tinted(TW.stone, AMBER, 0.7), '500', '#867d76');
+// 파랑 500(#3b82f6)은 남색 패널 위 글자로 대비가 모자라 조금 밝게 당긴다.
+const MIDNIGHT_ACCENT = withStep(TW.blue, '500', '#4d8ef7');
+const MIDNIGHT_NEUTRAL = withStep(tinted(TW.slate, TW.blue, 0.8), '500', '#6f80a0');
+const VIOLET_NEUTRAL = withStep(tinted(TW.zinc, TW.violet, 0.9), '500', '#7f7896');
 
 export const DEFAULT_THEME_ID = 'cyan';
 
@@ -59,19 +68,19 @@ export const THEMES = [
     id: 'stone',
     name: '스톤',
     description: '따뜻한 무채색',
-    accent: STONE_ACCENT, slate: STONE_NEUTRAL, gray: STONE_NEUTRAL, zinc: STONE_NEUTRAL, black: '#0c0a09',
+    accent: STONE_ACCENT, slate: STONE_NEUTRAL, gray: STONE_NEUTRAL, zinc: STONE_NEUTRAL, black: '#120e0b',
   },
   {
     id: 'midnight',
     name: '미드나잇 블루',
     description: '남색 배경과 파란 강조색',
-    accent: TW.blue, slate: MIDNIGHT_NEUTRAL, gray: MIDNIGHT_NEUTRAL, zinc: MIDNIGHT_NEUTRAL, black: '#020617',
+    accent: MIDNIGHT_ACCENT, slate: MIDNIGHT_NEUTRAL, gray: MIDNIGHT_NEUTRAL, zinc: MIDNIGHT_NEUTRAL, black: '#040a1e',
   },
   {
     id: 'violet',
     name: '바이올렛',
-    description: '보라 강조색',
-    accent: VIOLET_ACCENT, slate: VIOLET_NEUTRAL, gray: VIOLET_NEUTRAL, zinc: VIOLET_NEUTRAL, black: '#000000',
+    description: '보라 배경과 보라 강조색',
+    accent: VIOLET_ACCENT, slate: VIOLET_NEUTRAL, gray: VIOLET_NEUTRAL, zinc: VIOLET_NEUTRAL, black: '#0b0616',
   },
 ];
 

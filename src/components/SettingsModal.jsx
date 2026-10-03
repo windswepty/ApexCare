@@ -53,13 +53,13 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
     };
   }, [isOpen]);
 
-  // 창을 열 때 현재 강조색으로 초기화한다
+  // 창을 열 때와 색 조합을 바꿨을 때 지금 쓰는 강조색으로 맞춘다(색 조합을 바꾸면 직접 지정한 색은 해제된다)
   useEffect(() => {
     if (!isOpen) return;
     const current = accent || findTheme(themeId).accent[5];
     setDraft(current);
     setHexText(current);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, themeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const api = window.pywebview && window.pywebview.api;
 
@@ -85,10 +85,19 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
     }
   };
 
+  // 색 조합을 고르면 직접 지정한 강조색은 해제한다. 예전에는 강조색이 남아 모든 색 조합에 덮어씌워져,
+  // 색 조합을 바꿔도 화면이 거의 그대로였다.
   const chooseTheme = (id) => {
     if (saving || id === themeId) return;
-    commit(`theme:${id}`, { id, accent }, { id: themeId, accent },
-      api && (() => api.setUiTheme(id)), '색 조합을 저장했습니다.');
+    commit(`theme:${id}`, { id, accent: null }, { id: themeId, accent },
+      api && (async () => {
+        const res = await api.setUiTheme(id);
+        if (!res?.success || !accent) return res;
+        const cleared = await api.setUiAccent('');
+        return cleared?.success ? res
+          : { success: false, message: `색 조합은 저장했지만 직접 지정한 강조색을 해제하지 못했습니다(${cleared?.message || '저장 실패'})` };
+      }),
+      accent ? '색 조합을 저장했습니다. 직접 지정했던 강조색은 해제했습니다.' : '색 조합을 저장했습니다.');
   };
 
   const saveAccent = (value) => {
@@ -135,7 +144,8 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
                 색 조합
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                고르면 바로 적용되고 다음 실행 때도 유지됩니다. 경고·위험을 알리는 빨강·주황은 색 조합과 관계없이 그대로입니다.
+                고르면 배경·패널·강조색이 함께 바뀌고 다음 실행 때도 유지됩니다. 직접 지정한 강조색은 해제됩니다.
+                경고·위험을 알리는 빨강·주황은 색 조합과 관계없이 그대로입니다.
               </p>
             </div>
 

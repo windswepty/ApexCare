@@ -156,3 +156,14 @@ def test_debloater_says_which_apps_cannot_be_restored():
     assert '제거하면 Windows 가 설치 파일까지 지웁니다' in src            # 확인 창
     assert '제거하면 설치 파일도 지워져 되살릴 수 없음' in src             # 항목 표시
     assert "이 계정에서 제거하고(아래 '제거한 앱' 에서 되살릴 수 있습니다)" not in src
+
+
+def test_choosing_a_theme_changes_the_whole_ui():
+    # 직접 지정한 강조색이 남아 모든 색 조합을 덮어써, 색 조합을 바꿔도 화면이 그대로였다(사용자 보고).
+    modal = _read('src/components/SettingsModal.jsx')
+    assert "{ id, accent: null }" in modal and "api.setUiAccent('')" in modal
+    assert '[isOpen, themeId]' in modal                        # 입력 칸도 새 색 조합의 강조색으로
+    # 배경·패널(무채색 어두운 단계)도 색 조합마다 물든다. 예전에는 거의 같은 검정·회색이었다
+    theme = _read('src/theme.js')
+    assert 'tinted(TW.zinc, TW.violet' in theme and 'tinted(TW.slate, TW.blue' in theme
+    assert "black: '#000000',\n  },\n  {\n    id: 'graphite'" in theme       # 기본(시안)은 그대로
