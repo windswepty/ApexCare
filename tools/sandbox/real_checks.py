@@ -439,6 +439,118 @@ def boost_nagle():
     return verdict(problems, diff(before, snapshot('nagle_after')))
 
 
+def _orphan_ping(addr):
+    """부모 없는 ping 을 띄워 PID 를 돌려준다. 이 점검의 자식으로 띄우면 앱이 '자기 프로세스' 로 보고 막는다(맞는 동작).
+    PowerShell 이 띄우고 먼저 끝나게 해, 사용자가 따로 실행한 프로그램과 같은 처지로 만든다."""
+    ping = os.path.join(os.environ['SystemRoot'], 'System32', 'PING.EXE')
+    r = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                        f"(Start-Process -FilePath '{ping}' -ArgumentList '-t','{addr}' "
+                        "-WindowStyle Hidden -PassThru).Id"],
+                       shell=False, capture_output=True, text=True, errors='replace',
+                       creationflags=CREATE_NO_WINDOW, timeout=60)
+    return int(r.stdout.strip().splitlines()[-1])
+
+
+# 게임 도중의 앱: 부스트(Nagle·게이밍 전원 모드·백그라운드 앱 낮추기)를 적용하고 준비됐다고 알린 뒤 기다린다.
+# 점검이 TerminateProcess 로 끝낸다(작업 관리자의 '작업 끝내기' 와 같다 — 정리 코드가 돌지 않는다).
+_CRASH_CHILD = '''
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from backend import game_booster, process_boost
+game_booster._enter_boost_mode()
+r = process_boost.set_priority(int(sys.argv[2]), 'idle', owner='boost')
+with open(sys.argv[3], 'w', encoding='utf-8') as f:
+    f.write(repr((r.get('ok'), r.get('message'), game_booster._booster_state.get('appliedBoosts'))))
+time.sleep(600)
+'''
+
+# 다시 실행한 앱: main.py 와 같이 Api 를 만들고(지난 세션 정리가 여기서 돈다) 정리한 뒤 끝난다
+_RESTART_CHILD = '''
+import sys
+sys.path.insert(0, sys.argv[1])
+from backend.api import Api
+api = Api(None)
+api._cleanup()
+'''
+
+
+@check('게임 부스트: 게임 도중 앱이 강제 종료돼도 다시 켜면 Nagle·전원 모드·낮춘 앱 우선순위가 원래대로')
+def boost_crash_recovery():
+    import psutil
+    from backend import config_manager, game_booster, perf_modes, system_state as ss
+    before = snapshot('crash_before')
+    problems = []
+    cfg = config_manager.load_config()
+    saved = dict(cfg)
+    pid = _orphan_ping('127.0.0.5')
+    child = None
+    ready = os.path.join(OUT, 'crash_ready.txt')
+    env = dict(os.environ, PYTHONUTF8='1')
+    try:
+        if os.path.exists(ready):
+            os.remove(ready)
+        time.sleep(1)
+        nice_before = psutil.Process(pid).nice()
+        r = perf_modes.apply_mode('eco')                 # 게임 전 모드: 에코(저장된 모드)
+        if not r.get('success'):
+            problems.append(f"에코 적용: {r.get('message')}")
+        eco = snapshot('crash_eco')
+        cfg.update(boost_disable_nagle=True, boost_auto_power_mode=True, boost_timer_resolution=False,
+                   boost_tame_background=False)
+        config_manager.save_config(cfg)
+        config_manager.set_booster_state(False)          # 다시 켤 때 감지 루프가 새 게임 세션을 만들지 않게
+
+        with open(os.path.join(OUT, 'crash_child.log'), 'w', encoding='utf-8') as log:
+            child = subprocess.Popen([sys.executable, '-c', _CRASH_CHILD, REPO, str(pid), ready], shell=False,
+                                     stdout=log, stderr=log, env=env, cwd=REPO, creationflags=CREATE_NO_WINDOW)
+            if not _wait(lambda: os.path.exists(ready) or child.poll() is not None, 180) or not os.path.exists(ready):
+                return 'FAIL', '게임 도중 상태를 만들지 못했습니다(crash_child.log 참고)', []
+            time.sleep(1)
+            with open(ready, encoding='utf-8') as f:
+                applied = f.read()
+            child.kill()                                 # 비정상 종료: 정리 코드가 돌지 않는다
+            child.wait(30)
+
+        # 정말 '게임 도중' 상태가 남았는지부터 본다. 아니면 아래 복구 확인이 아무것도 시험하지 않는다
+        if reg_get('HKLM', MM, 'SystemResponsiveness') != 10:
+            problems.append(f'준비: 게이밍 전원 모드가 적용되지 않았습니다 ({applied})')
+        if not any(e.get('group') == game_booster.BOOST_GROUP for e in ss.pending_changes().values()):
+            problems.append(f'준비: Nagle 기록이 없습니다 ({applied})')
+        if psutil.Process(pid).nice() != psutil.IDLE_PRIORITY_CLASS:
+            problems.append(f'준비: 백그라운드 앱을 낮추지 못했습니다 ({applied})')
+        if config_manager.get_boost_restore_mode() != 'eco':
+            problems.append('준비: 게임 전 모드(에코) 기록이 없습니다')
+
+        r = subprocess.run([sys.executable, '-c', _RESTART_CHILD, REPO], shell=False, capture_output=True,
+                           env=env, cwd=REPO, creationflags=CREATE_NO_WINDOW, timeout=300)
+        if r.returncode != 0:
+            problems.append(f'다시 실행 실패 {r.returncode}: {r.stderr.decode("utf-8", "replace")[-300:]}')
+        if psutil.Process(pid).nice() != nice_before:
+            problems.append(f'낮춘 앱의 우선순위가 돌아오지 않았습니다 (지금 {psutil.Process(pid).nice()})')
+        if any(e.get('group') == game_booster.BOOST_GROUP for e in ss.pending_changes().values()):
+            problems.append('Nagle 기록이 남았습니다(되돌리지 않음)')
+        if config_manager.get_boost_restore_mode():
+            problems.append('게임 전 모드 기록이 남았습니다')
+        if config_manager.get_optimization_mode() != 'eco':
+            problems.append(f'저장된 모드가 에코가 아닙니다 ({config_manager.get_optimization_mode()})')
+        left = diff(eco, snapshot('crash_recovered'))
+        if left:
+            problems.append(f'다시 켠 뒤 상태가 게임 전(에코)과 다릅니다 ({len(left)}줄)')
+            return 'FAIL', '; '.join(problems), left
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill()
+        try:
+            psutil.Process(pid).kill()
+        except psutil.Error:
+            pass
+        config_manager.save_config(saved)
+        r = perf_modes.apply_mode('standard')
+        if not r.get('success'):
+            problems.append(f"표준 되돌리기: {r.get('message')}")
+    return verdict(problems, diff(before, snapshot('crash_after')))
+
+
 @check('정크 정리: %TEMP% 안 정션 너머 파일은 남고, 잠긴 파일은 앱 데이터 폴더에 기록')
 def junk_junction():
     import _winapi
@@ -633,15 +745,8 @@ def recycle_guard():
 def priority():
     import psutil
     from backend import process_boost
-    # 이 점검의 자식으로 띄우면 앱이 '자기 프로세스' 로 보고 막는다(맞는 동작). PowerShell 이 띄우고 먼저 끝나게 해
-    # 부모 없는 프로세스로 만든다. 사용자가 따로 실행한 프로그램과 같은 처지다.
     ping = os.path.join(os.environ['SystemRoot'], 'System32', 'PING.EXE')
-    r = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
-                        f"(Start-Process -FilePath '{ping}' -ArgumentList '-t','127.0.0.3' "
-                        "-WindowStyle Hidden -PassThru).Id"],
-                       shell=False, capture_output=True, text=True, errors='replace',
-                       creationflags=CREATE_NO_WINDOW, timeout=60)
-    pid = int(r.stdout.strip().splitlines()[-1])
+    pid = _orphan_ping('127.0.0.3')
     problems = []
     try:
         time.sleep(1)
@@ -973,16 +1078,7 @@ def other_account_startup():
         with open(journal, encoding='utf-8') as f:
             if json.load(f).get('entries'):
                 problems.append('그 계정의 저널에 되돌린 기록이 남았습니다')
-        left = []
-        i = 0
-        while True:
-            try:
-                n = winreg.EnumKey(winreg.HKEY_USERS, i)
-            except OSError:
-                break
-            if n.upper().startswith(('APEXCARE_', 'APEXSBX_')):
-                left.append(n)
-            i += 1
+        left = _temp_hives()
         if left:
             problems.append(f'올린 하이브가 남았습니다: {left}')
     finally:
@@ -996,6 +1092,141 @@ def other_account_startup():
         subprocess.run([net, 'user', user, '/delete'], shell=False, capture_output=True,
                        creationflags=CREATE_NO_WINDOW, timeout=60)
     return verdict(problems, diff(before, snapshot('other_account_after')))
+
+
+def _temp_hives():
+    """HKU 에 올라와 있는 이 앱·점검의 임시 하이브 이름들"""
+    left, i = [], 0
+    while True:
+        try:
+            n = winreg.EnumKey(winreg.HKEY_USERS, i)
+        except OSError:
+            break
+        if n.upper().startswith(('APEXCARE_', 'APEXSBX_')):
+            left.append(n)
+        i += 1
+    return left
+
+
+def _hku_loaded(sid):
+    try:
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_USERS, sid))
+        return True
+    except OSError:
+        return False
+
+
+# 다른 계정으로 프로그램 하나를 띄운다(보조 로그온, 프로필 로드). 그동안 그 계정의 레지스트리가 HKU\<SID> 에 올라와
+# 빠른 사용자 전환으로 로그인해 있는 것과 같은 처지가 된다. 암호는 명령줄이 아니라 환경 변수로 넘긴다.
+_PS_RUN_AS = (
+    "$p = ConvertTo-SecureString $env:APEXSBX_PW -AsPlainText -Force; "
+    "$c = New-Object System.Management.Automation.PSCredential($env:APEXSBX_USER, $p); "
+    "(Start-Process -FilePath $env:APEXSBX_EXE -ArgumentList '-t','127.0.0.6' -Credential $c -LoadUserProfile "
+    "-WorkingDirectory $env:APEXSBX_DIR -WindowStyle Hidden -PassThru).Id "
+    "| Set-Content -LiteralPath $env:APEXSBX_OUT -Encoding ascii"
+)
+
+
+@check('제거 전 되돌리기: 로그인해 있는 다른 계정(빠른 사용자 전환)이 끈 시작 프로그램을 그 계정의 레지스트리에서 되돌림')
+def other_account_signed_in():
+    """샌드박스에서만: 버리는 지역 계정으로 프로그램을 띄워 그 계정의 하이브가 올라온 상태에서, 제거 전 되돌리기가
+    올라온 하이브(HKU\\<SID>)를 그대로 고치는지(파일을 따로 올리지 않는지) 본다."""
+    import secrets
+    from backend import uninstall_prep
+    sysroot = os.environ.get('SystemRoot') or r'C:\Windows'
+    system32 = os.path.join(sysroot, 'System32')
+    net = os.path.join(system32, 'net.exe')
+    ps = os.path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    user = 'apexsbxon'
+    pw = 'Ax9!' + secrets.token_hex(5)            # 14자 이하(넘으면 net.exe 가 Y/N 을 묻는다)
+    approved = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    disabled = b'\x03\x00\x00\x00' + b'\x22' * 8
+    problems, sid, pid, created = [], None, None, False
+    before = snapshot('signed_in_before')
+
+    def value_now():
+        try:
+            with winreg.OpenKey(winreg.HKEY_USERS, sid + '\\' + approved) as k:
+                return winreg.QueryValueEx(k, 'ApexSbxOn')[0]
+        except FileNotFoundError:
+            return None
+
+    try:
+        r = subprocess.run([net, 'user', user, pw, '/add'], shell=False,
+                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+        if r.returncode != 0:
+            return 'FAIL', f'점검용 계정을 만들지 못했습니다: {r.stderr.decode("cp949", "replace")[-200:]}', []
+        created = True
+        r = subprocess.run([ps, '-NoProfile', '-Command', f'(Get-LocalUser {user}).SID.Value'], shell=False,
+                           capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+        sid = (r.stdout or '').strip()
+        # 파이프로 받지 않는다. 그 계정으로 띄운 ping 이 PowerShell 의 출력 파이프를 물려받아 붙들고 있어, 파이프로
+        # 받으면 ping 이 끝날 때까지(-t 라 영원히) 기다렸다(22회차 샌드박스에서 멈춤). PID 는 파일로 받는다.
+        pid_file = os.path.join(OUT, 'signed_in_pid.txt')
+        err_file = os.path.join(OUT, 'signed_in_runas.log')
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
+        env = dict(os.environ, APEXSBX_PW=pw, APEXSBX_USER=user, APEXSBX_EXE=os.path.join(system32, 'PING.EXE'),
+                   APEXSBX_DIR=system32, APEXSBX_OUT=pid_file)
+        with open(err_file, 'w', encoding='utf-8') as log:
+            subprocess.run([ps, '-NoProfile', '-Command', _PS_RUN_AS], shell=False, stdin=subprocess.DEVNULL,
+                           stdout=log, stderr=log, env=env, cwd=system32, creationflags=CREATE_NO_WINDOW,
+                           timeout=120)
+        try:
+            with open(pid_file, encoding='ascii') as f:
+                pid = int(f.read().strip())
+        except (OSError, ValueError):
+            with open(err_file, encoding='utf-8', errors='replace') as f:
+                why = f.read()[-300:]
+            return 'FAIL', f'그 계정으로 프로그램을 띄우지 못했습니다: {why}', []
+        if not sid or not _wait(lambda: _hku_loaded(sid), 60):
+            return 'FAIL', f'그 계정의 레지스트리가 올라오지 않았습니다 (SID {sid!r})', []
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' + '\\' + sid) as k:
+            home = os.path.expandvars(winreg.QueryValueEx(k, 'ProfileImagePath')[0])
+
+        # 그 계정이 APEX CARE 로 시작 프로그램을 꺼 둔 상태: 올라온 하이브에 '꺼짐' 표시, 그 계정의 저널에 '원래 없었음'
+        with winreg.CreateKeyEx(winreg.HKEY_USERS, sid + '\\' + approved, 0, winreg.KEY_WRITE) as k:
+            winreg.SetValueEx(k, 'ApexSbxOn', 0, winreg.REG_BINARY, disabled)
+        journal = os.path.join(home, 'AppData', 'Roaming', 'APEX_CARE_DATA', 'system_state.json')
+        os.makedirs(os.path.dirname(journal), exist_ok=True)
+        with open(journal, 'w', encoding='utf-8') as f:
+            json.dump({'version': 1, 'entries': {f'reg:HKCU\\{approved}\\ApexSbxOn': {
+                'kind': 'registry', 'group': 'startup:HKCU:ApexSbxOn', 'hive': 'HKCU', 'path': approved,
+                'name': 'ApexSbxOn', 'existed': False, 'value': None, 'type': 3, 'created_keys': []}}}, f)
+        if value_now() != disabled:
+            problems.append('준비: 그 계정 레지스트리에 꺼짐 표시가 써지지 않았습니다')
+
+        steps = [x for x in uninstall_prep._revert_other_accounts() if user in x['name']]
+        if not steps or not steps[0]['ok']:
+            problems.append(f'되돌리기 결과: {steps}')
+        if value_now() is not None:
+            problems.append('되돌린 뒤에도 그 계정 레지스트리에 꺼짐 표시가 남았습니다')
+        with open(journal, encoding='utf-8') as f:
+            if json.load(f).get('entries'):
+                problems.append('그 계정의 저널에 되돌린 기록이 남았습니다')
+        if not _hku_loaded(sid):
+            problems.append('로그인해 있는 계정의 레지스트리가 내려갔습니다')
+        left = _temp_hives()
+        if left:
+            problems.append(f'로그인해 있는데 레지스트리 파일을 따로 올렸습니다: {left}')
+    finally:
+        if pid:
+            # 다른 계정의 프로세스라 taskkill 로 끝낸다
+            subprocess.run([os.path.join(system32, 'taskkill.exe'), '/PID', str(pid), '/F'], shell=False,
+                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+        if sid:
+            _wait(lambda: not _hku_loaded(sid), 60)          # 프로필이 내려가야 지울 수 있다
+            try:
+                ue = ctypes.WinDLL('userenv', use_last_error=True)
+                ue.DeleteProfileW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p]
+                ue.DeleteProfileW(sid, None, None)
+            except Exception as e:
+                problems.append(f'점검용 프로필을 지우지 못했습니다: {e}')
+        if created:
+            subprocess.run([net, 'user', user, '/delete'], shell=False, capture_output=True,
+                           creationflags=CREATE_NO_WINDOW, timeout=60)
+    return verdict(problems, diff(before, snapshot('signed_in_after')))
 
 
 @check('원클릭 최적화: Windows Update 캐시·Prefetch 는 건드리지 않음')
