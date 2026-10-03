@@ -196,6 +196,7 @@ def _machine_settings():
         except machine_store.Unreadable:
             return None
         if isinstance(data, dict):
+            _drop_account_copy()
             return data
         cfg = load_config()
         if is_unreadable(cfg):
@@ -204,6 +205,22 @@ def _machine_settings():
         if machine_store.write(_MACHINE_VALUE, data) and data:
             update_config(lambda c: [c.pop(k, None) for k in _MACHINE_KEYS])
         return data                                      # 못 썼으면 이번에는 이 값을 쓰고 다음에 다시 가져온다
+
+
+_dropped = [False]
+
+
+def _drop_account_copy():
+    """PC 쪽 설정이 이미 있으면 이 계정 파일에 남은 옛 모드 값을 지운다(가져오지는 않는다). 실행마다 한 번.
+    남겨 두면 제거(PC 쪽 기록 삭제) 뒤 다시 설치했을 때 이 계정이 먼저 켜면 옛 게이밍 모드를 가져와 적용했다."""
+    if _dropped[0]:
+        return
+    cfg = load_config()
+    if is_unreadable(cfg):
+        return
+    _dropped[0] = True
+    if any(k in cfg for k in _MACHINE_KEYS):
+        update_config(lambda c: [c.pop(k, None) for k in _MACHINE_KEYS])
 
 
 def _machine_get(key, default):

@@ -82,7 +82,8 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
   이 계정의 시작 프로그램 표시(HKCU StartupApproved)만 `%APPDATA%\APEX_CARE_DATA\system_state.json`. 계정 폴더는 같은 계정의 일반 권한
   프로그램도 쓸 수 있으므로, 거기 있는 기록으로 HKLM 을 쓰지 않습니다(예전 버전 저널은 계정마다 한 번만 옮김). 성능 모드·게임 전 모드도
   PC 에 하나라 같은 키의 `Settings` 에 둡니다. 그래서 다른 Windows 계정에서 앱이 떠 있으면 실행을 막습니다(Global 뮤텍스).
-  나머지 설정은 같은 계정 폴더의 `settings.json`.
+  나머지 설정은 같은 계정 폴더의 `settings.json`. 제거할 때는 다른 계정이 끈 시작 프로그램도 그 계정의 하이브(`HKU\<SID>`,
+  로그아웃 상태면 그 계정의 NTUSER.DAT 를 잠깐 올렸다가 반드시 내림)에서 되돌립니다(`uninstall_prep._revert_other_accounts`).
 
 ### 프로세스
 

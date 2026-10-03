@@ -123,6 +123,35 @@ def summarize_output(text, max_lines=3, max_chars=400):
     return out if len(out) <= max_chars else out[:max_chars] + '…'
 
 
+# 결과 문단 중 '로그 파일 위치' 만 알려 주는 문단. 실패 원인으로 쓰지 않는다(그 앞 문단에 원인이 있다).
+_LOG_HINT = re.compile(r'log file|' + re.escape('.log') + r'|로그 파일', re.I)
+_ERROR_HEAD = re.compile(r'^(error|오류)', re.I)
+
+
+def summarize_failure(text, max_chars=400):
+    """실패한 도구 출력에서 원인 문장. 로그 위치 안내만 있는 끝 문단을 건너뛰고, 바로 앞의 오류 코드 문단(Error: 0x…)을
+    함께 붙인다. 예전에는 결과 문단 하나만 써서 DISM 실패가 'The DISM log file can be found at …' 만 보였다."""
+    if not text:
+        return ''
+    norm = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    paragraphs = []
+    for block in re.split(r'\n\s*\n', norm):
+        lines = [ln.strip() for ln in block.split('\n')]
+        lines = [ln for ln in lines if _meaningful(ln)]
+        if lines:
+            paragraphs.append(' '.join(lines))
+    hints = []
+    while len(paragraphs) > 1 and _LOG_HINT.search(paragraphs[-1]) and len(paragraphs[-1]) < 200:
+        hints.insert(0, paragraphs.pop())
+    if not paragraphs:
+        return ''
+    parts = [paragraphs[-1]]
+    if len(paragraphs) > 1 and _ERROR_HEAD.match(paragraphs[-2]):
+        parts.insert(0, paragraphs[-2])
+    out = ' '.join(parts + hints)
+    return out if len(out) <= max_chars else out[:max_chars] + '…'
+
+
 def _run_hidden_cmd_bg(args, state_dict, timeout_sec=None):
     cmd_str = " ".join(str(a) for a in args)        # 로그 표시용. 실행에는 쓰지 않는다.
     if not args or not os.path.isabs(str(args[0])):
@@ -150,7 +179,7 @@ def _run_hidden_cmd_bg(args, state_dict, timeout_sec=None):
             log.info(f"✓ Command succeeded: {cmd_str}")
         else:
             state_dict["status"] = "error"
-            state_dict["error"] = (summarize_output(err) or summarize_output(out)
+            state_dict["error"] = (summarize_failure(err) or summarize_failure(out)
                                    or f"종료 코드 {result.returncode}")
             log.warning(f"✗ Command failed (code {result.returncode}): {cmd_str} -> {err or out}")
     except subprocess.TimeoutExpired:

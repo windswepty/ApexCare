@@ -83,7 +83,8 @@ const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기
 function ramTotalLabel(info) {
   const usable = Number(info.ramTotalGB);
   const installed = Number(info.ramInstalledGB);
-  if (!(usable > 0)) return '…';
+  // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않았으면 '?'
+  if (!(usable > 0)) return info.cpuModel !== '확인 중…' ? '?' : '…';
   if (installed > 0 && installed - usable >= 0.1) {
     return `설치 ${installed.toFixed(1)} GB · 하드웨어 예약 ${(installed - usable).toFixed(1)} GB`;
   }
@@ -131,7 +132,8 @@ export default function Dashboard({ addToast, active = true }) {
     diskFreeGB: null,
     systemDrive: null
   });
-  const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : '…');
+  // 받기 전에는 '…', 받았는데 값이 없으면(이 PC 에서 읽지 못함) '?'. 예전에는 끝날 일 없는 '…' 가 계속 보였다.
+  const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : sysInfo.cpuModel !== '확인 중…' ? '?' : '…');
   // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않은 값은 '?' (0 으로 지어내지 않는다)
   const loaded = sysInfo.cpuModel !== '확인 중…';
   const count = (v) => (isNum(v) && v > 0 ? v : loaded ? '?' : '…');
@@ -172,7 +174,10 @@ export default function Dashboard({ addToast, active = true }) {
         try {
           const stats = await window.pywebview.api.getSystemStats();
           // 읽기에 실패하면(error) 이전 값을 그대로 둔다. 0 으로 바꾸지 않는다.
-          if (stats && !stats.error) {
+          if (stats && stats.error) {
+            // 백엔드가 통계를 읽지 못했다. '확인 중…' 이 끝나지 않게 '읽지 못함' 으로 바꾼다(다음 주기에 다시 묻는다).
+            setSysInfo((prev) => (prev.cpuModel === '확인 중…' ? { ...prev, cpuModel: '읽지 못함', gpuModel: '읽지 못함' } : prev));
+          } else if (stats) {
             const cpu = isNum(stats.cpuUsage) ? stats.cpuUsage : null;
             const gpu = isNum(stats.gpuUsage) ? stats.gpuUsage : null;
             setCpuUsage(cpu);
@@ -624,7 +629,7 @@ export default function Dashboard({ addToast, active = true }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{ramTotalLabel(sysInfo)}</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(ramUsage)}</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(ramUsage, loaded ? 'unavailable' : undefined)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">
@@ -652,7 +657,7 @@ export default function Dashboard({ addToast, active = true }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {gb(sysInfo.diskTotalGB)}</p>
             </div>
           </div>
-          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(diskUsage)}</span>
+          <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(diskUsage, loaded ? 'unavailable' : undefined)}</span>
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden mb-4">

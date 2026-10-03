@@ -131,3 +131,29 @@ def test_uninstall_command_without_a_folder_runs_only_from_the_windows_folder(mo
     # Windows 폴더에 없는 이름은 실행하지 않는다
     r = uninstaller.run_uninstall('setup.exe /uninstall')
     assert r['success'] is False and '설정 → 앱' in r['message'] and started == []
+
+
+def test_user_installed_uninstaller_is_not_run_with_admin_rights(monkeypatch, tmp_path):
+    # 사용자 폴더의 제거 프로그램(Discord 의 Update.exe 등)이나 이 계정에만 등록된 프로그램은 일반 권한 프로그램이
+    # 바꿔 넣을 수 있다. 관리자 권한인 이 앱이 실행하면 그 권한을 넘겨준다. Windows 설정 → 앱으로 안내한다
+    import types
+    from backend import uninstaller
+    started, opened = [], []
+    monkeypatch.setattr(uninstaller.subprocess, 'Popen',
+                        lambda args, shell=None: started.append(list(args)) or types.SimpleNamespace(pid=7))
+    monkeypatch.setattr(uninstaller, '_split_command', lambda s: s.split('|'))
+    monkeypatch.setattr(uninstaller, '_open_apps_settings', lambda: opened.append(1))
+    pf = tmp_path / 'Program Files'
+    user = tmp_path / 'Users' / 'me' / 'AppData' / 'Local' / 'Discord'
+    for d in (pf / 'Foo', user):
+        d.mkdir(parents=True)
+    (pf / 'Foo' / 'uninst.exe').write_bytes(b'')
+    (user / 'Update.exe').write_bytes(b'')
+    monkeypatch.setenv('ProgramFiles', str(pf))
+
+    r = uninstaller.run_uninstall(str(user / 'Update.exe') + '|--uninstall')
+    assert r['success'] is False and r['needsSettings'] and started == [] and opened == [1]
+    r = uninstaller.run_uninstall(str(pf / 'Foo' / 'uninst.exe') + '|/S', user_scope=True)   # HKCU 에 등록된 항목
+    assert r['success'] is False and started == []
+    assert uninstaller.run_uninstall(str(pf / 'Foo' / 'uninst.exe') + '|/S')['success']
+    assert started == [[str(pf / 'Foo' / 'uninst.exe'), '/S']]

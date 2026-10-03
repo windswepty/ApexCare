@@ -23,7 +23,8 @@ export default function Uninstaller({ addToast }) {
   const [isCleaning, setIsCleaning] = useState(false);
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
-  const launchingRef = useRef(false);     // 제거 프로그램을 띄우는 중(두 번 눌러 두 개가 뜨지 않게)
+  const launchingRef = useRef(false);
+  const [viaSettings, setViaSettings] = useState(false);   // Windows 설정 → 앱에서 제거하도록 안내했다     // 제거 프로그램을 띄우는 중(두 번 눌러 두 개가 뜨지 않게)
 
   const [cleanElapsed, setCleanElapsed] = useState(0);
 
@@ -84,10 +85,19 @@ export default function Uninstaller({ addToast }) {
     try {
       // 이름만 넘긴다. 실행할 제거 명령은 백엔드가 레지스트리에서 직접 찾는다.
       const res = await a.uninstallApp(app.name);
+      if (res?.needsSettings) {
+        // 사용자 폴더에 설치된 프로그램: Windows 설정 → 앱에서 제거한 뒤 여기서 남은 폴더를 찾는다
+        addToast?.(res.message, 'info');
+        setViaSettings(true);
+        setActiveApp(app);
+        setStep('wait_uninstall');
+        return;
+      }
       if (!res?.success) {
         addToast?.(res?.message || '제거 프로그램을 실행하지 못했습니다.', 'error');
         return;
       }
+      setViaSettings(false);
       setActiveApp(app);
       setStep('wait_uninstall');
     } catch (e) {
@@ -172,11 +182,16 @@ export default function Uninstaller({ addToast }) {
     // 실패·일부 실패면 이 화면에 머문다. 제거가 끝난 프로그램은 목록에서 사라져, 돌아가면 다시 찾을 길이 없었다.
     // 휴지통으로 보낸 것만 빼고, 남은 것에는 이유를 붙여 다시 시도할 수 있게 한다.
     if (failed) {
-      const why = new Map(failed.filter((f) => f && f.path).map((f) => [f.path, f.reason || '']));
-      const left = leftovers.filter((l) => !chosen.has(l.path) || why.has(l.path))
-        .map((l) => (why.has(l.path) ? { ...l, failReason: why.get(l.path) } : l));
+      // 백엔드가 돌려주는 경로는 모양이 다를 수 있다(끝의 역슬래시, 대소문자). 같은 정규화로 맞춘다.
+      // 어느 항목인지 맞추지 못한 실패가 있으면 고른 항목을 하나도 빼지 않는다(보내지 못한 폴더가 사라져 보이지 않게).
+      const key = (p) => String(p || '').replace(/[\\/]+$/, '').toLowerCase();
+      const why = new Map(failed.filter((f) => f && f.path).map((f) => [key(f.path), f.reason || '']));
+      const matched = new Set(leftovers.map((l) => key(l.path)).filter((k) => why.has(k)));
+      const unmatched = failed.length > matched.size;
+      const left = leftovers.filter((l) => !chosen.has(l.path) || why.has(key(l.path)) || unmatched)
+        .map((l) => (why.has(key(l.path)) ? { ...l, failReason: why.get(key(l.path)) } : l));
       setLeftovers(left);
-      setChosen(new Set(left.filter((l) => why.has(l.path)).map((l) => l.path)));
+      setChosen(new Set(left.filter((l) => chosen.has(l.path)).map((l) => l.path)));
     }
   };
 
@@ -279,11 +294,13 @@ export default function Uninstaller({ addToast }) {
             <Trash2 className="w-10 h-10 text-amber-500" />
           </div>
           <h3 className="text-xl font-bold text-black dark:text-white mb-2">
-            [{activeApp?.name}] 제거 프로그램을 실행했습니다
+            {viaSettings ? `[${activeApp?.name}] 은(는) Windows 설정에서 제거해 주세요` : `[${activeApp?.name}] 제거 프로그램을 실행했습니다`}
           </h3>
           <p className="text-gray-500 dark:text-slate-400 mb-8">
-            화면에 뜬 제거 프로그램의 안내에 따라 제거를 끝까지 마쳐 주세요. 제거가 끝나면 아래 버튼으로 남은 폴더를 찾습니다.
-            아직 설치돼 있으면 찾지 않습니다.
+            {viaSettings
+              ? '사용자 폴더에 설치된 프로그램이라 관리자 권한인 이 앱이 제거 프로그램을 실행하지 않습니다. 열린 Windows 설정 → 앱에서 제거를 마친 뒤 아래 버튼으로 남은 폴더를 찾습니다.'
+              : '화면에 뜬 제거 프로그램의 안내에 따라 제거를 끝까지 마쳐 주세요. 제거가 끝나면 아래 버튼으로 남은 폴더를 찾습니다.'}
+            {' '}아직 설치돼 있으면 찾지 않습니다.
           </p>
 
           <div className="flex gap-4">

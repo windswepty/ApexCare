@@ -140,13 +140,25 @@ def recover_after_crash():
                 failed.append(f"{entry.get('name', pid) if isinstance(entry.get('name'), str) else pid}: {bad}")
                 continue
             _original[pid] = entry
-            r = restore(pid)
+            try:
+                r = restore(pid)
+            except Exception as e:                # 기록 하나 때문에 나머지 복구가 멈추지 않게
+                _original.pop(pid, None)
+                failed.append(f"{entry.get('name', pid)}: {e}")
+                continue
             if r['ok'] and not r.get('reason'):
                 restored += 1
             elif not r['ok']:
                 failed.append(f"{entry.get('name', pid)}: {r.get('reason', '실패')}")
         _persist()
     return restored, failed
+
+
+def _current_user():
+    try:
+        return (psutil.Process(os.getpid()).username() or '').lower() or None
+    except Exception:
+        return None
 
 
 def _invalid_recovery_entry(pid, entry):
@@ -163,16 +175,25 @@ def _invalid_recovery_entry(pid, entry):
     created = entry.get('created')
     if isinstance(created, bool) or not isinstance(created, (int, float)):
         return '기록 형식이 올바르지 않아 건너뛰었습니다'
-    ok, _, _, err = process_guard.check_controllable(pid, action='priority')
-    if ok:
-        return None
+    if not isinstance(entry.get('name'), str):
+        return '기록 형식이 올바르지 않아 건너뛰었습니다'
+    # 같은 프로세스인지 먼저 본다. 끝났거나 번호를 다른 프로세스(시스템 프로세스일 수도)가 받았으면 되돌릴 대상이
+    # 없다 — restore 가 '이미 종료됨' 으로 정리한다. 예전에는 관문부터 불러 '되돌리기 실패' 로 보고했다.
     try:
-        psutil.Process(pid)
+        p = psutil.Process(pid)
+        if p.create_time() != created:
+            return None
+        user = (p.username() or '').lower()
     except psutil.NoSuchProcess:
-        return None         # 이미 끝났다. restore 가 '종료됨' 으로 정리한다
+        return None
     except psutil.Error:
-        pass
-    return err or '건드릴 수 없는 프로세스라 건너뛰었습니다'
+        return '프로세스 정보를 읽지 못해 건너뛰었습니다'
+    # 부스트·에코는 이 계정의 앱만 낮춘다. 시스템·서비스 계정이나 다른 계정의 프로세스는 그 기록에서 나올 수 없다.
+    me = _current_user()
+    if 'system' in user or 'service' in user or (me and user != me):
+        return '이 계정의 앱이 아니라 건너뛰었습니다'
+    ok, _, _, err = process_guard.check_controllable(pid, action='priority')
+    return None if ok else (err or '건드릴 수 없는 프로세스라 건너뛰었습니다')
 
 
 def _never_throttle(name):

@@ -231,7 +231,7 @@ export default function RestoreCenter({ addToast, active = true }) {
                 <div className="mt-2">
                   <ul className="space-y-1">
                     {result.failed.slice(0, 6).map((f, i) => (
-                      <li key={i} className="text-xs text-rose-400 break-words">· {f.reason || f.key}</li>
+                      <li key={i} className="text-xs text-rose-400 break-words">· {f.what ? `${f.what}: ` : ''}{f.reason || f.key}</li>
                     ))}
                     {result.failed.length > 6 && (
                       <li className="text-xs text-gray-500">· 외 {result.failed.length - 6}건</li>

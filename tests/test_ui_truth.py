@@ -126,3 +126,25 @@ def test_nagle_option_says_when_it_applies():
     gb = _read('src/components/GameBooster.jsx')
     assert '레지스트리 영구 변경' not in gb and '게임 동안만 레지스트리에 기록' in gb
     assert '재부팅하거나 네트워크를 다시 연결할 때' in gb
+
+
+def test_settings_dialog_keeps_tab_inside():
+    # Tab·Shift+Tab 이 설정 창 안에서만 돈다(가려진 창 닫기 버튼으로 가지 않는다)
+    modal = _read('src/components/SettingsModal.jsx')
+    assert "e.key !== 'Tab'" in modal and 'dialogRef.current.querySelectorAll(FOCUSABLE)' in modal
+    assert '(e.shiftKey ? last : first).focus()' in modal and 'ref={dialogRef}' in modal
+
+
+def test_dashboard_does_not_wait_forever_for_values_it_could_not_read():
+    # 첫 응답 뒤에도 값이 없으면 '측정 중'·'…' 가 아니라 읽지 못했다고 보여준다
+    dash = _read('src/components/Dashboard.jsx')
+    assert "pctText(diskUsage, loaded ? 'unavailable' : undefined)" in dash
+    assert "pctText(ramUsage, loaded ? 'unavailable' : undefined)" in dash
+    assert "return info.cpuModel !== '확인 중…' ? '?' : '…';" in dash
+    assert "sysInfo.cpuModel !== '확인 중…' ? '?' : '…'" in dash
+    assert "if (stats && stats.error)" in dash and "cpuModel: '읽지 못함'" in dash
+
+
+def test_restore_center_names_what_failed():
+    src = _read('src/components/RestoreCenter.jsx')
+    assert "{f.what ? `${f.what}: ` : ''}{f.reason || f.key}" in src

@@ -265,3 +265,27 @@ def test_reused_pid_is_judged_by_the_new_program_not_the_cached_name(procs):
         procs.tick(2.0)
         found = {c['pid'] for c in process_boost.find_throttle_candidates(None, cpu_threshold=3.0)}
         assert 5120 not in found                              # 예전에는 옛 이름 helper.exe 로 판정해 OBS 를 낮췄다
+
+
+def test_crash_record_whose_number_now_belongs_to_a_system_process_is_not_a_failure(procs):
+    # 재부팅 뒤 기록한 번호를 svchost 가 받았다. 되돌릴 대상이 없을 뿐 실패가 아니다(예전에는 제거를 막았다)
+    import json
+    procs.add(9120, 'svchost.exe', created=5000.0, username='NT AUTHORITY\\SYSTEM')
+    with open(process_boost._state_path(), 'w', encoding='utf-8') as f:
+        json.dump({'9120': {'priority': NORMAL_PRIORITY_CLASS, 'created': 1000.0, 'name': 'chrome.exe',
+                            'owner': 'boost'}}, f)
+    assert process_boost.recover_after_crash() == (0, [])
+    assert procs.nice_calls == []
+
+
+def test_crash_record_for_a_service_or_without_a_name_is_skipped_safely(procs):
+    import json
+    procs.add(930, 'SearchIndexer.exe', created=1000.0, username='NT AUTHORITY\\SYSTEM')
+    procs.add(931, 'app.exe', nice=IDLE_PRIORITY_CLASS, created=1000.0)
+    with open(process_boost._state_path(), 'w', encoding='utf-8') as f:
+        json.dump({'930': {'priority': IDLE_PRIORITY_CLASS, 'created': 1000.0, 'name': 'x', 'owner': 'eco'},
+                   '123': {'priority': NORMAL_PRIORITY_CLASS, 'created': 1.0, 'owner': 'boost'},
+                   '931': {'priority': NORMAL_PRIORITY_CLASS, 'created': 1000.0, 'name': 'app.exe', 'owner': 'boost'}}, f)
+    n, bad = process_boost.recover_after_crash()
+    assert n == 1 and len(bad) == 2                       # 서비스 계정·이름 없는 기록은 건너뛰고, 나머지는 되돌린다
+    assert procs.procs[930].nice == NORMAL_PRIORITY_CLASS and procs.procs[931].nice == NORMAL_PRIORITY_CLASS

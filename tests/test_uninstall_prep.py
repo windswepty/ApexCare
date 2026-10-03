@@ -120,26 +120,103 @@ def test_failures_are_reported_and_kept_for_retry():
     assert REGISTRY.value('HKLM', machine_store.KEY, 'Journal')
 
 
-@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
-def test_startup_items_turned_off_in_another_account_are_reported(tmp_path):
-    # 다른 계정의 시작 프로그램 표시는 그 계정의 HKCU 라 여기서 되돌릴 수 없다. 숨기지 않고 알린다.
-    other = tmp_path / 'Users' / 'kid'
-    data = other / 'AppData' / 'Roaming' / 'APEX_CARE_DATA'
+OTHER_SID = 'S-1-5-21-9-9-9-1002'
+APPROVED = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+DISABLED = b'\x03\x00\x00\x00' + b'\x11' * 8
+
+
+def _other_account(tmp_path):
+    """다른 계정 'kid' 가 APEX CARE 로 'Game' 시작 프로그램을 꺼 둔 상태(원래 표시 값은 없었다)."""
+    home = tmp_path / 'Users' / 'kid'
+    data = home / 'AppData' / 'Roaming' / 'APEX_CARE_DATA'
     data.mkdir(parents=True)
-    approved = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
-    with open(data / 'system_state.json', 'w', encoding='utf-8') as f:
-        json.dump({'version': 1, 'entries': {f'reg:HKCU\\{approved}\\Game': {
-            'kind': 'registry', 'group': 'startup:HKCU:Game', 'hive': 'HKCU', 'path': approved,
-            'name': 'Game', 'existed': False, 'value': None, 'type': 3}}}, f)
+    journal = data / 'system_state.json'
+    with open(journal, 'w', encoding='utf-8') as f:
+        json.dump({'version': 1, 'entries': {f'reg:HKCU\\{APPROVED}\\Game': {
+            'kind': 'registry', 'group': 'startup:HKCU:Game', 'hive': 'HKCU', 'path': APPROVED,
+            'name': 'Game', 'existed': False, 'value': None, 'type': 3, 'created_keys': []}}}, f)
     profiles = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
-    REGISTRY.seed('HKLM', profiles + r'\S-1-5-21-9-9-9-1002', 'ProfileImagePath', str(other), fakewin.REG_EXPAND_SZ)
+    REGISTRY.seed('HKLM', profiles + '\\' + OTHER_SID, 'ProfileImagePath', str(home), fakewin.REG_EXPAND_SZ)
+    return home, journal
+
+
+def _journal_entries(path):
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)['entries']
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_startup_items_of_a_signed_in_account_are_reverted_in_its_hive(tmp_path):
+    # 빠른 사용자 전환으로 그 계정도 로그인해 있다: 레지스트리가 HKU\<SID> 에 올라와 있다
+    home, journal = _other_account(tmp_path)
+    REGISTRY.seed('HKU', OTHER_SID + '\\' + APPROVED, 'Game', DISABLED, fakewin.REG_BINARY)
     _seed_pc()
 
     res = uninstall_prep.revert_for_uninstall()
 
-    assert res['success'] is False
+    assert res['success'], res['failed']
+    assert REGISTRY.get('HKU', OTHER_SID + '\\' + APPROVED, 'Game') is None      # 원래 없던 '꺼짐' 표시를 지웠다
+    assert _journal_entries(journal) == {}
+    assert any('kid' in s['name'] and s['ok'] for s in res['steps'])
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_startup_items_of_a_signed_out_account_are_reverted_by_loading_its_hive(tmp_path, monkeypatch):
+    # 로그아웃한 계정: 그 계정의 NTUSER.DAT 를 잠깐 올렸다가 되돌린 뒤 바로 내린다
+    home, journal = _other_account(tmp_path)
+    (home / 'NTUSER.DAT').write_bytes(b'regf')
+    events = []
+
+    def load(name, path):
+        events.append(('load', name, path))
+        REGISTRY.seed('HKU', name + '\\' + APPROVED, 'Game', DISABLED, fakewin.REG_BINARY)
+
+    def unload(name):
+        events.append(('unload', name, REGISTRY.get('HKU', name + '\\' + APPROVED, 'Game')))
+        REGISTRY.roots[fakewin.HKEY_USERS].subkeys.pop(name.lower(), None)
+        return True
+    monkeypatch.setattr(uninstall_prep, '_enable_privileges', lambda *names: True)
+    monkeypatch.setattr(uninstall_prep, '_load_hive', load)
+    monkeypatch.setattr(uninstall_prep, '_unload_hive', unload)
+    _seed_pc()
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    assert res['success'], res['failed']
+    (op1, name, path), (op2, name2, at_unload) = events
+    assert op1 == 'load' and path == str(home / 'NTUSER.DAT') and name.startswith('APEXCARE_')
+    assert op2 == 'unload' and name2 == name and at_unload is None    # 내리기 전에 '꺼짐' 표시를 지웠다
+    assert not REGISTRY.has_key('HKU', name)                          # 올린 것은 반드시 내린다
+    assert _journal_entries(journal) == {}
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_other_account_failures_are_reported_not_hidden(tmp_path, monkeypatch):
+    home, journal = _other_account(tmp_path)
+    (home / 'NTUSER.DAT').write_bytes(b'regf')
+    monkeypatch.setattr(uninstall_prep, '_enable_privileges', lambda *names: True)
+    monkeypatch.setattr(uninstall_prep, '_load_hive',
+                        lambda name, path: REGISTRY.seed('HKU', name + '\\' + APPROVED, 'Game', DISABLED,
+                                                         fakewin.REG_BINARY))
+    monkeypatch.setattr(uninstall_prep, '_unload_hive', lambda name: False)    # 내리지 못했다
+    _seed_pc()
+
+    res = uninstall_prep.revert_for_uninstall()
+
     step = next(s for s in res['failed'] if 'kid' in s['name'])
-    assert '1개' in step['name'] and '작업 관리자' in step['detail']
+    assert '내리지 못했습니다' in step['detail'] and '재부팅' in step['detail']
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_other_account_without_a_registry_file_is_reported(tmp_path):
+    home, journal = _other_account(tmp_path)          # 로그아웃 상태인데 NTUSER.DAT 가 없다
+    _seed_pc()
+
+    res = uninstall_prep.revert_for_uninstall()
+
+    step = next(s for s in res['failed'] if 'kid' in s['name'])
+    assert 'NTUSER.DAT' in step['detail'] and '작업 관리자' in step['detail']
+    assert _journal_entries(journal)                  # 되돌리지 못한 기록은 남긴다
 
 
 
@@ -427,3 +504,22 @@ def test_uninstaller_starts_cleanup_with_its_own_working_dir():
     popen = next(n for n in ast.walk(main) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'subprocess.Popen')
     kw = {k.arg: ast.unparse(k.value) for k in popen.keywords}
     assert kw.get('cwd') == "_system32('')" and kw.get('shell') == 'False'
+
+
+@pytest.mark.usefixtures('as_admin', 'no_ram_purge')
+def test_legacy_item_disabled_in_task_manager_is_revived_but_stays_off():
+    # 예전 버전이 숨기기 전에 이미 작업 관리자에서 꺼 둔 항목. 되살리면서 켜면 사용자가 끈 것이 켜지고,
+    # '전부 원래대로' 뒤에 새 변경('켜기')이 기록됐다
+    _seed_pc()
+    machine_approved = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    REGISTRY.seed('HKLM', machine_approved, 'OldTool', DISABLED, fakewin.REG_BINARY)
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup', 'OldTool', r'C:\apps\old.exe', fakewin.REG_SZ)
+    REGISTRY.seed('HKCU', r'Software\APEXCARE\DisabledStartup\_origin', 'OldTool', 'HKLM|' + RUN_MACHINE,
+                  fakewin.REG_SZ)
+
+    r = perf_modes.revert_everything()
+
+    assert r['success'], r['parts']
+    assert REGISTRY.value('HKLM', RUN_MACHINE, 'OldTool') == r'C:\apps\old.exe'      # 되살렸다
+    assert REGISTRY.value('HKLM', machine_approved, 'OldTool') == DISABLED            # 꺼진 채
+    assert ss.pending_changes() == {}                                                 # 새 변경을 남기지 않는다

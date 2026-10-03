@@ -5,6 +5,9 @@ import {
   accentProblems, readableAccent, resemblesWarningColor,
 } from '../theme';
 
+// 키보드로 갈 수 있는 것(Tab 이 창 안에서만 돌게 할 때 쓴다)
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 // 예전 '저장하기' 버튼은 아무것도 저장하지 않고 "설정이 저장되었습니다" 를 띄웠다.
 // 이제 고르면 바로 적용하고, 백엔드가 저장에 성공했을 때만 성공을 알린다.
 // 저장에 실패하면 화면도 이전 색으로 되돌린다. 다음 실행 때 보일 색과 어긋나지 않게.
@@ -13,16 +16,36 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
 
-  // 대화상자: 열면 닫기 버튼으로 초점을 옮기고 Esc 로 닫는다. 닫으면 열었던 곳으로 초점을 돌려준다.
+  // 대화상자: 열면 닫기 버튼으로 초점을 옮기고, Tab 은 창 안에서만 돌고, Esc 로 닫는다. 닫으면 열었던 곳으로 돌려준다.
   // 예전에는 초점이 오버레이 뒤에 남아 Tab 이 가려진 창 닫기 버튼으로 갔다.
   const closeRef = useRef(null);
+  const dialogRef = useRef(null);
   const onCloseRef = useRef(onClose);          // App 이 렌더마다 새 함수를 넘겨도 초점을 다시 옮기지 않게
   onCloseRef.current = onClose;
   useEffect(() => {
     if (!isOpen) return undefined;
     const before = document.activeElement;
     closeRef.current?.focus();
-    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const items = [...dialogRef.current.querySelectorAll(FOCUSABLE)]
+        .filter((el) => !el.disabled && el.getClientRects().length > 0);
+      if (!items.length) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const inside = dialogRef.current.contains(document.activeElement);
+      if (e.shiftKey ? (!inside || document.activeElement === first) : (!inside || document.activeElement === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -92,7 +115,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, themeId, acce
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
       role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-[90%] max-w-lg max-h-[90vh] flex flex-col border border-gray-200 dark:border-slate-700 overflow-hidden">
+      <div ref={dialogRef} className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-[90%] max-w-lg max-h-[90vh] flex flex-col border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50 dark:bg-slate-800/30 flex-shrink-0">
           <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
             <Settings className="w-5 h-5" />

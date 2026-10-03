@@ -145,7 +145,42 @@ def test_corrupt_machine_journal_is_kept_aside():
     REGISTRY.seed('HKLM', machine_store.KEY, 'Journal', '{깨짐', fakewin.REG_SZ)
     assert ss.pending_changes() == {}
     values = REGISTRY._find(fakewin.HKEY_LOCAL_MACHINE, ['SOFTWARE', 'APEX CARE']).values
-    assert len([n for n in values if n.startswith('journal.corrupt-')]) == 1 and 'journal' not in values
+    assert len([n for n in values if n.startswith('journal.corrupt-')]) == 1
+    assert _machine_journal()['entries'] == {}            # 새 저널은 비어 있다(깨진 것은 옆에 남았다)
+
+
+def test_fresh_account_is_marked_so_later_writes_to_its_file_are_ignored():
+    # 예전 기록이 없어도 처음 읽을 때 '옮김' 으로 표시한다. 예전에는 표시하지 않아, 나중에 일반 권한 프로그램이
+    # 계정 파일에 써 넣은 HKLM 기록을 옮겨 관리자 권한으로 썼다
+    assert ss.pending_changes() == {}
+    assert fakewin.ACCOUNT_SID in _machine_journal()['imported']
+    evil = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+    _write_account_journal({f'reg:HKLM\\{evil}\\x': _reg_entry('HKLM', evil, 'x', r'C:\evil.exe', fakewin.REG_SZ)})
+    assert ss.pending_changes() == {}
+    assert ss.restore_all()['ok'] and REGISTRY.get('HKLM', evil, 'x') is None
+
+
+def test_account_file_entry_cannot_shadow_a_pc_journal_record():
+    # 키는 'svc:sysmain' 인데 내용은 시작 프로그램 표시인 기록. 예전에는 PC 저널의 같은 키를 가려, 원래 값 기록 없이
+    # 서비스를 바꾸고 '되돌림 성공' 이라고 했다
+    SERVICES.add('SysMain', 2)
+    assert ss.pending_changes() == {}                      # 이 계정은 '옮김' 으로 표시됐다
+    _write_account_journal({'svc:sysmain': _reg_entry('HKCU', APPROVED, 'X', None)})
+    assert ss.set_service_start('SysMain', 'disabled', 't')['ok']
+    assert 'svc:sysmain' in _machine_journal()['entries']
+    assert ss.restore_all()['ok'] and SERVICES.start_of('SysMain')[0] == 2
+
+
+def test_old_record_keeps_the_true_original_when_the_pc_journal_has_the_same_key(monkeypatch, tmp_path):
+    # 예전 버전에서 계정 B 가 20→10 으로 바꿨다(B 의 파일에 원래 값 20). 새 버전에서 계정 A 가 먼저 같은 값을
+    # 기록하면 그 '원래 값' 은 10 이다. 예전에는 B 의 20 을 버려 되돌리기가 10 을 썼다
+    REGISTRY.seed('HKLM', KEY, 'SystemResponsiveness', 10)
+    assert ss.set_registry('HKLM', KEY, 'SystemResponsiveness', 10, group='perf_mode')['ok']   # 계정 A
+    _as_other_account(monkeypatch, tmp_path, 'S-1-5-21-9-9-9-1002')                           # 계정 B
+    _write_account_journal({f'reg:HKLM\\{KEY}\\SystemResponsiveness':
+                            _reg_entry('HKLM', KEY, 'SystemResponsiveness', 20)})
+    assert ss.restore_group('perf_mode')['ok']
+    assert REGISTRY.value('HKLM', KEY, 'SystemResponsiveness') == 20
 
 
 # ── 레지스트리 ────────────────────────────────────────────
@@ -438,3 +473,18 @@ def test_values_written_to_the_active_plan_take_effect_and_are_undone():
     assert POWER.effective(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN) == 100
     assert ss.restore_group('t')['ok']
     assert POWER.effective(ss.SUB_PROCESSOR, ss.PROCTHROTTLEMIN) == 5
+
+
+def test_old_plan_record_without_set_to_asks_once_instead_of_claiming_restored():
+    # 예전 버전 기록에는 '바꿔 둔 플랜(set_to)' 이 없다. 원래 플랜이 지워졌을 때 안내 없이 '되돌림' 으로 지웠다
+    custom = '11111111-2222-3333-4444-555555555555'
+    ss.pending_changes()                                   # 이 계정 '옮김' 표시
+    POWER.active = fakewin.PLAN_HIGH_PERF
+    j = _machine_journal()
+    j['entries']['power:active_plan'] = {'kind': 'power_plan', 'group': 't', 'value': custom}
+    machine_store.write('Journal', j)
+
+    r = ss.restore_group('t')
+    assert r['ok'] is False and '삭제' in r['failed'][0]['reason']
+    POWER.active = fakewin.PLAN_POWER_SAVER                # 안내대로 다른 플랜을 고름
+    assert ss.restore_group('t')['ok'] and _journal() == {}

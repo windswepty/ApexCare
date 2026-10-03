@@ -207,12 +207,13 @@ def _apply_mode_locked(mode, user_set, persist):
     reverted = ss.restore_group(MODE_GROUP)
     # 개수는 설정 단위로 센다(전원 연결·배터리 값을 따로 세지 않는다). 적용 결과의 '항목' 과 같은 단위다.
     reverted['restored'] = reverted.get('restored_settings', reverted['restored'])
+    n_revert_fail = reverted.get('failed_settings', len(reverted['failed']))
     steps.append({
         'name': '이전 모드 설정 되돌리기',
         'ok': reverted['ok'],
         'revert': True,
         'detail': f"{reverted['restored']}개 항목 복구"
-                  + (f", {len(reverted['failed'])}개 실패 — {reverted['failed'][0].get('reason', '')}"
+                  + (f", {n_revert_fail}개 실패 — {reverted['failed'][0].get('reason', '')}"
                      if reverted['failed'] else ''),
         'failures': reverted['failed'],
     })
@@ -293,7 +294,7 @@ def _apply_mode_locked(mode, user_set, persist):
         _save_mode(mode, user_set, notes)
 
     if not spec['plan']:
-        n_ok, n_fail = reverted['restored'], len(reverted['failed'])
+        n_ok, n_fail = reverted['restored'], n_revert_fail
         if n_fail:
             msg = (f"성능 모드가 바꾼 설정 {n_fail}개를 되돌리지 못했습니다"
                    + (f" ({n_ok}개는 되돌렸습니다)." if n_ok else "."))
@@ -302,7 +303,7 @@ def _apply_mode_locked(mode, user_set, persist):
         else:
             msg = "표준 모드입니다. 되돌릴 성능 모드 설정이 없었습니다."
     elif failed or revert_failed:
-        n = len(failed) + len(reverted['failed'])
+        n = len(failed) + n_revert_fail
         msg = f"{spec['label']} 모드를 적용했지만 {n}개 항목이 실패했습니다."
     else:
         msg = f"{spec['label']} 모드를 적용했습니다. ({len(applied)}개 항목"
@@ -311,7 +312,7 @@ def _apply_mode_locked(mode, user_set, persist):
     log.info(f"[모드] {mode}: 성공 {len(applied)} 실패 {len(failed)}")
     return _result(mode, spec, steps, notes, msg, success=success, partial=partial,
                    applied=len(applied), skipped=len(skipped),
-                   failed=len(failed) + len(reverted['failed']),
+                   failed=len(failed) + n_revert_fail,
                    restored=reverted['restored'])
 
 
@@ -434,7 +435,7 @@ def _revert_everything_locked():
     r['restored'] = r.get('restored_settings', r['restored'])        # 설정 단위(전원 연결·배터리 값을 하나로)
     parts.append({'name': '시스템 설정 (성능 모드·튜닝·부스트)', 'ok': r['ok'],
                   'detail': f"{r['restored']}개 복구"
-                            + (f", {len(r['failed'])}개 실패" if r['failed'] else ''),
+                            + (f", {r.get('failed_settings', len(r['failed']))}개 실패" if r['failed'] else ''),
                   'restored': r['restored'], 'failed': r['failed']})
 
     from backend import system_repair, optimizer
@@ -460,7 +461,7 @@ def _revert_everything_locked():
     if uninstall_prep._disabled_startup_names():
         steps = uninstall_prep._restore_disabled_startup()
         bad = [s for s in steps if not s['ok']]
-        parts.append({'name': '구버전 시작 프로그램', 'ok': not bad,
+        parts.append({'name': '구버전 시작 프로그램', 'ok': not bad, 'count': len(steps) - len(bad),
                       'detail': (f"{len(steps)}개를 원래 자리에 되살렸습니다" if not bad else
                                  '; '.join(f"{s['name']}: {s['detail']}" for s in bad[:3]))})
 
@@ -478,7 +479,8 @@ def _revert_everything_locked():
     failed_parts = [p for p in parts if not p['ok']]
     ok = not failed_parts
     # 구버전 백업에서 되돌린 영역도 센다. 예전에는 그것만 있으면 '0개 설정을 되돌렸습니다' 로 나왔다.
-    total = r['restored'] + sum(1 for p in parts[1:] if p['ok'] and p['name'].startswith('구버전'))
+    # 구버전 시작 프로그램은 되살린 항목 수만큼(복구 센터가 항목마다 한 건으로 보여 준다)
+    total = r['restored'] + sum(p.get('count', 1) for p in parts[1:] if p['ok'] and p['name'].startswith('구버전'))
     return {
         'success': ok,
         'message': (f"{total}개 설정을 원래대로 되돌렸습니다." if ok else

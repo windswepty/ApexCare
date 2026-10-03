@@ -122,6 +122,8 @@ def get_installed_apps():
                                 "uninstallString": uninstall_string,
                                 "installLocation": location if isinstance(location, str) else '',
                                 "quietUninstall": _read(sub, "QuietUninstallString"),
+                                # 이 계정에만 설치된 프로그램(HKCU). 그 제거 프로그램은 일반 권한으로 바꿔 넣을 수 있다
+                                "scope": 'user' if hkey == winreg.HKEY_CURRENT_USER else 'machine',
                             })
                     except Exception as e:
                         log.debug(f"하위 키 읽기 실패: {e}")
@@ -168,10 +170,28 @@ def uninstall_by_name(app_name):
     if not match:
         return {"success": False,
                 "message": f"'{app_name}' 을(를) 설치된 프로그램 목록에서 찾지 못했습니다. 이미 제거되었을 수 있습니다."}
-    return run_uninstall(match['uninstallString'])
+    return run_uninstall(match['uninstallString'], user_scope=match.get('scope') == 'user')
 
 
-def run_uninstall(uninstall_string):
+def _admin_only_path(path):
+    """관리자만 쓸 수 있는 곳(Program Files·Windows 폴더) 안의 파일인가. 실경로로 판단한다."""
+    try:
+        real = safe_delete.norm(path)
+    except Exception:
+        return False
+    roots = [os.environ.get(v) for v in ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'SystemRoot')]
+    return any(r and safe_delete.is_inside(real, safe_delete.norm(r)) for r in roots)
+
+
+def _open_apps_settings():
+    """Windows 설정 → 앱을 연다(실패해도 안내 문구는 그대로 보여 준다)."""
+    try:
+        os.startfile('ms-settings:appsfeatures')
+    except Exception as e:
+        log.debug(f"설정 앱을 열지 못했습니다: {e}")
+
+
+def run_uninstall(uninstall_string, user_scope=False):
     """제거 프로그램을 실행한다.
 
     셸을 거치지 않는다. 대부분의 언인스톨러는 자체 UI 를 띄우므로 기동만 확인하고
@@ -208,6 +228,15 @@ def run_uninstall(uninstall_string):
                     "message": f"제거 명령의 실행 파일 위치가 적혀 있지 않습니다: {exe}\n"
                                "Windows 의 '설정 → 앱' 에서 제거해 주세요."}
         args = [candidate] + args[1:]
+
+    if user_scope or not _admin_only_path(args[0]):
+        # 이 계정에만 설치된 프로그램이거나 제거 프로그램이 사용자 폴더(%LOCALAPPDATA%, C:\Games 같은 곳)에 있다.
+        # 그 exe 는 일반 권한 프로그램도 바꿔 넣을 수 있어, 관리자 권한인 이 앱이 실행하면 권한을 넘겨주게 된다.
+        # Windows 설정 → 앱은 이런 제거 프로그램을 일반 권한으로 실행한다. 그쪽을 열어 준다.
+        _open_apps_settings()
+        return {"success": False, "needsSettings": True,
+                "message": "이 프로그램은 사용자 폴더에 설치돼 있어 APEX CARE(관리자 권한)가 제거 프로그램을 실행하지 않습니다. "
+                           "열린 Windows 설정 → 앱에서 제거한 뒤 '제거를 마쳤습니다' 를 누르면 남은 폴더를 찾아 드립니다."}
 
     try:
         proc = subprocess.Popen(args, shell=False)

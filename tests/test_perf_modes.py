@@ -353,3 +353,15 @@ def test_mode_card_preview_does_not_say_it_already_applied():
     for mode in ('gaming', 'eco'):
         note = cards[mode]['note']
         assert '적용하면' in note and '적용했습니다' not in note, note
+
+
+def test_failed_and_restored_counts_use_the_same_unit():
+    # 한 설정의 전원 연결·배터리 값이 둘 다 실패하면 '실패 1개' 다(예전에는 2개, 되돌림과 합이 적용 수를 넘었다)
+    _seed_plans()
+    g = perf_modes.apply_mode('gaming')
+    assert g['success']
+    for side in ('ac', 'dc'):
+        POWER.fail_write.add((fakewin.PLAN_HIGH_PERF, ss.PROCTHROTTLEMIN, side))
+    s = perf_modes.apply_mode('standard')
+    assert s['failedCount'] == 1 and s['restoredCount'] == g['appliedCount'] - 1
+    assert '1개를 되돌리지 못했습니다' in s['message']

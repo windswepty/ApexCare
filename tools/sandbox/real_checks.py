@@ -900,6 +900,104 @@ def journal_location():
     return verdict(problems, diff(before, snapshot('journal_after')))
 
 
+@check('제거 전 되돌리기: 로그아웃한 다른 계정이 끈 시작 프로그램을 그 계정의 레지스트리에서 되돌림')
+def other_account_startup():
+    """샌드박스에서만: 버리는 지역 계정과 프로필을 만들고, 그 계정의 NTUSER.DAT 에 '꺼짐' 표시를 써 둔 뒤
+    제거 전 되돌리기(_revert_other_accounts)가 하이브를 올려 지우고 반드시 내리는지 본다."""
+    import secrets
+    from backend import uninstall_prep
+    sysroot = os.environ.get('SystemRoot') or r'C:\Windows'
+    net = os.path.join(sysroot, 'System32', 'net.exe')
+    user = 'apexsbxkid'
+    approved = r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    disabled = b'\x03\x00\x00\x00' + b'\x11' * 8
+    problems, sid, home = [], None, None
+    before = snapshot('other_account_before')
+
+    def hive_value(ntuser):
+        temp = 'APEXSBX_' + secrets.token_hex(4)
+        uninstall_prep._load_hive(temp, ntuser)
+        try:
+            with winreg.OpenKey(winreg.HKEY_USERS, temp + '\\' + approved) as k:
+                return winreg.QueryValueEx(k, 'ApexSbxKid')[0]
+        except FileNotFoundError:
+            return None
+        finally:
+            if not uninstall_prep._unload_hive(temp):
+                problems.append(f'점검용으로 올린 {temp} 를 내리지 못했습니다')
+
+    try:
+        # 암호가 14자를 넘으면 net.exe 가 Y/N 을 물어 창 없이 실패한다('올바른 응답이 제공되지 않았습니다'). 14자로 맞춘다
+        r = subprocess.run([net, 'user', user, 'Ax9!' + secrets.token_hex(5), '/add'], shell=False,
+                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+        if r.returncode != 0:
+            return 'FAIL', f'점검용 계정을 만들지 못했습니다: {r.stderr.decode("cp949", "replace")[-200:]}', []
+        ps = os.path.join(sysroot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+        r = subprocess.run([ps, '-NoProfile', '-Command', f'(Get-LocalUser {user}).SID.Value'], shell=False,
+                           capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+        sid = (r.stdout or '').strip()
+        buf = ctypes.create_unicode_buffer(260)
+        ue = ctypes.WinDLL('userenv', use_last_error=True)
+        ue.CreateProfile.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+        hr = ue.CreateProfile(sid, user, buf, 260)
+        home = buf.value
+        ntuser = os.path.join(home, 'NTUSER.DAT') if home else ''
+        if hr != 0 or not os.path.isfile(ntuser):
+            return 'FAIL', f'점검용 프로필을 만들지 못했습니다 (CreateProfile 0x{hr & 0xFFFFFFFF:08X}, {home})', []
+        if not uninstall_prep._enable_privileges('SeBackupPrivilege', 'SeRestorePrivilege'):
+            return 'FAIL', '레지스트리 하이브를 올릴 권한을 켜지 못했습니다', []
+
+        # 그 계정이 APEX CARE 로 시작 프로그램을 꺼 둔 상태: 하이브에 '꺼짐' 표시, 그 계정의 저널에 '원래 없었음'
+        temp = 'APEXSBX_' + secrets.token_hex(4)
+        uninstall_prep._load_hive(temp, ntuser)
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_USERS, temp + '\\' + approved, 0, winreg.KEY_WRITE) as k:
+                winreg.SetValueEx(k, 'ApexSbxKid', 0, winreg.REG_BINARY, disabled)
+        finally:
+            if not uninstall_prep._unload_hive(temp):
+                problems.append('준비 중에 올린 하이브를 내리지 못했습니다')
+        journal = os.path.join(home, 'AppData', 'Roaming', 'APEX_CARE_DATA', 'system_state.json')
+        os.makedirs(os.path.dirname(journal), exist_ok=True)
+        with open(journal, 'w', encoding='utf-8') as f:
+            json.dump({'version': 1, 'entries': {f'reg:HKCU\\{approved}\\ApexSbxKid': {
+                'kind': 'registry', 'group': 'startup:HKCU:ApexSbxKid', 'hive': 'HKCU', 'path': approved,
+                'name': 'ApexSbxKid', 'existed': False, 'value': None, 'type': 3, 'created_keys': []}}}, f)
+        if hive_value(ntuser) != disabled:
+            problems.append('준비: 그 계정 하이브에 꺼짐 표시가 써지지 않았습니다')
+
+        steps = [x for x in uninstall_prep._revert_other_accounts() if user in x['name']]
+        if not steps or not steps[0]['ok']:
+            problems.append(f'되돌리기 결과: {steps}')
+        if hive_value(ntuser) is not None:
+            problems.append('되돌린 뒤에도 그 계정 하이브에 꺼짐 표시가 남았습니다')
+        with open(journal, encoding='utf-8') as f:
+            if json.load(f).get('entries'):
+                problems.append('그 계정의 저널에 되돌린 기록이 남았습니다')
+        left = []
+        i = 0
+        while True:
+            try:
+                n = winreg.EnumKey(winreg.HKEY_USERS, i)
+            except OSError:
+                break
+            if n.upper().startswith(('APEXCARE_', 'APEXSBX_')):
+                left.append(n)
+            i += 1
+        if left:
+            problems.append(f'올린 하이브가 남았습니다: {left}')
+    finally:
+        if sid:
+            try:
+                ue = ctypes.WinDLL('userenv', use_last_error=True)
+                ue.DeleteProfileW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p]
+                ue.DeleteProfileW(sid, None, None)
+            except Exception as e:
+                problems.append(f'점검용 프로필을 지우지 못했습니다: {e}')
+        subprocess.run([net, 'user', user, '/delete'], shell=False, capture_output=True,
+                       creationflags=CREATE_NO_WINDOW, timeout=60)
+    return verdict(problems, diff(before, snapshot('other_account_after')))
+
+
 @check('원클릭 최적화: Windows Update 캐시·Prefetch 는 건드리지 않음')
 def one_click():
     from backend import optimizer

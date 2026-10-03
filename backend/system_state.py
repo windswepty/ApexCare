@@ -81,17 +81,26 @@ def _locked(fn):
 # 그 뒤로 그 파일에서는 시작 프로그램 표시 기록만 읽는다.
 _USER_PATH = 'software\\microsoft\\windows\\currentversion\\explorer\\startupapproved\\'
 _KINDS = ('registry', 'power_value', 'power_plan', 'service')
+# 종류별 '원래 값' 을 담는 칸(예전 기록과 합칠 때 쓴다). group·why·set_to 는 지금 기록의 것을 둔다.
+_ORIGINAL_FIELDS = {'registry': ('existed', 'value', 'type', 'created_keys'), 'power_value': ('value',),
+                    'power_plan': ('value',), 'service': ('start', 'delayed', 'value')}
 
 
 def _is_user_entry(e):
     return isinstance(e, dict) and e.get('kind') == 'registry' and e.get('hive') == 'HKCU'
 
 
-def _trusted_user_entry(e):
+def _user_key(e):
+    return f"reg:HKCU\\{e['path']}\\{e['name']}"
+
+
+def _trusted_user_entry(e, key=None):
     """계정 파일의 기록 중 쓰는 것: 이 계정의 시작 프로그램 표시뿐. HKCU 의 다른 곳(관리자만 쓰는 Software\\Policies 등)을
-    관리자 권한의 되돌리기로 쓰게 하지 않는다."""
-    return (_is_user_entry(e) and isinstance(e.get('path'), str) and isinstance(e.get('name'), str)
-            and e['path'].lower().startswith(_USER_PATH))
+    관리자 권한의 되돌리기로 쓰게 하지 않는다. key 를 주면 키 이름도 그 기록의 정규 이름과 같아야 한다
+    (키가 'svc:sysmain' 인데 내용은 시작 프로그램 표시인 기록이 PC 저널의 같은 키를 가리지 못하게)."""
+    ok = (_is_user_entry(e) and isinstance(e.get('path'), str) and isinstance(e.get('name'), str)
+          and e['path'].lower().startswith(_USER_PATH))
+    return ok and (key is None or key == _user_key(e))
 
 
 def _account_sid():
@@ -152,25 +161,40 @@ def _import_legacy(machine, user, entries):
     """예전 버전이 이 계정의 파일에 남긴 PC 쪽 기록을 PC 저널로 옮긴다. 계정마다 한 번만.
 
     한 번 옮긴 뒤 그 파일에 생긴 PC 쪽 기록은 이 앱이 쓴 것이 아니다(새 버전은 거기 쓰지 않는다). 쓰지 않는다.
-    PC 저널에 같은 키가 이미 있으면 그쪽이 먼저 기록한 원래 값이라 그대로 둔다.
+    예전 기록이 없어도 처음 읽을 때 '옮김' 으로 표시한다. 예전에는 옮길 것이 있을 때만 표시해, 새로 설치한 계정은
+    나중에 일반 권한 프로그램이 그 파일에 써 넣은 PC 쪽 기록을 계속 받아들였다.
+    PC 저널에 같은 키가 이미 있으면 예전 기록의 원래 값을 넣는다. 예전 기록이 더 먼저(새 버전을 쓰기 전에) 남긴 것이라,
+    PC 저널의 값은 예전 버전이 이미 바꿔 둔 값이다.
     """
-    legacy = {k: e for k, e in user['entries'].items() if isinstance(e, dict) and not _is_user_entry(e)}
-    if not legacy:
-        return
     sid = _account_sid()
     if not sid or sid in machine['imported']:
-        if sid:
+        legacy = [k for k, e in user['entries'].items() if isinstance(e, dict) and not _is_user_entry(e)]
+        if sid and legacy:
             log.warning(f"계정 저널에 PC 쪽 기록 {len(legacy)}개가 있지만 이미 옮긴 계정이라 쓰지 않습니다")
         return
-    moved = {k: e for k, e in legacy.items() if e.get('kind') in _KINDS and k not in machine['entries']}
+    legacy = {k: e for k, e in user['entries'].items() if isinstance(e, dict) and not _is_user_entry(e)}
+    moved = {}
+    for k, e in legacy.items():
+        if e.get('kind') not in _KINDS:
+            continue
+        have = machine['entries'].get(k)
+        if have is None:
+            moved[k] = e
+        elif have.get('kind') == e.get('kind'):
+            merged = dict(have)
+            for f in _ORIGINAL_FIELDS.get(e['kind'], ()):
+                if f in e:
+                    merged[f] = e[f]
+            moved[k] = merged
     new = dict(machine, entries={**machine['entries'], **moved}, imported=machine['imported'] + [sid])
     if not machine_store.write(_MACHINE_VALUE, new):
         return                                  # 다음에 다시 시도한다
     machine.update(new)
     entries.update(moved)
-    log.info(f"예전 저널의 PC 쪽 기록 {len(moved)}개를 옮겼습니다")
-    # 계정 파일에서는 뺀다. 못 빼도 이 계정은 옮긴 것으로 기록됐으므로 다시 쓰이지 않는다.
-    _save_user_file({'version': 1, 'entries': {k: e for k, e in user['entries'].items() if k not in legacy}})
+    if legacy:
+        log.info(f"예전 저널의 PC 쪽 기록 {len(moved)}개를 옮겼습니다")
+        # 계정 파일에서는 뺀다. 못 빼도 이 계정은 옮긴 것으로 기록됐으므로 다시 쓰이지 않는다.
+        _save_user_file({'version': 1, 'entries': {k: e for k, e in user['entries'].items() if k not in legacy}})
 
 
 def _load():
@@ -183,10 +207,10 @@ def _load():
         user = _load_user_file()
         entries = dict(machine['entries'])
         for k, e in user['entries'].items():
-            if _trusted_user_entry(e):
+            if _trusted_user_entry(e, k) and k not in entries:
                 entries[k] = e
             elif _is_user_entry(e):
-                log.warning(f"계정 저널의 이 기록은 쓰지 않습니다(시작 프로그램 표시가 아님): {k}")
+                log.warning(f"계정 저널의 이 기록은 쓰지 않습니다(시작 프로그램 표시가 아니거나 PC 저널과 키가 겹침): {k}")
         _import_legacy(machine, user, entries)
         return {'version': 1, 'entries': entries}
 
@@ -200,12 +224,13 @@ def _save(data):
         except JournalUnreadable:
             return False
         ok = True
-        m_entries = {k: e for k, e in data['entries'].items() if not _is_user_entry(e)}
+        # 키와 내용이 모두 이 계정의 시작 프로그램 표시인 것만 계정 파일로, 나머지는 PC 저널로
+        m_entries = {k: e for k, e in data['entries'].items() if not _trusted_user_entry(e, k)}
         if machine['entries'] != m_entries:
             ok = machine_store.write(_MACHINE_VALUE, dict(machine, entries=m_entries))
         # 이 계정 파일에서 쓰지 않는 기록(아직 옮기지 못한 예전 기록 등)은 그대로 둔다
-        u_entries = {k: e for k, e in user['entries'].items() if not _trusted_user_entry(e)}
-        u_entries.update({k: e for k, e in data['entries'].items() if _is_user_entry(e)})
+        u_entries = {k: e for k, e in user['entries'].items() if not _trusted_user_entry(e, k)}
+        u_entries.update({k: e for k, e in data['entries'].items() if _trusted_user_entry(e, k)})
         if user['entries'] != u_entries:
             ok = _save_user_file({'version': 1, 'entries': u_entries}) and ok
         return ok
@@ -465,7 +490,7 @@ def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why='')
         existed, before, before_type = read_registry_strict(hive, path, name)
     except PermissionError:
         return {'ok': False, 'verified': False,
-                'reason': '원래 값을 읽을 권한이 없어 바꾸지 않았습니다(관리자 권한 필요)'}
+                'reason': '원래 값을 읽기가 거부되어 바꾸지 않았습니다(보안 정책이 이 값을 잠갔을 수 있습니다)'}
     except OSError as e:
         return {'ok': False, 'verified': False,
                 'reason': f'원래 값을 읽지 못해 바꾸지 않았습니다: {e}'}
@@ -484,7 +509,7 @@ def set_registry(hive, path, name, value, group, vtype=winreg.REG_DWORD, why='')
                                 winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
             winreg.SetValueEx(k, name, 0, vtype, value)
     except PermissionError:
-        return {'ok': False, 'verified': False, 'reason': '권한 부족(관리자 권한 필요)'}
+        return {'ok': False, 'verified': False, 'reason': '쓰기가 거부되었습니다(다른 프로그램이나 보안 정책이 이 값을 잠갔을 수 있습니다)'}
     except Exception as e:
         return {'ok': False, 'verified': False, 'reason': str(e)}
 
@@ -955,6 +980,61 @@ def _restore_registry(e):
     return None
 
 
+def restore_user_entries_under(base, entries):
+    """다른 계정의 하이브(HKU\\<SID> 또는 잠깐 올린 NTUSER.DAT) 아래에서 그 계정의 시작 프로그램 표시 기록을 되돌린다.
+
+    제거할 때만 쓴다. 이 계정의 저널(HKCU)과 같은 규칙이다: 원래 값이 있었으면 그 값으로, 없었으면 지우고,
+    되읽어 확인하고, 이 앱이 만든 키는 비었을 때만 지운다. 시작 프로그램 표시가 아닌 기록은 건드리지 않는다.
+    반환: (되돌린 키 목록, [{'key', 'reason'}])
+    """
+    done, failed, created = [], [], set()
+    for key, e in entries.items():
+        if not _trusted_user_entry(e):
+            failed.append({'key': key, 'reason': '시작 프로그램 표시 기록이 아니라 건드리지 않았습니다'})
+            continue
+        path, name = e['path'], e['name']
+        original = _dec(e.get('value'))
+        try:
+            if e.get('existed'):
+                if original is None:
+                    failed.append({'key': key, 'reason': '기록된 원래 값의 형식이 올바르지 않아 건드리지 않았습니다'})
+                    continue
+                with winreg.CreateKeyEx(base, path, 0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
+                    winreg.SetValueEx(k, name, 0, e.get('type') or winreg.REG_BINARY, original)
+            else:
+                try:
+                    with winreg.OpenKey(base, path, 0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as k:
+                        winreg.DeleteValue(k, name)
+                except FileNotFoundError:
+                    pass
+            try:
+                with winreg.OpenKey(base, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+                    now, _ = winreg.QueryValueEx(k, name)
+                exists = True
+            except FileNotFoundError:
+                exists, now = False, None
+        except OSError as ex:
+            failed.append({'key': key, 'reason': f'되돌리지 못했습니다: {ex}'})
+            continue
+        if e.get('existed') and (not exists or now != original):
+            failed.append({'key': key, 'reason': f'되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {original}, 실제 {now})'})
+            continue
+        if not e.get('existed') and exists:
+            failed.append({'key': key, 'reason': '원래 없던 값을 지웠지만 아직 남아 있습니다'})
+            continue
+        created.update(k for k in e.get('created_keys') or [] if isinstance(k, str))
+        done.append(key)
+    for path in sorted(created, key=lambda p: p.count('\\'), reverse=True):
+        try:
+            with winreg.OpenKey(base, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+                subkeys, values, _ = winreg.QueryInfoKey(k)
+            if not subkeys and not values:
+                winreg.DeleteKeyEx(base, path, winreg.KEY_WOW64_64KEY, 0)
+        except OSError:
+            pass
+    return done, failed
+
+
 @_locked
 def _restore(predicate):
     try:
@@ -965,6 +1045,7 @@ def _restore(predicate):
                 'failed': [{'key': 'journal', 'reason': f'변경 기록 파일을 읽지 못해 되돌리지 못했습니다 ({e})'}]}
     entries = data['entries']
     done, failed, plans_touched = [], [], set()
+    fill_set_to = {}
     created_keys = set()        # 되돌린 값을 쓰면서 이 앱이 만들었던 키. 끝에 비어 있으면 지운다.
 
     # 전원 플랜 전환은 마지막에 해야 한다. 먼저 하면 세부값을 엉뚱한 플랜에 쓴다.
@@ -1016,7 +1097,11 @@ def _restore(predicate):
                         # 원래 플랜이 지워졌다. 이 앱이 바꿔 둔 플랜이 아직 켜져 있으면 사용자가 골라야 한다(한 번 안내).
                         # 사용자가 이미 다른 플랜을 골랐으면 돌아갈 곳이 없으니 기록을 정리한다. 예전에는 기록이 영원히
                         # 남아 이후 모든 모드 전환과 제거 전 되돌리기가 실패했다.
-                        if active and active == str(e.get('set_to') or '').lower():
+                        # 바꿔 둔 플랜을 모르는 예전 기록은 지금 켜진 플랜이 그것이라고 보고 한 번 안내한다
+                        set_to = e.get('set_to') if 'set_to' in e else active
+                        if 'set_to' not in e and active:
+                            fill_set_to[key] = active      # 다음에는 사용자가 다른 플랜을 골랐는지 알 수 있다
+                        if active and active == str(set_to or '').lower():
                             name = KNOWN_PLANS.get(original, original)
                             failed.append({'key': key, 'reason': (
                                 f"원래 전원 플랜({name})이 이 PC 에서 삭제되어 되돌릴 수 없습니다. "
@@ -1042,7 +1127,7 @@ def _restore(predicate):
             else:
                 failed.append({'key': key, 'reason': f'알 수 없는 종류: {kind}'})
         except PermissionError:
-            failed.append({'key': key, 'reason': '권한 부족(관리자 권한으로 실행하세요)'})
+            failed.append({'key': key, 'reason': '쓰기가 거부되었습니다(다른 프로그램이나 보안 정책이 이 값을 잠갔을 수 있습니다)'})
         except Exception as ex:
             failed.append({'key': key, 'reason': str(ex)})
 
@@ -1059,6 +1144,22 @@ def _restore(predicate):
     # 성공한 것만 저널에서 지운다. 실패한 건 남겨야 다음에 다시 시도할 수 있다.
     if done:
         _forget_and_hand_over(done, kept)
+    if fill_set_to:
+        try:
+            data = _load()
+            for key, plan in fill_set_to.items():
+                if key in data['entries']:
+                    data['entries'][key]['set_to'] = plan
+            _save(data)
+        except JournalUnreadable:
+            pass
 
-    return {'ok': not failed, 'restored': len(done), 'restored_settings': count_settings(done), 'failed': failed,
-            'remaining': len(pending_changes())}
+    # 개수는 설정 단위로(전원 연결·배터리 값을 하나로). 한쪽만 실패한 설정은 되돌린 것으로 세지 않는다.
+    bad = {setting_of(f['key']) for f in failed if isinstance(f.get('key'), str)}
+    for f in failed:
+        e = entries.get(f.get('key'))
+        if isinstance(e, dict) and e.get('why'):
+            f.setdefault('what', e['why'])            # 화면이 어느 설정인지 보여 줄 수 있게
+    return {'ok': not failed, 'restored': len(done),
+            'restored_settings': len({setting_of(k) for k in done} - bad), 'failed_settings': len(bad),
+            'failed': failed, 'remaining': len(pending_changes())}

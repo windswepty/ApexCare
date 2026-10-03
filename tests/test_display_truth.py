@@ -281,6 +281,18 @@ def test_sfc_four_line_result_keeps_its_first_line():
             '오프라인 복구의 경우 세부 정보는 /OFFLOGFILE 플래그가 제공하는 로그 파일에 포함되어 있습니다.\r\n')
     summary = system_repair.summarize_output(text)
     assert summary.startswith('Windows 리소스 보호에서 손상된 파일을 찾았지만 그중 일부를 복구할 수 없습니다.')
+    assert system_repair.summarize_failure(text).startswith('Windows 리소스 보호에서 손상된 파일을')
+
+
+def test_dism_failure_shows_the_cause_not_only_the_log_path():
+    # 결과 문단 하나만 쓰면 'The DISM log file can be found at …' 만 남았다
+    text = ('[==========================84.9%=============             ]\r\n\r\n'
+            'Error: 0x800f081f\r\n\r\n'
+            'The source files could not be found.\r\n'
+            'Use the "Source" option to specify the location of the files that are required to restore the feature.\r\n\r\n'
+            'The DISM log file can be found at C:\\WINDOWS\\Logs\\DISM\\dism.log\r\n')
+    why = system_repair.summarize_failure(text)
+    assert why.startswith('Error: 0x800f081f The source files could not be found.') and 'dism.log' in why
 
 
 def test_repair_tools_are_never_killed_and_report_real_elapsed_time(monkeypatch):
@@ -428,7 +440,7 @@ def program_files(tmp_path, monkeypatch):
 def test_uninstall_runs_the_registered_command_not_a_ui_string(monkeypatch, program_files):
     _register_app('FooApp', 'Foo App', r'"C:\Program Files\Foo\uninst.exe" /S')
     ran = []
-    monkeypatch.setattr(uninstaller, 'run_uninstall', lambda s: ran.append(s) or {'success': True})
+    monkeypatch.setattr(uninstaller, 'run_uninstall', lambda s, user_scope=False: ran.append(s) or {'success': True})
 
     assert uninstaller.uninstall_by_name('Foo App')['success']
     assert ran == [r'"C:\Program Files\Foo\uninst.exe" /S']
