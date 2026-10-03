@@ -677,6 +677,7 @@ def test_stats_use_the_windows_drive_and_survive_a_missing_c_drive(monkeypatch):
         raise FileNotFoundError(path)                  # 이 PC 에는 그 드라이브가 없다
     monkeypatch.setenv('SystemDrive', 'D:')
     monkeypatch.setattr(system_monitor.psutil, 'disk_usage', disk_usage)
+    monkeypatch.setattr(system_monitor.psutil, 'disk_partitions', lambda all=False: [])   # 드라이브 목록은 아래 테스트가 본다
     monkeypatch.setattr(system_monitor, 'memory_lists', lambda: None)
 
     st = system_monitor.get_system_stats()
@@ -684,3 +685,40 @@ def test_stats_use_the_windows_drive_and_survive_a_missing_c_drive(monkeypatch):
     assert seen == ['D:\\']
     # 예전에는 C: 를 못 읽으면 통계 전체가 None 이라 앱이 로딩 화면에서 멈췄다
     assert st is not None and st['systemDrive'] == 'D:' and st['diskPct'] is None and st['ramTotalGB']
+
+
+def test_dashboard_lists_every_drive_and_follows_plugging_in_and_out(monkeypatch):
+    # 예전에는 Windows 드라이브(C:)만 보여 D: 가 있는 PC 에서도 C: 만 보였다(사용자 보고)
+    import types
+    from backend import system_monitor
+    GB = 1024 ** 3
+    parts = [types.SimpleNamespace(mountpoint='D:\\', fstype='NTFS', opts='rw,fixed'),
+             types.SimpleNamespace(mountpoint='C:\\', fstype='NTFS', opts='rw,fixed'),
+             types.SimpleNamespace(mountpoint='E:\\', fstype='', opts='cdrom'),             # 빈 CD 드라이브
+             types.SimpleNamespace(mountpoint='Z:\\', fstype='NTFS', opts='rw,remote')]     # 네트워크(끊기면 멈춘다)
+    sizes = {'C:\\': (465, 380), 'D:\\': (931, 120), 'F:\\': (58, 10)}
+    read = []
+
+    def disk_usage(path):
+        read.append(path)
+        total, used = sizes[path]
+        return types.SimpleNamespace(total=total * GB, used=used * GB, free=(total - used) * GB,
+                                     percent=round(used / total * 100, 1))
+    monkeypatch.setenv('SystemDrive', 'C:')
+    monkeypatch.setattr(system_monitor.psutil, 'disk_partitions', lambda all=False: list(parts))
+    monkeypatch.setattr(system_monitor.psutil, 'disk_usage', disk_usage)
+    monkeypatch.setattr(system_monitor, 'memory_lists', lambda: None)
+
+    drives = system_monitor.get_system_stats()['drives']
+    assert [d['label'] for d in drives] == ['C:', 'D:']                      # 문자 순, CD·네트워크 제외
+    assert drives[0]['system'] and not drives[1]['system'] and drives[1]['totalGB'] == 931
+    assert 'Z:\\' not in read and 'E:\\' not in read                          # 네트워크·CD 는 읽지도 않는다
+
+    parts.append(types.SimpleNamespace(mountpoint='F:\\', fstype='exFAT', opts='rw,removable'))   # USB 를 꽂았다
+    drives = system_monitor.get_system_stats()['drives']
+    assert [d['label'] for d in drives] == ['C:', 'D:', 'F:'] and drives[2]['removable']
+    parts.pop()                                                                # 뺐다
+    assert [d['label'] for d in system_monitor.get_system_stats()['drives']] == ['C:', 'D:']
+
+    dash = _read('src/components/Dashboard.jsx')
+    assert 'sysInfo.drives.map' in dash and "d.system ? ' (Windows)'" in dash and "' (이동식)'" in dash

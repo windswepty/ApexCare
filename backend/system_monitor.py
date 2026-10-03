@@ -410,6 +410,18 @@ def system_drive():
     return d if re.fullmatch(r'[A-Za-z]:', d) else 'C:'
 
 
+def _all_drives():
+    """대시보드용 드라이브 목록(문자 순). 매체 종류(SSD/HDD)는 느려서 묻지 않는다. 읽지 못하면 None."""
+    try:
+        from backend import storage
+        drives = storage.get_drives(detect_media=False)
+    except Exception as e:
+        log.debug(f"드라이브 목록을 읽지 못했습니다: {e}")
+        return None
+    keep = ('label', 'system', 'removable', 'totalGB', 'usedGB', 'freeGB', 'percent')
+    return sorted(({k: d[k] for k in keep} for d in drives), key=lambda d: d['label'].upper())
+
+
 def get_system_stats():
     """Get system stats using only psutil and WMI for GPU."""
     note_demand()
@@ -466,6 +478,8 @@ def get_system_stats():
             # 반올림한 전체에서 반올림한 사용량을 빼면 1GB 씩 어긋난다. 남은 용량은 따로 잰다.
             'diskFreeGB': round(disk.free / (1024**3)) if disk else None,
             'diskPct': round(disk.percent) if disk else None,
+            # 연결된 모든 드라이브(꽂거나 빼면 다음 갱신 때 반영). 읽지 못하면 None — 화면은 위의 시스템 드라이브만 보여 준다
+            'drives': _all_drives(),
             'gpuUsage': _fresh_gpu_usage(),       # None = 측정 중 또는 측정 불가(gpuUsageState 로 구분)
             'gpuUsageState': _gpu_state,
             'gpuModel': _get_gpu_model(),

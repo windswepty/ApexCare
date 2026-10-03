@@ -60,16 +60,24 @@ def _probe_media_type(mountpoint):
 
 
 def get_drives(detect_media=True):
-    """로컬 드라이브별 용량. 네트워크·CD 드라이브는 제외한다."""
+    """로컬 드라이브별 용량. 네트워크·CD 드라이브는 제외한다(연결이 끊긴 네트워크 드라이브는 읽다가 오래 멈춘다).
+
+    대시보드가 3초마다 부른다. 드라이브를 꽂거나 빼면 다음 호출부터 목록에 생기거나 빠진다.
+    """
     drives = []
+    system = (os.environ.get('SystemDrive') or 'C:').strip().rstrip('\\/').upper()
     for part in psutil.disk_partitions(all=False):
         try:
-            if not part.fstype or 'cdrom' in (part.opts or ''):
+            opts = (part.opts or '').lower()
+            if not part.fstype or 'cdrom' in opts or 'remote' in opts:
                 continue
             usage = psutil.disk_usage(part.mountpoint)
+            label = os.path.splitdrive(part.mountpoint)[0] or part.mountpoint
             drives.append({
                 'mount': part.mountpoint,
-                'label': os.path.splitdrive(part.mountpoint)[0] or part.mountpoint,
+                'label': label,
+                'system': label.upper() == system,          # Windows 가 설치된 드라이브
+                'removable': 'removable' in opts,            # USB 메모리·SD 카드 등
                 'fstype': part.fstype,
                 'totalGB': round(usage.total / 1024 ** 3, 1),
                 'usedGB': round(usage.used / 1024 ** 3, 1),

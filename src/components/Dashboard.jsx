@@ -91,6 +91,17 @@ function ramTotalLabel(info) {
   return `${usable.toFixed(1)} GB`;
 }
 
+// 드라이브 용량 표기. 1000 GB 를 넘으면 TB 로(값은 1024 단위 — 탐색기와 같다)
+function sizeText(v) {
+  if (!isNum(v)) return '?';
+  if (v >= 1000) return `${(v / 1024).toFixed(1)} TB`;
+  return v >= 100 ? `${Math.round(v)} GB` : `${v.toFixed(1)} GB`;
+}
+
+function driveName(d) {
+  return `${d.label} 드라이브${d.system ? ' (Windows)' : d.removable ? ' (이동식)' : ''}`;
+}
+
 export default function Dashboard({ addToast, active = true }) {
   // 예전에는 CPU·RAM·디스크 사용률로 임의 공식을 만들어 'Health Score' 와
   // '최상 / 최적화 필요' 를 판정했다. 측정한 건강 상태가 아니므로 없앴다.
@@ -130,7 +141,8 @@ export default function Dashboard({ addToast, active = true }) {
     diskTotalGB: null,
     diskUsedGB: null,
     diskFreeGB: null,
-    systemDrive: null
+    systemDrive: null,
+    drives: null           // 연결된 모든 드라이브. 꽂거나 빼면 다음 갱신(3초) 때 생기고 사라진다
   });
   // 받기 전에는 '…', 받았는데 값이 없으면(이 PC 에서 읽지 못함) '?'. 예전에는 끝날 일 없는 '…' 가 계속 보였다.
   const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : sysInfo.cpuModel !== '확인 중…' ? '?' : '…');
@@ -213,7 +225,8 @@ export default function Dashboard({ addToast, active = true }) {
               // 백엔드가 직접 잰 남은 용량. 반올림한 전체 − 반올림한 사용량으로 계산하면 1GB 씩 어긋났다.
               diskFreeGB: stats.diskFreeGB ?? null,
               // Windows 가 설치된 드라이브(C: 가 아닐 수 있다)
-              systemDrive: stats.systemDrive || null
+              systemDrive: stats.systemDrive || null,
+              drives: Array.isArray(stats.drives) && stats.drives.length ? stats.drives : null
             });
           }
         } catch {
@@ -548,14 +561,21 @@ export default function Dashboard({ addToast, active = true }) {
             <span className="text-black dark:text-white font-medium text-right">{ramTotalLabel(sysInfo)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            {/* Windows 가 설치된 드라이브만 잰 값이다. 예전에는 'Storage' 라고 써서 전체 저장 장치 용량처럼 보였다. */}
-            <span className="text-gray-500 dark:text-gray-400">{sysInfo.systemDrive || '시스템'} 드라이브</span>
-            <span className="text-black dark:text-white font-medium text-right">{gb(sysInfo.diskTotalGB)}</span>
-          </div>
-          <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
             <span className="text-gray-500 dark:text-gray-400">코어 / 스레드</span>
             <span className="text-black dark:text-white font-medium text-right">{coresText}</span>
           </div>
+          {/* 연결된 드라이브마다 한 줄. 예전에는 Windows 드라이브(C:)만 보였다. 목록을 못 받으면 Windows 드라이브만 */}
+          {sysInfo.drives ? sysInfo.drives.map((d) => (
+            <div key={d.label} className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+              <span className="text-gray-500 dark:text-gray-400">{driveName(d)}</span>
+              <span className="text-black dark:text-white font-medium text-right">{sizeText(d.totalGB)}</span>
+            </div>
+          )) : (
+            <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
+              <span className="text-gray-500 dark:text-gray-400">{sysInfo.systemDrive || '시스템'} 드라이브</span>
+              <span className="text-black dark:text-white font-medium text-right">{gb(sysInfo.diskTotalGB)}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -645,7 +665,38 @@ export default function Dashboard({ addToast, active = true }) {
         </div>
       </div>
 
-      {/* 4. Disk Storage */}
+      {/* 4. Disk Storage — 드라이브가 여럿이면 드라이브마다 막대 하나 */}
+      {sysInfo.drives && sysInfo.drives.length > 1 ? (
+      <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="p-3 rounded-2xl bg-gray-100 dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-black dark:text-white">
+            <HardDrive className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-base text-black dark:text-white">드라이브 {sysInfo.drives.length}개</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              전체 {sizeText(sysInfo.drives.reduce((s, d) => s + (d.totalGB || 0), 0))} · 남은 용량 {sizeText(sysInfo.drives.reduce((s, d) => s + (d.freeGB || 0), 0))}
+            </p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {sysInfo.drives.map((d) => (
+            <div key={d.label}>
+              <div className="flex items-baseline justify-between gap-3 text-sm mb-1">
+                <span className="font-semibold text-black dark:text-white truncate">{driveName(d)}</span>
+                <span className="font-mono text-gray-500 dark:text-gray-400 shrink-0">
+                  {sizeText(d.usedGB)} / {sizeText(d.totalGB)} · <span className="font-bold text-black dark:text-white">{isNum(d.percent) ? `${Math.round(d.percent)}%` : '?'}</span>
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                <div className={`${getUsageColor(d.percent)} h-full rounded-full transition-all duration-500`} style={{ width: barWidth(d.percent) }}></div>
+              </div>
+              <div className="text-[0.6875rem] text-gray-500 dark:text-gray-400 mt-0.5">남은 용량 {sizeText(d.freeGB)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      ) : (
       <div className="md:col-span-6 glass-panel p-6 relative overflow-hidden flex flex-col justify-between hover:border-black/20 dark:hover:border-white/20 transition-all duration-300">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
@@ -672,6 +723,7 @@ export default function Dashboard({ addToast, active = true }) {
           <span>남은 용량: {gb(sysInfo.diskFreeGB)}</span>
         </div>
       </div>
+      )}
 
       </div>
     </div>
