@@ -193,7 +193,7 @@ def test_ui_background_scale_and_motion_are_validated_and_saved():
     # 손으로 고친 이상한 값은 기본값으로 읽는다
     cm.update_config(lambda c: c.update(ui_scale=9999, ui_background='#zzzzzz', ui_reduce_motion='1'))
     assert cm.get_ui_appearance() == {'theme': 'cyan', 'accent': None, 'background': None,
-                                      'scale': 100, 'reduceMotion': False}
+                                      'scale': 100, 'reduceMotion': False, 'icon': ''}
 
 
 def test_reset_ui_appearance_puts_everything_back_at_once(monkeypatch):
@@ -202,8 +202,20 @@ def test_reset_ui_appearance_puts_everything_back_at_once(monkeypatch):
     cm.set_ui_background('#2e1065')
     cm.set_ui_scale(110)
     cm.set_ui_reduce_motion(True)
+    cm.set_ui_icon('#FF8800')
     r = cm.reset_ui_appearance()
     assert r['success'] and r['theme'] == 'cyan' and r['accent'] is None and r['background'] is None
-    assert r['scale'] == 100 and r['reduceMotion'] is False
+    assert r['scale'] == 100 and r['reduceMotion'] is False and r['icon'] == ''
     monkeypatch.setattr(cm, 'save_config', lambda c: False)
     assert cm.reset_ui_appearance()['success'] is False and cm.set_ui_scale(90)['success'] is False
+
+
+def test_ui_icon_accepts_only_presets_and_colors():
+    for ok in ('accent', 'dark', '#FF8800', ''):
+        assert cm.set_ui_icon(ok)['success'], ok
+    assert cm.set_ui_icon('#ff8800')['success'] and cm.get_ui_icon() == '#ff8800'
+    for bad in ('neon', '#ff88', 12, True):
+        assert cm.set_ui_icon(bad)['success'] is False, bad
+    assert cm.get_ui_icon() == '#ff8800'
+    cm.update_config(lambda c: c.__setitem__('ui_icon', 'javascript:alert(1)'))      # 손으로 고친 값
+    assert cm.get_ui_icon() == ''

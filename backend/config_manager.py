@@ -37,6 +37,8 @@ DEFAULT_CONFIG = {
     "ui_scale": 100,
     # 움직임 줄이기(애니메이션·부드러운 스크롤 끄기)
     "ui_reduce_motion": False,
+    # 앱 아이콘 색: "" 기본 | "accent" 강조색 | "dark" 어두운 바탕 | "#rrggbb" 직접 고른 바탕색
+    "ui_icon": "",
     # 초기 설정 마법사를 한 번 닫았는지. 예전에는 앱을 켤 때마다 마법사가 떴다.
     "setup_wizard_done": False,
 }
@@ -392,13 +394,36 @@ def set_ui_reduce_motion(value):
     return {"success": True, "reduceMotion": value}
 
 
+_ICON_PRESETS = ("", "accent", "dark")
+
+
+def get_ui_icon():
+    value = load_config().get("ui_icon") or ""
+    if value in _ICON_PRESETS:
+        return value
+    return value.lower() if isinstance(value, str) and _HEX_RE.match(value) else ""
+
+
+def set_ui_icon(value):
+    """앱 아이콘 색을 저장한다. 정해 둔 값이나 #rrggbb 만 받는다. 다시 읽어 확인한다."""
+    if value is None:
+        value = ""
+    if not isinstance(value, str) or not (value in _ICON_PRESETS or _HEX_RE.match(value)):
+        return {"success": False, "message": f"아이콘 색 값이 올바르지 않습니다: {value}"}
+    value = value.lower()
+    if not update_config(lambda c: c.__setitem__("ui_icon", value)) or load_config().get("ui_icon") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 아이콘 색으로 열립니다."}
+    return {"success": True, "icon": value}
+
+
 def get_ui_appearance():
-    """화면 설정 전부(색 조합·강조색·배경색·크기·움직임 줄이기)."""
+    """화면 설정 전부(색 조합·강조색·배경색·크기·움직임 줄이기·아이콘 색)."""
     return {"theme": get_ui_theme(), "accent": get_ui_accent(), "background": get_ui_background(),
-            "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion()}
+            "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion(), "icon": get_ui_icon()}
 
 
-_UI_DEFAULTS = {k: DEFAULT_CONFIG[k] for k in ("ui_theme", "ui_accent", "ui_background", "ui_scale", "ui_reduce_motion")}
+_UI_DEFAULTS = {k: DEFAULT_CONFIG[k] for k in ("ui_theme", "ui_accent", "ui_background", "ui_scale",
+                                               "ui_reduce_motion", "ui_icon")}
 
 
 def reset_ui_appearance():

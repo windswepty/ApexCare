@@ -89,6 +89,7 @@ const ACCENT_CACHE_KEY = 'apexcare.uiAccent';
 const BG_CACHE_KEY = 'apexcare.uiBackground';
 const SCALE_CACHE_KEY = 'apexcare.uiScale';
 const MOTION_CACHE_KEY = 'apexcare.uiReduceMotion';
+const ICON_CACHE_KEY = 'apexcare.uiIcon';
 export const HEX_RE = /^#[0-9a-f]{6}$/i;
 
 export function findTheme(id) {
@@ -287,6 +288,83 @@ export function applyTheme(id, accentHex = null, bgHex = null) {
   return { id: base.id, accent: usable, rejectedAccent: wanted && !usable ? wanted : null, background: usableBg };
 }
 
+// ── 앱 아이콘 색 ────────────────────────────────────────
+// 아이콘은 둥근 바탕(icon-tile.png)과 기호(icon-glyph.png) 두 겹의 마스크라 색을 따로 칠할 수 있다.
+// 설정 값: '' 기본(흰 바탕·검은 기호) | 'accent' 강조색 바탕 | 'dark' 어두운 바탕·강조색 기호 | '#rrggbb' 직접 고른 바탕색
+export const ICON_PRESETS = [
+  { id: '', name: '기본' },
+  { id: 'accent', name: '강조색' },
+  { id: 'dark', name: '어두운' },
+];
+
+// 바탕 위에서 더 잘 보이는 기호 색(검정·흰색)
+function glyphOn(tile) {
+  return contrast(tile, '#000000') >= contrast(tile, '#ffffff') ? '#000000' : '#ffffff';
+}
+
+export function iconColors(setting, theme) {
+  if (setting === 'accent') return { tile: theme.accent[5], glyph: glyphOn(theme.accent[5]) };
+  if (setting === 'dark') return { tile: '#111111', glyph: theme.accent[4] };
+  if (setting && HEX_RE.test(setting)) return { tile: setting.toLowerCase(), glyph: glyphOn(setting.toLowerCase()) };
+  return { tile: '#ffffff', glyph: '#000000' };
+}
+
+export function isIconSetting(v) {
+  return v === '' || v === null || v === 'accent' || v === 'dark' || (typeof v === 'string' && HEX_RE.test(v));
+}
+
+// 지금 색 조합에 아이콘 색을 적용한다(화면 안의 모든 로고가 이 변수를 쓴다). { tile, glyph } 를 돌려준다.
+export function applyIcon(setting, themeId, accentHex = null, bgHex = null) {
+  const colors = iconColors(setting, composeTheme(themeId, accentHex, bgHex));
+  const style = document.documentElement.style;
+  style.setProperty('--icon-tile', colors.tile);
+  style.setProperty('--icon-glyph', colors.glyph);
+  try {
+    if (setting) localStorage.setItem(ICON_CACHE_KEY, setting);
+    else localStorage.removeItem(ICON_CACHE_KEY);
+  } catch { /* 무시 */ }
+  return colors;
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// 작업 표시줄·창 아이콘용 PNG(base64, 머리말 없이). 바탕·기호 마스크를 칠해 겹친다.
+export async function renderIconPng({ tile, glyph }, size = 256) {
+  const [tileImg, glyphImg] = await Promise.all([loadImage('/icon-tile.png'), loadImage('/icon-glyph.png')]);
+  const paint = (img, color) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0, size, size);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, size, size);
+    return c;
+  };
+  const out = document.createElement('canvas');
+  out.width = out.height = size;
+  const g = out.getContext('2d');
+  g.drawImage(paint(tileImg, tile), 0, 0);
+  g.drawImage(paint(glyphImg, glyph), 0, 0);
+  return out.toDataURL('image/png').split(',')[1];
+}
+
+// 작업 표시줄·Alt+Tab 의 창 아이콘도 같은 색으로. 기본('')이면 원래 아이콘으로 되돌린다. 실패해도 화면에는 영향이 없다.
+export async function syncWindowIcon(setting, colors) {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || typeof api.setWindowIcon !== 'function') return;
+  try {
+    await api.setWindowIcon(setting ? await renderIconPng(colors) : '');
+  } catch { /* 창 아이콘만 그대로 남는다 */ }
+}
+
 // ── 글자·화면 크기, 움직임 줄이기 ─────────────────────────
 // 크기는 문서 글자 크기(rem 기준)를 바꾼다. 화면의 글자·여백·아이콘 대부분이 rem 이라 함께 커진다.
 export const UI_SCALES = [90, 100, 110, 125];     // backend/config_manager.py 의 UI_SCALES 와 같아야 한다
@@ -311,9 +389,10 @@ export function cachedAppearance() {
       background: localStorage.getItem(BG_CACHE_KEY) || null,
       scale: Number(localStorage.getItem(SCALE_CACHE_KEY)) || 100,
       reduceMotion: localStorage.getItem(MOTION_CACHE_KEY) === '1',
+      icon: localStorage.getItem(ICON_CACHE_KEY) || '',
     };
   } catch {
-    return { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false };
+    return { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '' };
   }
 }
 

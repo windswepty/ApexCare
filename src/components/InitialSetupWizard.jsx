@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Cpu, HardDrive, Monitor, Zap, CheckCircle2, XCircle, ChevronRight, Loader2, Gauge, Sliders, MemoryStick } from 'lucide-react';
+import AppLogo from './AppLogo';
 
 // 사양 판정에 쓰는 메모리 용량. 꽂혀 있는 용량(설치)을 쓴다. Windows 가 쓸 수 있는 용량은 내장 그래픽 예약만큼
 // 작아서, 예전에는 8GB PC 가 7.8GB 로 읽혀 'RAM 8 GB 미만 = 저사양' 에 걸려 SysMain 이 꺼졌다.
@@ -220,9 +221,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
             {/* Header */}
             <div className={`p-8 pb-6 border-b ${band}`}>
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-black dark:bg-white flex items-center justify-center">
-                  <img src="/icon.png" alt="logo" className="w-6 h-6 invert dark:invert-0" />
-                </div>
+                <AppLogo className="w-10 h-10" />
                 <div>
                   <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
                     <span className="text-cyan-400">APEX CARE</span> 초기 설정

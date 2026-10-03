@@ -335,6 +335,25 @@ class Api:
     def resetUiAppearance(self):
         return config_manager.reset_ui_appearance()
 
+    def setUiIcon(self, icon):
+        return config_manager.set_ui_icon(icon)
+
+    def setWindowIcon(self, png_base64):
+        """작업 표시줄·Alt+Tab 의 창 아이콘을 바꾼다. 빈 값이면 원래 아이콘으로. 이 창에만 적용된다."""
+        from backend import window_frame, window_icon
+        png = None
+        if png_base64:
+            png = window_icon.decode_png(png_base64)
+            if png is None:
+                return {"success": False, "message": "아이콘 그림 형식이 올바르지 않습니다."}
+        try:
+            hwnd = window_frame.find_own_window(self._window.title) if self._window else None
+            ok = window_icon.apply(hwnd, png)
+        except Exception as e:
+            log.warning(f"창 아이콘을 바꾸지 못했습니다: {e}")
+            ok = False
+        return {"success": ok} if ok else {"success": False, "message": "창 아이콘을 바꾸지 못했습니다."}
+
     # --- 초기 설정 마법사 (첫 실행 때만) ---
     def getSetupWizardDone(self):
         return config_manager.get_setup_wizard_done()

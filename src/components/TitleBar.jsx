@@ -1,4 +1,5 @@
 import { Minus, Square, X, Settings } from 'lucide-react';
+import AppLogo from './AppLogo';
 
 export default function TitleBar({ onOpenSettings }) {
   const handleMinimize = () => {
@@ -38,7 +39,7 @@ export default function TitleBar({ onOpenSettings }) {
     <header className="pywebview-drag-region h-9 bg-white dark:bg-black border-b border-black/10 dark:border-white/10 flex items-center justify-between px-3 select-none z-50 sticky top-0 w-full" style={{ WebkitAppRegion: 'drag' }}>
       {/* App Branding title */}
       <div className="flex items-center gap-2 text-xs font-bold text-black dark:text-white transition-colors duration-300">
-        <img src="/icon.png" alt="logo" className="w-4 h-4 rounded-sm dark:invert" />
+        <AppLogo className="w-4 h-4" />
         <span className="tracking-wide">APEX CARE - Desktop PC Optimizer</span>
       </div>
 

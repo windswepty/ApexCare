@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor } from 'lucide-react';
+import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor, Sparkles } from 'lucide-react';
+import AppLogo from './AppLogo';
 import {
   THEMES, HEX_RE, DEFAULT_THEME_ID, UI_SCALES, applyTheme, applyDisplay, swatch, findTheme, composeTheme,
   accentProblems, readableAccent, resemblesWarningColor, fitBackground,
+  ICON_PRESETS, iconColors, applyIcon, syncWindowIcon,
 } from '../theme';
 
 // 키보드로 갈 수 있는 것(Tab 이 창 안에서만 돌게 할 때 쓴다)
@@ -12,12 +14,13 @@ const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabi
 // 이제 고르면 바로 적용하고, 백엔드가 저장에 성공했을 때만 성공을 알린다.
 // 저장에 실패하면 화면도 이전 색으로 되돌린다. 다음 실행 때 보일 색과 어긋나지 않게.
 export default function SettingsModal({ isOpen, onClose, addToast, appearance, onAppearanceChange, onOpenSetupWizard }) {
-  const { id: themeId, accent = null, background = null, scale = 100, reduceMotion = false } = appearance || {};
+  const { id: themeId, accent = null, background = null, scale = 100, reduceMotion = false, icon = '' } = appearance || {};
   const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent' | 'background' | 'scale' | 'motion' | 'reset'
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
   const [bgDraft, setBgDraft] = useState('');   // 편집 중인 배경색
   const [bgText, setBgText] = useState('');
+  const [iconDraft, setIconDraft] = useState('#22d3ee');   // 아이콘 바탕색 직접 고르기
 
   // 대화상자: 열면 닫기 버튼으로 초점을 옮기고, Tab 은 창 안에서만 돌고, Esc 로 닫는다. 닫으면 열었던 곳으로 돌려준다.
   // 예전에는 초점이 오버레이 뒤에 남아 Tab 이 가려진 창 닫기 버튼으로 갔다.
@@ -65,10 +68,11 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
     const bg = background || findTheme(themeId).zinc[9];
     setBgDraft(bg);
     setBgText(bg);
+    if (icon && HEX_RE.test(icon)) setIconDraft(icon);
   }, [isOpen, themeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const api = window.pywebview && window.pywebview.api;
-  const current = { id: themeId, accent, background, scale, reduceMotion };
+  const current = { id: themeId, accent, background, scale, reduceMotion, icon };
 
   // 적용 → 저장 → 실패 시 되돌림. patch: 바꿀 화면 설정 일부
   const commit = async (key, patch, save, okMessage) => {
@@ -80,6 +84,9 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
     const next = { ...prev, ...patch };
     const show = (a) => {
       const applied = applyTheme(a.id, a.accent, a.background);
+      // 아이콘 색(강조색을 따르는 경우가 있어 색 조합이 바뀔 때마다 다시 칠한다)과 작업 표시줄의 창 아이콘
+      const colors = applyIcon(a.icon, applied.id, a.accent, a.background);
+      if (a.icon || prev.icon) syncWindowIcon(a.icon, colors);
       onAppearanceChange({ ...a, id: applied.id, ...applyDisplay(a) });
     };
     show(next);
@@ -141,9 +148,15 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
       value ? '움직임 줄이기를 켰습니다.' : '움직임 줄이기를 껐습니다.');
   };
 
+  const saveIcon = (value) => {
+    if (saving || value === icon) return;
+    commit('icon', { icon: value }, api && (() => api.setUiIcon(value)),
+      value ? '앱 아이콘 색을 저장했습니다.' : '앱 아이콘을 기본 색으로 되돌렸습니다.');
+  };
+
   const resetAll = () => {
     if (saving) return;
-    commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false },
+    commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '' },
       api && (() => api.resetUiAppearance()), '화면 설정을 모두 기본값으로 되돌렸습니다.');
   };
 
@@ -166,7 +179,9 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   const bgPreview = composeTheme(themeId, accent, bgValid ? bgDraft : null);
   const bgSaved = bgValid && background === bgDraft.toLowerCase();
   const setBg = (hex) => { setBgDraft(hex); setBgText(hex); };
-  const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion;
+  const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion && !icon;
+  const shown = composeTheme(themeId, accent, background);       // 지금 화면의 색(아이콘 미리보기에 쓴다)
+  const iconCustom = Boolean(icon) && HEX_RE.test(icon);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
@@ -416,6 +431,64 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                   기본 배경색
                 </button>
               )}
+            </div>
+          </section>
+
+          {/* ── 앱 아이콘 색 ── */}
+          <section className="space-y-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                앱 아이콘 색
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+                사이드바·제목 표시줄·로딩 화면의 로고와 실행 중인 작업 표시줄 아이콘이 함께 바뀝니다.
+                바탕화면 바로 가기·고정해 둔 작업 표시줄 단추의 아이콘은 Windows 가 설치 파일에서 읽어 그대로입니다.
+              </p>
+            </div>
+            <div role="radiogroup" aria-label="앱 아이콘 색" className="grid grid-cols-4 gap-2">
+              {ICON_PRESETS.map((p) => {
+                const c = iconColors(p.id, shown);
+                const selected = icon === p.id;
+                return (
+                  <button
+                    key={p.id || 'default'}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={saving !== null}
+                    onClick={() => saveIcon(p.id)}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-2.5 transition-colors disabled:cursor-wait ${
+                      selected ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-black/10 dark:border-slate-700 hover:border-slate-500'
+                    }`}
+                  >
+                    <AppLogo className="w-9 h-9" tile={c.tile} glyph={c.glyph} />
+                    <span className="text-[0.6875rem] font-bold text-gray-900 dark:text-slate-100">{p.name}</span>
+                  </button>
+                );
+              })}
+              <div className={`flex flex-col items-center gap-1.5 rounded-xl border p-2.5 ${
+                iconCustom ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-black/10 dark:border-slate-700'
+              }`}>
+                <AppLogo className="w-9 h-9" tile={iconColors(iconDraft, shown).tile} glyph={iconColors(iconDraft, shown).glyph} />
+                <div className="flex items-center gap-1">
+                  <input
+                    type="color"
+                    aria-label="아이콘 바탕색 고르기"
+                    value={iconDraft}
+                    onChange={(e) => setIconDraft(e.target.value)}
+                    className="w-5 h-5 rounded border border-black/10 dark:border-slate-700 bg-transparent cursor-pointer p-0"
+                  />
+                  <button
+                    type="button"
+                    disabled={saving !== null || icon === iconDraft.toLowerCase()}
+                    onClick={() => saveIcon(iconDraft.toLowerCase())}
+                    className="text-[0.6875rem] font-bold text-cyan-400 disabled:opacity-40"
+                  >
+                    {icon === iconDraft.toLowerCase() ? '적용됨' : '직접 지정'}
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

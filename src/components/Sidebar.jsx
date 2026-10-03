@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { attachSmoothScroll } from '../smoothScroll';
+import AppLogo from './AppLogo';
 import {
   LayoutDashboard,
   Cpu,
@@ -49,9 +50,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
         <div>
           {/* Brand Header */}
         <div className="flex items-center gap-3 mb-8 px-2">
-          <div className="w-10 h-10 rounded-xl border border-black/10 flex items-center justify-center bg-white shadow-sm overflow-hidden transition-colors duration-300">
-            <img src="/icon.png" alt="logo" className="w-7 h-7" />
-          </div>
+          <AppLogo className="w-10 h-10" />
           <div>
             <h1 className="font-extrabold text-lg tracking-tight text-black dark:text-white flex items-center gap-1.5 transition-colors duration-300">
               APEX <span className="text-gray-500 dark:text-gray-400">CARE</span>
