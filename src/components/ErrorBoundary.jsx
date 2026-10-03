@@ -29,6 +29,29 @@ export default class ErrorBoundary extends React.Component {
   };
 
   render() {
+    if (this.state.hasError && this.props.compact) {
+      // 탭 하나의 오류. 사이드바·다른 탭(특히 '변경 내역 · 되돌리기')은 그대로 쓸 수 있게 이 자리에만 보여 준다.
+      // 예전에는 한 탭이 오류를 내면 앱 전체가 오류 화면으로 바뀌어 되돌리기 화면에도 갈 수 없었다.
+      return (
+        <div className="glass-panel p-6 flex flex-col items-center text-center gap-3">
+          <AlertTriangle className="w-10 h-10 text-red-500" />
+          <h2 className="text-lg font-bold text-black dark:text-white">이 화면을 표시하는 중 오류가 발생했습니다</h2>
+          <p className="text-sm text-gray-600 dark:text-slate-400">
+            진행 중이던 작업과 시스템 설정은 그대로입니다. 다른 탭은 계속 쓸 수 있습니다.
+            문제가 계속되면 아래 오류 내용을 함께 알려 주세요.
+          </p>
+          <div className="w-full max-w-2xl text-left bg-gray-100 dark:bg-slate-900 p-3 rounded-lg text-xs font-mono border border-gray-300 dark:border-slate-800 select-text overflow-auto max-h-40">
+            <div className="text-red-500 font-bold">{this.state.error && this.state.error.toString()}</div>
+          </div>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null, errorInfo: null })}
+            className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-bold text-sm transition-colors"
+          >
+            이 화면 다시 열기
+          </button>
+        </div>
+      );
+    }
     if (this.state.hasError) {
       // 예전에는 'F12 로 개발자 도구를 열어 보라' 고 안내했다. 설치된 앱에서는 개발자 도구가 꺼져 있어 할 수 없는 일이다.
       return (

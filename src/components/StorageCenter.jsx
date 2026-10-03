@@ -352,7 +352,7 @@ function JunkResult({ result }) {
         {result.skipped_count > 0 && (
           <p className="text-xs text-gray-500 mt-1">
             사용 중인 파일 {result.skipped_count.toLocaleString()}개({fmtMB(result.skipped_mb)})는 건너뛰었습니다.
-            {result.skipped_log && <> 목록: <span className="font-mono break-all">{result.skipped_log}</span></>}
+            {result.skipped_log && <> 목록: <span className="break-all">{result.skipped_log}</span></>}
           </p>
         )}
       </div>
@@ -470,7 +470,7 @@ function FileSection({ addToast, onDone }) {
       </div>
 
       <div className="flex gap-2 text-xs">
-        <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+        <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
         <p className="text-gray-500 dark:text-gray-400 leading-relaxed">
           시스템 폴더와 알려진 게임 런처(Steam·Epic·Xbox·EA·Riot·넥슨 등)의 설치 폴더는 검색에서 제외됩니다.
           다른 이름의 폴더에 직접 설치한 게임은 걸러지지 않을 수 있으니 경로를 확인하세요.
@@ -610,7 +610,7 @@ function DiskSection({ addToast, overview, visible = true }) {
 
       {allSsd && (
         <div className="flex gap-2 text-xs">
-          <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+          <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
           <p className="text-gray-500 dark:text-gray-400">
             모든 드라이브가 SSD 입니다. TRIM 만 수행되며 보통 몇 초 안에 끝납니다.
             SSD 에는 조각 모음이 필요 없어 Windows 가 하지 않습니다.

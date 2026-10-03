@@ -118,12 +118,12 @@ export default function StartupManager({ addToast, active = true }) {
       {/* Counts — 레지스트리에서 읽은 값만 보여준다 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">켜진 시작 프로그램</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">켜진 시작 프로그램</span>
           <div className="text-3xl font-black font-mono text-cyan-400 my-1">{countText(enabledCount)}</div>
         </div>
 
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">꺼진 시작 프로그램</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">꺼진 시작 프로그램</span>
           <div className="text-3xl font-black font-mono text-slate-400 my-1">{countText(disabledCount)}</div>
         </div>
       </div>
@@ -134,7 +134,7 @@ export default function StartupManager({ addToast, active = true }) {
           <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm">
             등록된 시작 프로그램 목록{loadState === 'ok' ? ` (${startupApps.length})` : ''}
           </h3>
-          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">이름 순</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">이름 순</span>
         </div>
         <p className="text-[0.6875rem] text-gray-500 dark:text-slate-400">
           각 프로그램이 부팅 시간에 주는 영향은 측정하지 않으므로 표시하지 않습니다.

@@ -182,3 +182,21 @@ def test_display_settings_are_applied_everywhere():
         assert 'text-[11px]' not in _read(os.path.join('src', 'components', f)), f
     assert '.reduce-motion' in _read('src/index.css')
     assert "classList.contains('reduce-motion')" in _read('src/smoothScroll.js')
+
+
+def test_one_broken_tab_does_not_take_down_the_app():
+    # 예전에는 한 탭의 오류(예: 성능 모드 목록이 null)가 앱 전체를 오류 화면으로 바꿔 '되돌리기' 탭에도 갈 수 없었다
+    app = _read('src/App.jsx')
+    assert app.count('<ErrorBoundary compact>') == 10
+    assert 'this.props.compact' in _read('src/components/ErrorBoundary.jsx')
+    assert 'Array.isArray(list) ? list : []' in _read('src/components/PerformanceModes.jsx')
+
+
+def test_screens_follow_the_theme_and_korean_is_not_in_a_coding_font():
+    for f in os.listdir(os.path.join(ROOT, 'src', 'components')):
+        src = _read(os.path.join('src', 'components', f))
+        # 화면 고유색(보라 그라데이션 등)은 색 조합을 무시했다. 강조색(cyan = 테마 변수)을 쓴다
+        assert 'from-purple' not in src and 'to-indigo' not in src and 'to-pink' not in src, f
+        assert 'uppercase tracking-widest' not in src, f              # 한글에 영문 대문자용 넓은 자간
+    cfg = _read('tailwind.config.cjs')
+    assert 'mono:' in cfg and '"Malgun Gothic"' in cfg               # 고정폭 글꼴 안의 한글은 맑은 고딕

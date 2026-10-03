@@ -202,16 +202,16 @@ export default function SystemRepair({ addToast }) {
 
       {/* DISM Panel */}
       <div className={`glass-panel p-5 flex flex-col gap-4 transition-all duration-300 ${
-        dism.status === 'running' ? 'border-purple-500/50 shadow-lg shadow-purple-500/10' : 'border-black/10 dark:border-slate-800'
+        dism.status === 'running' ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'border-black/10 dark:border-slate-800'
       }`}>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-start gap-4 flex-1">
-            <div className="p-3 rounded-2xl border bg-purple-500/10 text-purple-400 border-purple-500/20">
+            <div className="p-3 rounded-2xl border bg-cyan-500/10 text-cyan-400 border-cyan-500/20">
               <Layers className="w-6 h-6" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="text-[0.625rem] font-mono text-purple-400 font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-black/10 dark:border-slate-800">
+                <span className="text-[0.625rem] font-mono text-cyan-400 font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-black/10 dark:border-slate-800">
                   DISM /RESTOREHEALTH
                 </span>
               </div>
@@ -222,7 +222,7 @@ export default function SystemRepair({ addToast }) {
 
           <div className="flex items-center gap-4">
             {dism.status === 'running' ? (
-              <button disabled className="btn-primary bg-gradient-to-r from-purple-500 to-indigo-600 shadow-purple-500/30 text-xs px-5 py-2.5 flex items-center gap-2 opacity-75 cursor-not-allowed">
+              <button disabled className="btn-primary text-xs px-5 py-2.5 flex items-center gap-2 opacity-75 cursor-not-allowed">
                 <RotateCw className="w-4 h-4 animate-spin" />
                 <span>복구 진행 중...</span>
               </button>
@@ -230,7 +230,7 @@ export default function SystemRepair({ addToast }) {
               <button
                 onClick={dism.run}
                 disabled={isAnyRunning}
-                className={`btn-primary bg-gradient-to-r from-purple-500 to-indigo-600 shadow-purple-500/30 text-xs px-5 py-2.5 flex items-center gap-2 ${isAnyRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`btn-primary text-xs px-5 py-2.5 flex items-center gap-2 ${isAnyRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Activity className="w-4 h-4" />
                 <span>{dism.status === 'idle' ? 'DISM 복구 실행' : 'DISM 복구 다시 실행'}</span>
@@ -241,7 +241,7 @@ export default function SystemRepair({ addToast }) {
 
         {dism.status === 'running' && (
           <div className="mt-2 p-4 rounded-xl bg-black/5 dark:bg-black/40 border border-black/10 dark:border-white/5 flex flex-col gap-3">
-            <div className="flex items-center justify-between text-purple-500 dark:text-purple-400 font-mono text-sm">
+            <div className="flex items-center justify-between text-cyan-500 dark:text-cyan-400 font-mono text-sm">
               <div className="flex items-center gap-2">
                 <RotateCw className="w-5 h-5 animate-spin" />
                 <span>Windows 이미지를 검사·복구하는 중...</span>
@@ -252,7 +252,7 @@ export default function SystemRepair({ addToast }) {
               </div>
             </div>
             <div className="relative w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-purple-500 to-indigo-600 rounded-full animate-indeterminate motion-reduce:w-full motion-reduce:opacity-40"></div>
+              <div className="absolute inset-y-0 w-1/3 bg-cyan-500 rounded-full animate-indeterminate motion-reduce:w-full motion-reduce:opacity-40"></div>
             </div>
           </div>
         )}

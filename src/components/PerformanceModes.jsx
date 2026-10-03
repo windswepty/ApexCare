@@ -81,7 +81,11 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
     const a = api();
     if (!a) return;
     try {
-      if (a.listOptimizationModes) setModes(await a.listOptimizationModes());
+      // 목록이 아닌 값이 오면(백엔드 오류 등) 빈 목록으로 둔다. 예전에는 null.map 으로 화면 전체가 오류로 바뀌었다.
+      if (a.listOptimizationModes) {
+        const list = await a.listOptimizationModes();
+        setModes(Array.isArray(list) ? list : []);
+      }
       if (a.getOptimizationMode) {
         const s = await a.getOptimizationMode();
         setStatus(s);
@@ -273,8 +277,8 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
 
       {/* 게임 부스트가 게임 동안만 게이밍 모드를 쓰는 중 */}
       {status?.boostOverride && (
-        <div className="glass-panel p-4 flex gap-3 border border-sky-500/30">
-          <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+        <div className="glass-panel p-4 flex gap-3 border border-cyan-500/30">
+          <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
           <div className="text-sm text-black/80 dark:text-white/80">
             <strong className="text-black dark:text-white">게임 부스트가 게임 동안만 게이밍 전원 모드를 쓰고 있습니다.</strong>{' '}
             게임이 끝나면 <span className="font-mono">{status.label}</span> 모드로 돌아갑니다.
@@ -365,9 +369,9 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                 {!mode.planAvailable && (
                   <p className="text-[0.6875rem] text-amber-500 leading-snug">{mode.note}</p>
                 )}
-                {mode.changes.length > 0 ? (
+                {(mode.changes || []).length > 0 ? (
                   <ul className="pt-1 space-y-1">
-                    {mode.changes.map((c, i) => (
+                    {(mode.changes || []).map((c, i) => (
                       <li key={i} className="text-[0.6875rem] text-gray-500 dark:text-gray-400 flex gap-1.5">
                         <ChevronRight className="w-3 h-3 mt-0.5 shrink-0 opacity-50" />{c}
                       </li>
@@ -431,7 +435,7 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
               ))}
               {result.notes?.map((n, i) => (
                 <div key={`n${i}`} className="flex items-start gap-2.5 text-sm pt-1">
-                  <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                  <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
                   <span className="text-black/70 dark:text-white/70">{n}</span>
                 </div>
               ))}

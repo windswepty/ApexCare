@@ -30,12 +30,12 @@ const renderLineGraph = (history, state) => {
 
   // 이 PC 에서 잴 수 없는 값이면 기록이 모일 일도 없다. 예전에는 '기록을 모으는 중…' 이 끝나지 않았다.
   if (state === 'unavailable') {
-    return <p className="text-[0.6875rem] text-gray-500 font-mono">이 PC 에서는 잴 수 없습니다</p>;
+    return <p className="text-[0.6875rem] text-gray-500">이 PC 에서는 잴 수 없습니다</p>;
   }
   // 잰 칸만 잇는다. 재지 않은 칸(null)은 그리지 않는다.
   const measured = history.map((val, i) => ({ val, i })).filter((p) => isNum(p.val));
   if (measured.length < 2) {
-    return <p className="text-[0.6875rem] text-gray-500 font-mono">기록을 모으는 중…</p>;
+    return <p className="text-[0.6875rem] text-gray-500">기록을 모으는 중…</p>;
   }
   const points = measured.map(({ val, i }) => {
     const x = (i / (HISTORY_POINTS - 1)) * width;
@@ -379,7 +379,7 @@ export default function Dashboard({ addToast, active = true }) {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setModalMessage(null)}></div>
           <div className="relative glass-panel p-6 w-full max-w-sm rounded-2xl shadow-2xl border border-white/20 dark:border-black/20 transform animate-in fade-in zoom-in duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${modalMessage.isError ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${modalMessage.isError ? 'bg-red-500/10 text-red-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <div>
@@ -510,7 +510,7 @@ export default function Dashboard({ addToast, active = true }) {
       <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-5">
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">마지막 원클릭 최적화</h4>
+            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">마지막 원클릭 최적화</h4>
             <div className="text-2xl font-black text-black dark:text-white">{lastOptimized}</div>
           </div>
           <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
@@ -520,11 +520,11 @@ export default function Dashboard({ addToast, active = true }) {
         
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">원클릭 최적화로 확보한 공간 (누적)</h4>
+            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">원클릭 최적화로 확보한 공간 (누적)</h4>
             <div className="text-2xl font-black text-black dark:text-white">{totalFreed.toFixed(1)} <span className="text-lg">MB</span></div>
           </div>
-          <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
-            <HardDrive className="w-6 h-6 text-blue-500" />
+          <div className="w-12 h-12 rounded-full bg-cyan-500/10 flex items-center justify-center">
+            <HardDrive className="w-6 h-6 text-cyan-400" />
           </div>
         </div>
       </div>

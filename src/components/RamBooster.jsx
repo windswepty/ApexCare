@@ -137,7 +137,7 @@ export default function RamBooster({ addToast, active = true }) {
       {/* Header Panel */}
       <div className="glass-panel p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 text-purple-400 font-mono text-xs font-semibold mb-1">
+          <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-semibold mb-1">
             <Cpu className="w-4 h-4" />
             MEMORY
           </div>
@@ -151,7 +151,7 @@ export default function RamBooster({ addToast, active = true }) {
         <button
           onClick={handlePurgeStandby}
           disabled={isPurging || loading || unavailable || noStandby}
-          className={`btn-primary bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-500/30 px-6 py-3.5 flex-shrink-0 ${
+          className={`btn-primary px-6 py-3.5 flex-shrink-0 ${
             isPurging || loading || unavailable || noStandby ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
@@ -175,11 +175,11 @@ export default function RamBooster({ addToast, active = true }) {
 
       {/* Result — 백엔드가 측정해 돌려준 값만 */}
       {purgeResult && (
-        <div className="glass-panel border-purple-500/40 bg-purple-950/20 p-4 rounded-xl flex items-center justify-between gap-4">
+        <div className="glass-panel border-emerald-500/40 bg-emerald-500/5 p-4 rounded-xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <CheckCircle2 className="w-6 h-6 text-purple-400 flex-shrink-0" />
+            <CheckCircle2 className="w-6 h-6 text-emerald-400 flex-shrink-0" />
             <div>
-              <h4 className="font-bold text-purple-300 text-sm">{purgeResult.message}</h4>
+              <h4 className="font-bold text-emerald-300 text-sm">{purgeResult.message}</h4>
               {typeof purgeResult.freeBeforeGB === 'number' && typeof purgeResult.freeAfterGB === 'number' && (
                 <p className="text-xs text-gray-700 dark:text-slate-300 font-mono">
                   여유 메모리 {purgeResult.freeBeforeGB.toFixed(1)} GB → {purgeResult.freeAfterGB.toFixed(1)} GB (비운 직후 측정)
@@ -196,25 +196,25 @@ export default function RamBooster({ addToast, active = true }) {
       {/* Memory composition */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="glass-panel p-4 border-l-4 border-l-cyan-400">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">사용 중</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">사용 중</span>
           <div className="text-2xl font-black font-mono text-black dark:text-white mt-1">{waiting || fmtGB(ram.inUseGB)}</div>
-          <span className="text-[0.625rem] text-slate-500 font-mono">프로그램과 Windows 가 쓰는 메모리</span>
+          <span className="text-[0.625rem] text-slate-500">프로그램과 Windows 가 쓰는 메모리</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-purple-500">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">대기 (Standby)</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">대기 (Standby)</span>
           <div className="text-2xl font-black font-mono text-purple-400 mt-1">{waiting || fmtGB(ram.standbyGB)}</div>
-          <span className="text-[0.625rem] text-slate-500 font-mono">최근 파일 캐시 · 필요하면 자동 반환</span>
+          <span className="text-[0.625rem] text-slate-500">최근 파일 캐시 · 필요하면 자동 반환</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-emerald-400">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">여유 (Free)</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">여유 (Free)</span>
           <div className="text-2xl font-black font-mono text-emerald-400 mt-1">{waiting || fmtGB(ram.freeGB)}</div>
-          <span className="text-[0.625rem] text-slate-500 font-mono">아무것도 담기지 않은 메모리</span>
+          <span className="text-[0.625rem] text-slate-500">아무것도 담기지 않은 메모리</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-slate-500">
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">메모리 사용률</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">메모리 사용률</span>
           <div className="text-2xl font-black font-mono text-gray-800 dark:text-slate-200 mt-1">
             {waiting || (typeof ram.pct === 'number' ? `${ram.pct}%` : '알 수 없음')}
           </div>
@@ -270,7 +270,7 @@ export default function RamBooster({ addToast, active = true }) {
             <Activity className="w-4 h-4 text-cyan-400" />
             메모리를 많이 쓰는 프로세스 {processes ? `(상위 ${processes.length}개)` : ''}
           </h3>
-          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono">메모리 사용량 순</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">메모리 사용량 순</span>
         </div>
 
         {processes === null ? (
@@ -293,7 +293,7 @@ export default function RamBooster({ addToast, active = true }) {
                   <tr key={proc.pid} className="hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-2 font-bold text-gray-800 dark:text-slate-200">{proc.name}</td>
                     <td className="py-3 px-2 text-gray-500 dark:text-slate-400">{proc.pid}</td>
-                    <td className="py-3 px-2 text-purple-400 font-bold">{proc.memoryMB} MB</td>
+                    <td className="py-3 px-2 text-cyan-400 font-bold">{proc.memoryMB} MB</td>
                     <td className="py-3 px-2 text-cyan-400">{proc.cpuPct ?? <span className="text-slate-500">측정 중</span>}</td>
                     <td className="py-3 px-2">
                       <span className={`px-2 py-0.5 rounded text-[0.625rem] ${

@@ -196,35 +196,35 @@ export default function App() {
           <main ref={scrollWrapperRef} className="flex-1 overflow-y-auto px-6 pb-6 flex flex-col">
             <div ref={scrollContentRef} className="flex flex-col flex-1">
               <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('dashboard') && <Dashboard active={activeTab === 'dashboard'} addToast={addToast} />}
+                {isMounted('dashboard') && <ErrorBoundary compact><Dashboard active={activeTab === 'dashboard'} addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'restore' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('restore') && <RestoreCenter active={activeTab === 'restore'} addToast={addToast} />}
+                {isMounted('restore') && <ErrorBoundary compact><RestoreCenter active={activeTab === 'restore'} addToast={addToast} /></ErrorBoundary>}
               </div>
 
               <div style={{ display: activeTab === 'storage' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('storage') && <StorageCenter active={activeTab === 'storage'} addToast={addToast} />}
+                {isMounted('storage') && <ErrorBoundary compact><StorageCenter active={activeTab === 'storage'} addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'ram' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('ram') && <RamBooster active={activeTab === 'ram'} addToast={addToast} />}
+                {isMounted('ram') && <ErrorBoundary compact><RamBooster active={activeTab === 'ram'} addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'startup' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('startup') && <StartupManager active={activeTab === 'startup'} addToast={addToast} />}
+                {isMounted('startup') && <ErrorBoundary compact><StartupManager active={activeTab === 'startup'} addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'modes' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('modes') && <PerformanceModes active={activeTab === 'modes'} currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} />}
+                {isMounted('modes') && <ErrorBoundary compact><PerformanceModes active={activeTab === 'modes'} currentMode={currentMode} setCurrentMode={setCurrentMode} addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'drivers' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('drivers') && <DriverUpdater addToast={addToast} />}
+                {isMounted('drivers') && <ErrorBoundary compact><DriverUpdater addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'uninstaller' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('uninstaller') && <Uninstaller addToast={addToast} />}
+                {isMounted('uninstaller') && <ErrorBoundary compact><Uninstaller addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'debloater' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('debloater') && <Debloater addToast={addToast} />}
+                {isMounted('debloater') && <ErrorBoundary compact><Debloater addToast={addToast} /></ErrorBoundary>}
               </div>
               <div style={{ display: activeTab === 'gamebooster' ? 'block' : 'none', height: '100%' }}>
-                {isMounted('gamebooster') && <GameBooster active={activeTab === 'gamebooster'} addToast={addToast} />}
+                {isMounted('gamebooster') && <ErrorBoundary compact><GameBooster active={activeTab === 'gamebooster'} addToast={addToast} /></ErrorBoundary>}
               </div>
             </div>
           </main>
@@ -238,7 +238,7 @@ export default function App() {
           <div key={toast.id} role={toast.type === 'error' ? 'alert' : undefined} className="pointer-events-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-right-8 fade-in duration-300">
             {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
             {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
-            {toast.type === 'info' && <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />}
+            {toast.type === 'info' && <Info className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />}
             <div className="flex-1">
               <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">
                 {toast.message}

@@ -19,8 +19,8 @@
   --text-muted: rgb(var(--slate-600));
   --text-dim: rgb(var(--slate-400));
 
-  --font-sans: 'Pretendard', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Malgun Gothic', sans-serif;
-  --font-mono: 'Cascadia Mono', Consolas, 'D2Coding', ui-monospace, monospace;
+  --font-sans: 'Pretendard', 'Segoe UI Variable', 'Segoe UI', 'Malgun Gothic', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, 'Malgun Gothic', ui-monospace, monospace;
 }
 
 .dark {

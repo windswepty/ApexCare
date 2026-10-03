@@ -14,6 +14,12 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // 숫자·코드는 고정폭 글꼴로, 한글은 맑은 고딕으로. 예전에는 font-mono 안의 한글이 Windows 기본 고정폭 한글 글꼴(굴림체 등)로
+      // 그려져 자간이 넓고 화면의 다른 글자와 따로 놀았다.
+      fontFamily: {
+        sans: ['Pretendard', '"Segoe UI Variable"', '"Segoe UI"', '"Malgun Gothic"', 'system-ui', 'sans-serif'],
+        mono: ['"Cascadia Mono"', 'Consolas', '"Malgun Gothic"', 'ui-monospace', 'monospace'],
+      },
       colors: {
         cyan: scale('accent'),
         slate: scale('slate'),

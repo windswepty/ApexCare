@@ -239,7 +239,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
 
               {/* Left: Specs */}
               <div>
-                <h3 className="text-xs font-mono font-bold mb-4 uppercase tracking-widest text-gray-500">
+                <h3 className="text-xs font-bold mb-4 text-gray-500">
                   이 PC 사양
                 </h3>
 
@@ -247,7 +247,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <Cpu className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
+                      <div className={`text-[0.625rem] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>프로세서</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.cpuModel}>{stats?.cpuModel || '알 수 없음'}</div>
@@ -260,7 +260,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <Monitor className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>그래픽 (GPU)</div>
+                      <div className={`text-[0.625rem] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>그래픽 (GPU)</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate" title={stats?.gpuModel || '알 수 없음'}>{stats?.gpuModel || '알 수 없음'}</div>
@@ -270,7 +270,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                   <div className={`p-3 rounded-xl border flex flex-col justify-center gap-2 ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-black/5'}`}>
                     <div className="flex items-center gap-2">
                       <MemoryStick className={`w-4 h-4 ${muted}`} />
-                      <div className={`text-[0.625rem] font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
+                      <div className={`text-[0.625rem] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>메모리 (RAM)</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-xs truncate">
@@ -295,7 +295,7 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
 
               {/* Right: 제안 설정 — 백엔드 미리보기를 받은 뒤에만 */}
               <div className="flex flex-col justify-center">
-                <h3 className="text-xs font-mono font-bold mb-4 uppercase tracking-widest text-gray-500">
+                <h3 className="text-xs font-bold mb-4 text-gray-500">
                   제안하는 설정
                 </h3>
 
