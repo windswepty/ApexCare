@@ -148,3 +148,11 @@ def test_dashboard_does_not_wait_forever_for_values_it_could_not_read():
 def test_restore_center_names_what_failed():
     src = _read('src/components/RestoreCenter.jsx')
     assert "{f.what ? `${f.what}: ` : ''}{f.reason || f.key}" in src
+
+
+def test_debloater_says_which_apps_cannot_be_restored():
+    src = _read('src/components/Debloater.jsx')
+    assert 'setRestorable(r?.restorable || {})' in src
+    assert '제거하면 Windows 가 설치 파일까지 지웁니다' in src            # 확인 창
+    assert '제거하면 설치 파일도 지워져 되살릴 수 없음' in src             # 항목 표시
+    assert "이 계정에서 제거하고(아래 '제거한 앱' 에서 되살릴 수 있습니다)" not in src

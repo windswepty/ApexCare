@@ -135,7 +135,30 @@ foreach ($n in @($arg.names)) {
 }
 """
 
-# 이 계정에서만 지운다. 다른 계정·Windows 이미지(프로비저닝)는 건드리지 않아 설치 파일이 남는다.
+# 지운 뒤에도 설치 파일이 남는지(되살릴 수 있는지) 미리 본다. 읽기만 한다.
+# Windows 는 마지막 사용자에게서 지워진 패키지의 설치 폴더를 곧바로 지운다(샌드박스에서 확인). 남는 것은
+# Windows 이미지에 들어 있는(프로비저닝) 패키지와 다른 계정에도 설치된 패키지뿐이다. 스토어에서 받아 이 계정에만
+# 설치한 앱은 지우면 이 화면에서 되살릴 수 없다.
+_PS_KEEPS = r"""
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$prov = @{}
+foreach ($p in @(Get-AppxProvisionedPackage -Online)) { $prov[[string]$p.DisplayName] = $true }
+foreach ($n in @($arg.names)) {
+  try {
+    $others = $false
+    foreach ($p in @(Get-AppxPackage -AllUsers -Name $n -ErrorAction Stop)) {
+      foreach ($u in @($p.PackageUserInformation)) {
+        if ([string]$u.UserSecurityId.Sid -ne $me -and [string]$u.InstallState -eq 'Installed') { $others = $true }
+      }
+    }
+    [void]$out.Add([ordered]@{ name = [string]$n; provisioned = [bool]$prov[[string]$n]; otherUsers = $others })
+  } catch {
+    [void]$out.Add([ordered]@{ name = [string]$n; error = [string]$_.Exception.Message })
+  }
+}
+"""
+
+# 이 계정에서만 지운다. 다른 계정·Windows 이미지(프로비저닝)는 건드리지 않는다. 그 둘이 없으면 설치 파일도 지워진다.
 _PS_REMOVE = r"""
 foreach ($f in @($arg.fullNames)) {
   try {
@@ -660,7 +683,7 @@ def get_install_state():
     names = sorted({p for x in appx for p in x['packages']})
     ok, rows, err = _query_packages(names)
     if not ok:
-        return {'ok': False, 'items': {x['id']: 'unknown' for x in appx}, 'error': err}
+        return {'ok': False, 'items': {x['id']: 'unknown' for x in appx}, 'restorable': {}, 'error': err}
     installed = {r.get('query') for r in rows if not r.get('error') and r.get('fullName')}
     failed = {r.get('query') for r in rows if r.get('error')}
     items = {}
@@ -672,7 +695,38 @@ def get_install_state():
             items[x['id']] = 'unknown'
         else:
             items[x['id']] = 'not_installed'
-    return {'ok': True, 'items': items, 'error': None}
+    kept = _files_kept([r for r in rows if not r.get('error') and r.get('fullName')])
+    restorable = {}
+    for x in appx:
+        if items[x['id']] != 'installed':
+            continue
+        vals = [kept.get(p) for p in x['packages'] if p in installed]
+        # 하나라도 지워지면 그 항목은 '되살릴 수 없음'. 모르는 것이 있으면 단정하지 않는다(None).
+        restorable[x['id']] = False if False in vals else (None if None in vals else True)
+    return {'ok': True, 'items': items, 'restorable': restorable, 'error': None}
+
+
+def _files_kept(rows):
+    """설치된 패키지(_PS_QUERY 의 행)마다 이 계정에서 지운 뒤에도 설치 파일이 남는지. {이름: True|False|None(모름)}"""
+    out, ask = {}, []
+    system_root = _windowsapps_roots()[1:]               # SystemApps: Windows 의 일부라 지워지지 않는다
+    for r in rows:
+        name = str(r.get('name') or '')
+        loc = os.path.normcase(str(r.get('installLocation') or ''))
+        if any(loc.startswith(os.path.normcase(s) + os.sep) for s in system_root):
+            out[name] = True
+        elif _PKG_RE.match(name):
+            ask.append(name)
+    if ask:
+        try:
+            ok, krows, _ = _run_ps_json(_PS_KEEPS, {'names': sorted(set(ask))}, QUERY_TIMEOUT_SEC)
+        except Exception:
+            ok, krows = False, []
+        got = {str(k.get('name')): (None if k.get('error') else bool(k.get('provisioned') or k.get('otherUsers')))
+               for k in krows} if ok else {}
+        for n in ask:
+            out[n] = got.get(n)
+    return out
 
 
 def get_debloat_status():

@@ -741,6 +741,175 @@ def recycle_guard():
     return verdict(problems, [])
 
 
+# ─── 클라우드 동기화(OneDrive 등)의 '온라인 전용' 파일 ───
+# OneDrive 와 같은 Windows 클라우드 파일 API(cldapi)로 동기화 폴더를 만들고 내용이 없는 자리 표시자 파일을 둔다.
+# 누가 내용을 읽으면 Windows 가 공급자에게 '내려받기(FETCH_DATA)' 를 요청한다. 그 요청 수를 세어, 앱의 검사가
+# 내려받기를 일으키지 않는지 본다(OneDrive 계정·네트워크 없이 같은 상황을 만든다. 샌드박스에서 확인).
+
+class _GUID(ctypes.Structure):
+    _fields_ = [('Data1', ctypes.c_uint32), ('Data2', ctypes.c_uint16), ('Data3', ctypes.c_uint16),
+                ('Data4', ctypes.c_ubyte * 8)]
+
+
+class _CF_SYNC_REGISTRATION(ctypes.Structure):
+    _fields_ = [('StructSize', ctypes.c_uint32), ('ProviderName', ctypes.c_wchar_p),
+                ('ProviderVersion', ctypes.c_wchar_p), ('SyncRootIdentity', ctypes.c_void_p),
+                ('SyncRootIdentityLength', ctypes.c_uint32), ('FileIdentity', ctypes.c_void_p),
+                ('FileIdentityLength', ctypes.c_uint32), ('ProviderId', _GUID)]
+
+
+class _CF_POLICY(ctypes.Structure):
+    _fields_ = [('Primary', ctypes.c_uint16), ('Modifier', ctypes.c_uint16)]
+
+
+class _CF_SYNC_POLICIES(ctypes.Structure):
+    _fields_ = [('StructSize', ctypes.c_uint32), ('Hydration', _CF_POLICY), ('Population', _CF_POLICY),
+                ('InSync', ctypes.c_uint32), ('HardLink', ctypes.c_uint32), ('PlaceholderManagement', ctypes.c_uint32)]
+
+
+_CF_CALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+
+
+class _CF_CALLBACK_REGISTRATION(ctypes.Structure):
+    _fields_ = [('Type', ctypes.c_uint32), ('Callback', _CF_CALLBACK)]
+
+
+class _FILE_BASIC_INFO(ctypes.Structure):
+    _fields_ = [('CreationTime', ctypes.c_int64), ('LastAccessTime', ctypes.c_int64),
+                ('LastWriteTime', ctypes.c_int64), ('ChangeTime', ctypes.c_int64), ('FileAttributes', ctypes.c_uint32)]
+
+
+class _CF_FS_METADATA(ctypes.Structure):
+    _fields_ = [('BasicInfo', _FILE_BASIC_INFO), ('FileSize', ctypes.c_int64)]
+
+
+class _CF_PLACEHOLDER_CREATE_INFO(ctypes.Structure):
+    _fields_ = [('RelativeFileName', ctypes.c_wchar_p), ('FsMetadata', _CF_FS_METADATA),
+                ('FileIdentity', ctypes.c_void_p), ('FileIdentityLength', ctypes.c_uint32),
+                ('Flags', ctypes.c_uint32), ('Result', ctypes.c_int32), ('CreateUsn', ctypes.c_int64)]
+
+
+class _CloudRoot:
+    """샌드박스 안의 점검용 동기화 폴더. 사용자 프로필 아래는 샌드박스에서 등록이 거부돼(E_INVALIDARG) C:\\ 바로 아래에 둔다."""
+
+    def __init__(self, root):
+        import uuid
+        self.root, self.fetches, self.key, self.registered = root, [], ctypes.c_int64(), False
+        self.cf = ctypes.WinDLL('cldapi', use_last_error=True)
+        for fn in ('CfRegisterSyncRoot', 'CfConnectSyncRoot', 'CfCreatePlaceholders', 'CfDisconnectSyncRoot',
+                   'CfUnregisterSyncRoot'):
+            getattr(self.cf, fn).restype = ctypes.c_long
+        os.makedirs(root, exist_ok=True)
+        reg = _CF_SYNC_REGISTRATION(ctypes.sizeof(_CF_SYNC_REGISTRATION), 'ApexSbxCloud', '1.0', None, 0, None, 0,
+                                    _GUID.from_buffer_copy(uuid.uuid4().bytes_le))
+        pol = _CF_SYNC_POLICIES(ctypes.sizeof(_CF_SYNC_POLICIES), _CF_POLICY(2, 0), _CF_POLICY(2, 0), 0, 0, 0)
+        self._check('CfRegisterSyncRoot', self.cf.CfRegisterSyncRoot(root, ctypes.byref(reg), ctypes.byref(pol), 0))
+        self.registered = True
+        self._cb = _CF_CALLBACK(lambda info, params: self.fetches.append(time.time()))
+        self._table = (_CF_CALLBACK_REGISTRATION * 2)(_CF_CALLBACK_REGISTRATION(0, self._cb),       # FETCH_DATA
+                                                      _CF_CALLBACK_REGISTRATION(0xFFFFFFFF, _CF_CALLBACK()))
+        self._check('CfConnectSyncRoot',
+                    self.cf.CfConnectSyncRoot(root, self._table, None, 0, ctypes.byref(self.key)))
+
+    @staticmethod
+    def _check(what, hr):
+        if hr != 0:
+            raise OSError(f'{what} 실패 0x{hr & 0xFFFFFFFF:08X}')
+
+    def placeholders(self, names, size):
+        """내용 없이 크기만 있는 '온라인 전용' 파일들(동기화됨 표시)"""
+        now = int((time.time() + 11644473600) * 10 ** 7)
+        ident = ctypes.create_string_buffer(b'apex-sbx')
+        infos = (_CF_PLACEHOLDER_CREATE_INFO * len(names))()
+        for i, n in enumerate(names):
+            infos[i].RelativeFileName = n
+            infos[i].FsMetadata.BasicInfo = _FILE_BASIC_INFO(now, now, now, now, 0x80)
+            infos[i].FsMetadata.FileSize = size
+            infos[i].FileIdentity = ctypes.cast(ident, ctypes.c_void_p)
+            infos[i].FileIdentityLength = 8
+            infos[i].Flags = 0x2                          # CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC
+        done = ctypes.c_uint32()
+        self._check('CfCreatePlaceholders', self.cf.CfCreatePlaceholders(self.root, infos, len(names), 0,
+                                                                         ctypes.byref(done)))
+        return [os.path.join(self.root, n) for n in names]
+
+    def close(self):
+        if self.key.value:
+            self.cf.CfDisconnectSyncRoot(self.key)
+            self.key = ctypes.c_int64()
+        if self.registered:
+            self.cf.CfUnregisterSyncRoot(self.root)        # 자리 표시자도 함께 사라진다
+            self.registered = False
+
+
+@check('저장공간: OneDrive 같은 온라인 전용 파일은 대용량·중복 검사와 삭제가 건드리지 않음(내려받기 요청 0회)')
+def cloud_only_files():
+    import threading
+    from backend import file_finder
+    big = 600 * 1024 * 1024
+    cloud_dir, local_dir = r'C:\ApexSbxCloud', r'C:\ApexSbxLocal'
+    problems = []
+    cloud = None
+    os.makedirs(local_dir, exist_ok=True)
+    local = [os.path.join(local_dir, n) for n in ('local_big.bin', 'local_dup_a.bin', 'local_dup_b.bin')]
+    try:
+        # 대조군: 로컬 파일은 검사에 잡혀야 한다(검사가 그 폴더를 실제로 본다는 증거)
+        with open(local[0], 'wb') as f:
+            f.truncate(big)
+        for p in local[1:]:
+            with open(p, 'wb') as f:
+                f.write(b'apex' * (4 * 1024 * 1024))           # 16MB, 두 파일 내용이 같다
+        cloud = _CloudRoot(cloud_dir)
+        files = cloud.placeholders(['cloud_a.mkv', 'cloud_b.mkv'], big)
+        attrs = {p: os.lstat(p).st_file_attributes for p in files}
+        if not all(a & 0x400000 for a in attrs.values()):
+            return 'FAIL', f'준비: 온라인 전용 표시가 없습니다 {[hex(a) for a in attrs.values()]}', []
+
+        large = {x['path'].lower() for x in file_finder.scan_large_files(min_mb=500)}
+        if local[0].lower() not in large:
+            problems.append('대조군: 로컬 대용량 파일이 대용량 검사에 나오지 않았습니다(검사가 그 폴더를 보지 않음)')
+        if large & {p.lower() for p in files}:
+            problems.append('온라인 전용 파일이 대용량 목록에 나왔습니다')
+        dups = {x['path'].lower() for x in file_finder.scan_duplicates()}
+        if not {p.lower() for p in local[1:]} <= dups:
+            problems.append('대조군: 내용이 같은 로컬 파일이 중복 검사에 나오지 않았습니다')
+        if dups & {p.lower() for p in files}:
+            problems.append('온라인 전용 파일이 중복 목록에 나왔습니다')
+        r = file_finder.delete_files([files[0]])
+        if r.get('deleted') or not os.path.exists(files[0]):
+            problems.append(f'온라인 전용 파일을 지웠습니다(클라우드 원본이 지워짐): {r}')
+        if cloud.fetches:
+            problems.append(f'검사·삭제가 내려받기를 {len(cloud.fetches)}번 일으켰습니다')
+        if not all(os.lstat(p).st_file_attributes & 0x400000 for p in files):
+            problems.append('검사 뒤 온라인 전용 파일이 내려받아진 상태로 바뀌었습니다')
+
+        # 대조군: 내용을 읽으면 내려받기 요청이 실제로 잡혀야 한다(위의 '0번' 이 의미가 있다는 증거)
+        before = len(cloud.fetches)
+
+        def read_one():
+            try:
+                with open(files[1], 'rb') as f:
+                    f.read(1)
+            except OSError:
+                pass                                       # 공급자가 답하지 않아 실패한다(정상)
+        threading.Thread(target=read_one, daemon=True).start()
+        _wait(lambda: len(cloud.fetches) > before, 15)
+        if len(cloud.fetches) == before:
+            problems.append('대조군: 파일을 읽어도 내려받기 요청이 잡히지 않았습니다(이 점검이 볼 수 없음)')
+    finally:
+        if cloud is not None:
+            cloud.close()                                  # 읽던 스레드는 연결이 끊기면 실패로 끝난다
+        for p in local:
+            if os.path.exists(p):
+                os.remove(p)                               # 이 점검이 만든 파일만 지운다
+        for d in (cloud_dir, local_dir):
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
+    return verdict(problems, [])
+
+
 @check('프로세스 우선순위: 바꾸고 원래대로, 시스템 프로세스는 거부')
 def priority():
     import psutil
@@ -836,7 +1005,8 @@ def _sandbox_appx_item():
         name = str(r.get('name') or '')
         loc = os.path.normcase(str(r.get('installLocation') or ''))
         seen.append(f"{name}{' [F]' if r.get('isFramework') else ''}{' [고정]' if r.get('nonRemovable') else ''}")
-        if (r.get('isFramework') or r.get('nonRemovable') or not debloater._PKG_RE.match(name)
+        # 호스트에서 복사해 등록한 스토어 앱은 지우면 설치 파일이 사라져 왕복 점검에 쓸 수 없다
+        if (r.get('isFramework') or r.get('nonRemovable') or not debloater._PKG_RE.match(name) or name in _STORE_APPS
                 or any(a in name.lower() for a in _SANDBOX_APPX_AVOID)
                 or debloater._manifest_path(r.get('installLocation')) is None):
             continue
@@ -851,21 +1021,73 @@ def _sandbox_appx_item():
     return {'id': 'sandbox-check', 'name': f'점검용 앱 {pick}', 'kind': 'appx', 'packages': [pick]}, names
 
 
+# 호스트(start_sandbox_check.ps1)가 결과 폴더에 복사해 둔 스토어 앱을 샌드박스의 WindowsApps 로 옮겨 이 계정에 등록한다.
+# 스토어 서명 그대로라 실제 PC 의 스토어 앱과 같다(서명 종류 Store, 개발자 모드 아님 — 샌드박스에서 확인).
+# 프로비저닝되지 않고 이 계정에만 설치되므로 '스토어에서 받아 이 계정에만 설치한 앱' 의 처지다.
+_PS_REGISTER_STAGED = r"""
+$ErrorActionPreference = 'Continue'
+$wa = $env:APEXSBX_WA
+takeown.exe /f $wa /a | Out-Null
+icacls.exe $wa /grant '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+# Windows PowerShell 5.1 의 ConvertFrom-Json 은 JSON 배열을 한 덩어리로 넘긴다. @() 로 감싸면 '배열 하나짜리 배열' 이
+# 되어 항목 이름이 비었다(24회차). 파이프로 풀어 항목별로 받는다.
+$pk = @(Get-Content -LiteralPath (Join-Path $env:APEXSBX_STAGE 'packages.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
+foreach ($p in $pk) {
+  $dst = Join-Path $wa $p.full
+  if (-not (Test-Path -LiteralPath $dst)) {
+    robocopy.exe (Join-Path $env:APEXSBX_STAGE $p.full) $dst /E /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+  }
+}
+$order = @($pk | Where-Object { $_.fw }) + @($pk | Where-Object { -not $_.fw -and $_.full -match '_x64__' })
+foreach ($p in $order) {
+  if (Get-AppxPackage -Name $p.name | Where-Object PackageFullName -eq $p.full) { continue }
+  try {
+    Add-AppxPackage -Register (Join-Path (Join-Path $wa $p.full) 'AppxManifest.xml') -DisableDevelopmentMode -ErrorAction Stop
+    Write-Output "OK $($p.full)"
+  } catch { Write-Output "FAIL $($p.full): $($_.Exception.Message.Split([Environment]::NewLine)[0])" }
+}
+"""
+_STORE_APPS = ('Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.ZuneVideo', 'Microsoft.ZuneMusic')
+_STAGED = {}
+
+
+def _register_staged_appx():
+    """(이 계정에 설치된 점검용 스토어 앱 이름 집합, 설명). 한 번만 등록한다."""
+    if 'done' in _STAGED:
+        return _STAGED['done']
+    from backend import debloater
+    stage = os.path.join(OUT, 'appx_stage')
+    if not os.path.isfile(os.path.join(stage, 'packages.json')):
+        _STAGED['done'] = (set(), '호스트 PC 에 디블로터 목록의 스토어 앱이 없어 복사하지 않았습니다')
+        return _STAGED['done']
+    env = dict(os.environ, APEXSBX_STAGE=stage, APEXSBX_WA=debloater._windowsapps_roots()[0])
+    r = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', _PS_REGISTER_STAGED],
+                       shell=False, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors='replace',
+                       env=env, creationflags=CREATE_NO_WINDOW, timeout=900)
+    ok, rows, err = debloater._query_packages(list(_STORE_APPS))
+    names = {x['name'] for x in rows if not x.get('error')} if ok else set()
+    _STAGED['done'] = (names, ((r.stdout or '') + (r.stderr or '')).strip()[-600:] or (err or ''))
+    return _STAGED['done']
+
+
 @check('디블로터 앱: 이 계정에서 제거 → 기록 → 되살리기')
 def appx_round_trip():
     from backend import debloater
+    _register_staged_appx()
     item, note = None, ''
+    # 되살릴 수 있는(설치 파일이 남는) 목록 앱으로 왕복을 본다. 이 계정에만 설치된 앱은 지우면 설치 파일이
+    # 사라져 되살릴 수 없다(그 경우는 다음 점검이 본다).
+    st = debloater.get_install_state()
     for x in debloater.DEBLOAT_SAFE_LIST:
-        if x['kind'] == 'appx':
-            ok, rows, _ = debloater._query_packages(x['packages'])
-            if ok and [r for r in rows if not r.get('error')]:
-                item = x
-                break
+        if x['kind'] == 'appx' and st.get('items', {}).get(x['id']) == 'installed' \
+                and st.get('restorable', {}).get(x['id']) is True:
+            item = x
+            break
     if not item:
         item, installed = _sandbox_appx_item()
         if not item:
             return 'SKIP', f'제거·되살리기에 쓸 앱이 없습니다. 설치된 앱: {installed}', []
-        note = f"목록의 앱이 없어 {item['packages'][0]} 로 확인했습니다. "
+        note = f"목록의 앱 중 되살릴 수 있는(Windows 기본 설치) 앱이 없어 {item['packages'][0]} 로 확인했습니다. "
     account = debloater._current_account()
     problems = []
     why = debloater._account_problem(account)
@@ -876,6 +1098,10 @@ def appx_round_trip():
     if not ok:
         return 'FAIL', f'설치 상태 확인 실패: {err}', []
     original = {r['familyName'].lower(): r['fullName'] for r in rows if not r.get('error')}
+    # 설치 파일이 남는 앱(Windows 이미지에 들어 있음)이라고 미리 알아봐야 한다. 화면이 '되살릴 수 있음' 으로 보여 준다
+    kept = debloater._files_kept([r for r in rows if not r.get('error')])
+    if not kept or not all(v is True for v in kept.values()):
+        problems.append(f'되살릴 수 있는 앱인데 미리 알아본 결과가 다릅니다: {kept}')
     before = snapshot('appx_before')
 
     status, detail = debloater._apply_appx_item(item, account)
@@ -904,6 +1130,60 @@ def appx_round_trip():
         problems.append(f'되살렸는데 제거 기록에 남았습니다: {left}')
     status, why, changes = verdict(problems, diff(before, snapshot('appx_after')))
     return status, (note + why).strip(), changes
+
+
+@check('디블로터 앱(호스트의 실제 스토어 앱): 이 계정에만 설치된 앱은 되살릴 수 없다고 미리 알리고, 영화 및 TV 를 지워도 미디어 플레이어는 그대로')
+def appx_store_only():
+    from backend import debloater
+    names, log = _register_staged_appx()
+    need = {'Microsoft.ZuneVideo', 'Microsoft.ZuneMusic', 'Microsoft.BingNews'}
+    if not need <= names:
+        return 'SKIP', f'점검할 스토어 앱을 등록하지 못했습니다(등록됨 {sorted(names)}): {log}', []
+    account = debloater._current_account()
+    problems, removed_full = [], []
+    try:
+        st = debloater.get_install_state()
+        for iid in ('bing', 'zune'):
+            if st['items'].get(iid) != 'installed':
+                problems.append(f"{iid}: 설치돼 있는데 {st['items'].get(iid)} 로 보입니다")
+            if st.get('restorable', {}).get(iid) is not False:
+                problems.append(f"{iid}: 이 계정에만 설치된 앱인데 되살릴 수 없다고 알리지 않습니다 "
+                                f"(restorable={st.get('restorable', {}).get(iid)})")
+        for iid in ('zune', 'bing'):
+            item = debloater._ITEMS_BY_ID[iid]
+            ok, rows, _ = debloater._query_packages(item['packages'])
+            removed_full += [x['fullName'] for x in rows if not x.get('error')]
+            status, detail = debloater._apply_appx_item(item, account)
+            if status != 'removed':
+                problems.append(f"{item['name']} 제거: {status} {detail}")
+        ok, rows, err = debloater._query_packages(list(_STORE_APPS))
+        now = {x['name'] for x in rows if not x.get('error')} if ok else None
+        if now is None:
+            problems.append(f'제거 뒤 설치 상태를 확인하지 못했습니다: {err}')
+        else:
+            if 'Microsoft.ZuneMusic' not in now:
+                problems.append('영화 및 TV 를 지우자 미디어 플레이어(ZuneMusic)도 사라졌습니다')
+            if now - {'Microsoft.ZuneMusic'}:
+                problems.append(f'제거 뒤에도 남았습니다: {sorted(now - {"Microsoft.ZuneMusic"})}')
+
+        # 미리 알린 대로 Windows 가 설치 파일을 지운다 → '제거한 앱' 은 설치 파일 없음, 되살리기는 Store 로 안내
+        def recs():
+            return [a for a in debloater.get_removed_apps() if a.get('fullName') in removed_full]
+        _wait(lambda: not any(a.get('manifestFound') for a in recs()), 60)
+        if len(recs()) != len(removed_full):
+            problems.append(f'제거 기록이 {len(recs())}개입니다(지운 패키지 {len(removed_full)}개)')
+        if any(a.get('manifestFound') for a in recs()):
+            problems.append('설치 파일이 남았습니다 — 되살릴 수 없다고 알린 것이 틀렸습니다')
+        r = debloater.restore_removed_apps(list(_STORE_APPS))
+        if r.get('success') or not r.get('failed') \
+                or not all('Microsoft Store' in str(f.get('reason')) for f in r['failed']):
+            problems.append(f"되살리기 결과가 사실과 다릅니다: {r.get('message')} {r.get('failed')}")
+        if r.get('restored'):
+            problems.append(f"되살릴 수 없는 앱을 되살렸다고 했습니다: {r['restored']}")
+    finally:
+        if removed_full:
+            debloater._forget_removed(removed_full)       # 이 점검이 남긴 기록만 뺀다(다음 점검에 섞이지 않게)
+    return verdict(problems, [])
 
 
 @check('APEX CARE 제거 전 되돌리기: main.py --revert-for-uninstall')
@@ -1033,7 +1313,8 @@ def other_account_startup():
 
     try:
         # 암호가 14자를 넘으면 net.exe 가 Y/N 을 물어 창 없이 실패한다('올바른 응답이 제공되지 않았습니다'). 14자로 맞춘다
-        r = subprocess.run([net, 'user', user, 'Ax9!' + secrets.token_hex(5), '/add'], shell=False,
+        pw = 'Ax9!' + secrets.token_hex(5)
+        r = subprocess.run([net, 'user', user, pw, '/add'], shell=False,
                            capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
         if r.returncode != 0:
             return 'FAIL', f'점검용 계정을 만들지 못했습니다: {r.stderr.decode("cp949", "replace")[-200:]}', []
@@ -1081,8 +1362,26 @@ def other_account_startup():
         left = _temp_hives()
         if left:
             problems.append(f'올린 하이브가 남았습니다: {left}')
+
+        # 그 계정이 다시 로그인하면 자기 프로필로 열려야 한다. 하이브를 내리지 못했거나 망가뜨렸으면 Windows 가
+        # 임시 프로필(C:\Users\TEMP)로 연다(점검표 13-7 의 '임시 프로필로 열리지 않는다').
+        seen = r'C:\Users\Public\apexsbx_profile.txt'
+        if os.path.exists(seen):
+            os.remove(seen)
+        cmd = os.path.join(sysroot, 'System32', 'cmd.exe')
+        _, why = _run_as(user, pw, cmd, f'/c echo %USERPROFILE%> {seen}', wait=True)
+        try:
+            with open(seen, encoding='mbcs', errors='replace') as f:
+                opened = f.read().strip()
+        except OSError:
+            opened = None
+        if not opened:
+            problems.append(f'되돌린 뒤 그 계정으로 로그온하지 못했습니다: {why}')
+        elif os.path.normcase(opened) != os.path.normcase(home):
+            problems.append(f'되돌린 뒤 그 계정이 자기 프로필이 아닌 {opened} 로 열렸습니다(임시 프로필)')
     finally:
         if sid:
+            _wait(lambda: not _hku_loaded(sid), 60)          # 로그온으로 올라온 프로필이 내려가야 지울 수 있다
             try:
                 ue = ctypes.WinDLL('userenv', use_last_error=True)
                 ue.DeleteProfileW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p]
@@ -1121,10 +1420,37 @@ def _hku_loaded(sid):
 _PS_RUN_AS = (
     "$p = ConvertTo-SecureString $env:APEXSBX_PW -AsPlainText -Force; "
     "$c = New-Object System.Management.Automation.PSCredential($env:APEXSBX_USER, $p); "
-    "(Start-Process -FilePath $env:APEXSBX_EXE -ArgumentList '-t','127.0.0.6' -Credential $c -LoadUserProfile "
-    "-WorkingDirectory $env:APEXSBX_DIR -WindowStyle Hidden -PassThru).Id "
-    "| Set-Content -LiteralPath $env:APEXSBX_OUT -Encoding ascii"
+    "$a = @{ FilePath = $env:APEXSBX_EXE; ArgumentList = $env:APEXSBX_ARGS; Credential = $c; LoadUserProfile = $true; "
+    "WorkingDirectory = $env:APEXSBX_DIR; WindowStyle = 'Hidden'; PassThru = $true }; "
+    "if ($env:APEXSBX_WAIT -eq '1') { $a.Wait = $true }; "
+    "(Start-Process @a).Id | Set-Content -LiteralPath $env:APEXSBX_OUT -Encoding ascii"
 )
+
+
+def _run_as(user, pw, exe, args, wait=False):
+    """다른 계정으로 프로그램을 띄운다(그 계정의 프로필을 올린다). (PID|None, 실패 설명)
+
+    출력을 파이프로 받지 않는다. 그 계정으로 띄운 프로그램이 PowerShell 의 출력 파이프를 물려받아 붙들고 있어,
+    파이프로 받으면 그 프로그램이 끝날 때까지 기다렸다(22회차 샌드박스에서 ping -t 로 멈춤). PID 는 파일로 받는다.
+    """
+    system32 = os.path.join(os.environ.get('SystemRoot') or r'C:\Windows', 'System32')
+    ps = os.path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    pid_file = os.path.join(OUT, f'runas_{user}_pid.txt')
+    err_file = os.path.join(OUT, f'runas_{user}.log')
+    if os.path.exists(pid_file):
+        os.remove(pid_file)
+    env = dict(os.environ, APEXSBX_PW=pw, APEXSBX_USER=user, APEXSBX_EXE=exe, APEXSBX_ARGS=args,
+               APEXSBX_DIR=system32, APEXSBX_OUT=pid_file, APEXSBX_WAIT='1' if wait else '0')
+    with open(err_file, 'w', encoding='utf-8') as log:
+        subprocess.run([ps, '-NoProfile', '-Command', _PS_RUN_AS], shell=False, stdin=subprocess.DEVNULL,
+                       stdout=log, stderr=log, env=env, cwd=system32, creationflags=CREATE_NO_WINDOW,
+                       timeout=180)
+    try:
+        with open(pid_file, encoding='ascii') as f:
+            return int(f.read().strip()), ''
+    except (OSError, ValueError):
+        with open(err_file, encoding='utf-8', errors='replace') as f:
+            return None, f.read()[-300:]
 
 
 @check('제거 전 되돌리기: 로그인해 있는 다른 계정(빠른 사용자 전환)이 끈 시작 프로그램을 그 계정의 레지스트리에서 되돌림')
@@ -1160,24 +1486,8 @@ def other_account_signed_in():
         r = subprocess.run([ps, '-NoProfile', '-Command', f'(Get-LocalUser {user}).SID.Value'], shell=False,
                            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=60)
         sid = (r.stdout or '').strip()
-        # 파이프로 받지 않는다. 그 계정으로 띄운 ping 이 PowerShell 의 출력 파이프를 물려받아 붙들고 있어, 파이프로
-        # 받으면 ping 이 끝날 때까지(-t 라 영원히) 기다렸다(22회차 샌드박스에서 멈춤). PID 는 파일로 받는다.
-        pid_file = os.path.join(OUT, 'signed_in_pid.txt')
-        err_file = os.path.join(OUT, 'signed_in_runas.log')
-        if os.path.exists(pid_file):
-            os.remove(pid_file)
-        env = dict(os.environ, APEXSBX_PW=pw, APEXSBX_USER=user, APEXSBX_EXE=os.path.join(system32, 'PING.EXE'),
-                   APEXSBX_DIR=system32, APEXSBX_OUT=pid_file)
-        with open(err_file, 'w', encoding='utf-8') as log:
-            subprocess.run([ps, '-NoProfile', '-Command', _PS_RUN_AS], shell=False, stdin=subprocess.DEVNULL,
-                           stdout=log, stderr=log, env=env, cwd=system32, creationflags=CREATE_NO_WINDOW,
-                           timeout=120)
-        try:
-            with open(pid_file, encoding='ascii') as f:
-                pid = int(f.read().strip())
-        except (OSError, ValueError):
-            with open(err_file, encoding='utf-8', errors='replace') as f:
-                why = f.read()[-300:]
+        pid, why = _run_as(user, pw, os.path.join(system32, 'PING.EXE'), '-t 127.0.0.6')
+        if not pid:
             return 'FAIL', f'그 계정으로 프로그램을 띄우지 못했습니다: {why}', []
         if not sid or not _wait(lambda: _hku_loaded(sid), 60):
             return 'FAIL', f'그 계정의 레지스트리가 올라오지 않았습니다 (SID {sid!r})', []
@@ -1488,14 +1798,119 @@ def write_report(started):
         f.write('\n'.join(lines) + '\n')
 
 
+# ─────────────────────────────────────────────
+# 재부팅 (점검표 3-4)
+# ─────────────────────────────────────────────
+# 샌드박스는 안에서 다시 시작해도 상태가 남고, 로그온 명령(run_in_sandbox.cmd)이 다시 돈다(샌드박스에서 확인).
+# 모든 점검이 끝나면 게이밍 모드를 적용하고 상태를 결과 폴더에 적은 뒤 종료 코드 REBOOT_EXIT 로 끝난다.
+# run_in_sandbox.cmd 가 그것을 보고 샌드박스를 다시 시작하고, 다시 돈 이 스크립트가 reboot_state.json 을 보고 확인을 이어 간다.
+
+REBOOT_EXIT = 50
+REBOOT_STATE = os.path.join(OUT, 'reboot_state.json')
+REBOOT_NAME = '성능 모드: 게이밍 → 재부팅 → 값 유지, 앱을 다시 켜도 원래 값 기록 그대로, 표준으로 되돌리면 처음과 같음'
+
+
+def _boot_epoch():
+    k = ctypes.windll.kernel32
+    k.GetTickCount64.restype = ctypes.c_uint64
+    return time.time() - k.GetTickCount64() / 1000
+
+
+def _originals():
+    """PC 저널의 원래 값 기록(저장 시각 같은 부가 정보는 뺀다)"""
+    from backend import machine_store, system_state as ss
+    out = {}
+    for k, e in ((machine_store.read('Journal') or {}).get('entries', {}) or {}).items():
+        out[k] = {f: e.get(f) for f in ('kind',) + ss._ORIGINAL_FIELDS.get(e.get('kind'), ())}
+    return json.loads(json.dumps(out))
+
+
+def reboot_before():
+    """재부팅 전 준비. 준비했으면 True(그 뒤 재부팅). 실패는 결과에 남긴다."""
+    from backend import perf_modes, system_state as ss
+    t0 = time.time()
+    try:
+        before = snapshot('reboot_before')
+        r = perf_modes.apply_mode('gaming')
+        if not r.get('success'):
+            perf_modes.apply_mode('standard')
+            raise RuntimeError(f"게이밍 적용 실패: {r.get('message')}")
+        bad = _expect_gaming()
+        if bad:
+            perf_modes.apply_mode('standard')
+            raise RuntimeError('; '.join(bad))
+        with open(REBOOT_STATE, 'w', encoding='utf-8') as f:
+            json.dump({'boot': _boot_epoch(), 'plan': ss.active_plan_guid(), 'originals': _originals(),
+                       'snap': before, 'seconds': round(time.time() - t0, 1)}, f, ensure_ascii=False)
+        print('[REBOOT] 게이밍 모드를 적용했습니다. 샌드박스를 다시 시작합니다.', flush=True)
+        return True
+    except Exception:
+        RESULTS.append({'name': REBOOT_NAME, 'status': 'FAIL', 'detail': traceback.format_exc(limit=6),
+                        'diff': [], 'seconds': round(time.time() - t0, 1)})
+        return False
+
+
+def reboot_after(state):
+    from backend import config_manager, perf_modes, system_state as ss
+    t0 = time.time()
+    problems, changes = [], []
+    try:
+        if abs(_boot_epoch() - state['boot']) < 5:
+            problems.append('샌드박스가 다시 시작되지 않았습니다(부팅 시각이 같음)')
+
+        def same_as_before(when):
+            if ss.active_plan_guid() != state['plan']:
+                problems.append(f"{when}: 활성 전원 플랜이 바뀌었습니다 ({ss.active_plan_guid()} ≠ {state['plan']})")
+            problems.extend(f'{when}: {p}' for p in _expect_gaming())
+            if config_manager.get_optimization_mode() != 'gaming':
+                problems.append(f"{when}: 저장된 모드가 {config_manager.get_optimization_mode()} 입니다")
+            if _originals() != state['originals']:
+                problems.append(f'{when}: PC 저널의 원래 값 기록이 바뀌었습니다(되돌리면 원래대로 가지 않음)')
+
+        same_as_before('재부팅 직후(앱 실행 전)')
+        # 앱을 켠다(저장된 모드를 다시 적용한다). 원래 값을 게이밍 값으로 덮어쓰면 안 된다
+        env = dict(os.environ, PYTHONUTF8='1')
+        r = subprocess.run([sys.executable, '-c', _RESTART_CHILD, REPO], shell=False, capture_output=True,
+                           env=env, cwd=REPO, creationflags=CREATE_NO_WINDOW, timeout=300)
+        if r.returncode != 0:
+            problems.append(f'앱 시작 실패 {r.returncode}: {r.stderr.decode("utf-8", "replace")[-300:]}')
+        same_as_before('재부팅 뒤 앱을 켠 다음')
+
+        r = perf_modes.apply_mode('standard')
+        if not r.get('success'):
+            problems.append(f"표준 되돌리기: {r.get('message')}")
+        changes = diff(state['snap'], snapshot('reboot_after'))
+    except Exception:
+        problems.append(traceback.format_exc(limit=6))
+    status, detail, changes = verdict(problems, changes)
+    RESULTS.append({'name': REBOOT_NAME, 'status': status, 'detail': detail, 'diff': changes[:60],
+                    'seconds': round(state.get('seconds', 0) + time.time() - t0, 1)})
+    print(f"[{status}] {REBOOT_NAME} ({RESULTS[-1]['seconds']}s) {detail.splitlines()[0] if detail else ''}", flush=True)
+
+
 def main():
     refuse_outside_sandbox()
     sys.path.insert(0, REPO)
     os.makedirs(OUT, exist_ok=True)
+    if os.path.exists(REBOOT_STATE):
+        # 재부팅 뒤 다시 불렸다. 지난 결과에 재부팅 점검만 더한다. 상태 파일은 먼저 지운다(다시 돌아도 반복하지 않게).
+        with open(REBOOT_STATE, encoding='utf-8') as f:
+            state = json.load(f)
+        os.remove(REBOOT_STATE)
+        with open(os.path.join(OUT, 'report.json'), encoding='utf-8') as f:
+            prev = json.load(f)
+        RESULTS.extend(prev.get('results', []))
+        reboot_after(state)
+        write_report(prev.get('started', ''))
+        return 1 if any(r['status'] == 'FAIL' for r in RESULTS) else 0
     started = time.strftime('%Y-%m-%d %H:%M:%S')
     for run in CHECKS:
         run()
         write_report(started)                      # 중간에 멈춰도 여기까지의 결과는 남는다
+    if reboot_before():
+        write_report(started)
+        return REBOOT_EXIT
+    write_report(started)
     return 1 if any(r['status'] == 'FAIL' for r in RESULTS) else 0
 
 

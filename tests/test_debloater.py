@@ -66,6 +66,8 @@ class FakeAppx:
         self.installed = set()
         self.remove_ignored = set()           # Remove 가 성공을 돌려주지만 그대로 남는 것
         self.register_ignored = set()         # Register 가 성공을 돌려주지만 설치되지 않는 것
+        self.sole = set()                     # 이 계정에만 설치(프로비저닝·다른 계정 없음): 지우면 Windows 가 파일도 지운다
+        self.keeps_fail = False               # 되살릴 수 있는지 확인하는 조회가 실패한다
         self.calls = []
 
     def add(self, name, files=True):
@@ -92,7 +94,16 @@ class FakeAppx:
                 n = self.by_full(f)
                 if n not in self.remove_ignored:
                     self.installed.discard(n)
+                    if n in self.sole:
+                        import shutil
+                        shutil.rmtree(self.catalog[n]['installLocation'], ignore_errors=True)
             return True, [{'fullName': f, 'ok': True, 'error': ''} for f in arg['fullNames']], None
+        if body is debloater._PS_KEEPS:
+            self.calls.append(('keeps', list(arg['names'])))
+            if self.keeps_fail:
+                return False, [], 'Get-AppxProvisionedPackage 실패'
+            return True, [{'name': n, 'provisioned': n not in self.sole, 'otherUsers': False}
+                          for n in arg['names']], None
         if body is debloater._PS_REGISTER:
             self.calls.append(('register', list(arg['manifests'])))
             for m in arg['manifests']:
@@ -360,3 +371,34 @@ def test_admin_logged_in_another_session_does_not_pass_the_account_check(procs, 
 
     assert debloater._desktop_accounts() == {'kid'}
     assert debloater._account_problem('mom') is not None            # 막는다(예전에는 mom 도 바탕 화면 계정으로 잡혔다)
+
+
+def test_install_state_tells_apart_apps_whose_files_windows_will_delete(appx):
+    # 이 계정에만 설치된 스토어 앱은 지우면 Windows 가 설치 폴더를 곧바로 지운다(샌드박스에서 확인).
+    # 예전에는 모든 앱에 '제거한 앱 에서 되살리기' 라고 보여 주었다.
+    appx.add('Microsoft.BingNews')
+    appx.add('Microsoft.BingWeather')
+    appx.add('Microsoft.ZuneVideo')
+    appx.sole.add('Microsoft.BingWeather')                # 뉴스는 남고 날씨는 지워진다 → 항목은 되살릴 수 없음
+    r = debloater.get_install_state()
+    assert r['restorable'] == {'bing': False, 'zune': True}
+    assert appx.ran('remove') == [] and appx.ran('register') == []     # 읽기만 한다
+    assert 'Remove-' not in debloater._PS_KEEPS and 'Add-' not in debloater._PS_KEEPS
+
+
+def test_restorability_unknown_is_not_guessed(appx):
+    appx.add('Microsoft.ZuneVideo')
+    appx.keeps_fail = True
+    r = debloater.get_install_state()
+    assert r['items']['zune'] == 'installed' and r['restorable'] == {'zune': None}
+
+
+def test_app_installed_only_here_cannot_be_restored_and_says_so(appx):
+    appx.add('Microsoft.ZuneVideo')
+    appx.sole.add('Microsoft.ZuneVideo')
+    status, _ = debloater._apply_appx_item(ITEM['zune'], 'kim')
+    assert status == 'removed'
+    assert [a['manifestFound'] for a in debloater.get_removed_apps()] == [False]
+    r = debloater.restore_removed_apps()
+    assert r['success'] is False and 'Microsoft Store' in r['failed'][0]['reason']
+    assert appx.ran('register') == []

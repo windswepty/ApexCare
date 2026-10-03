@@ -58,6 +58,29 @@ foreach ($name in 'DONE.txt', 'report.md', 'report.json', 'console.txt', 'snap')
         catch { Write-Host "지난 결과($p)를 지우지 못했습니다. 다른 결과 폴더를 쓰세요."; exit 2 }
     }
 }
+# 디블로터 앱 점검용: 이 PC 에 설치된 스토어 앱(디블로터 목록의 뉴스·날씨·영화 및 TV 와 남아야 하는 미디어 플레이어)과
+# 그 프레임워크를 결과 폴더로 복사한다. 이 PC 에서는 읽기만 한다. 샌드박스에는 스토어 앱이 없어서, 점검이 이것을
+# 샌드박스의 WindowsApps 로 옮겨 등록한 뒤 실제 목록으로 제거·되살리기를 돌린다. 이 PC 에 없으면 그 점검만 건너뛴다.
+$stage = Join-Path $Out 'appx_stage'
+$staged = @{}
+foreach ($n in 'Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.ZuneVideo', 'Microsoft.ZuneMusic') {
+    foreach ($p in @(Get-AppxPackage -Name $n -ErrorAction SilentlyContinue)) {
+        $staged[$p.PackageFullName] = $p
+        foreach ($d in @($p.Dependencies)) { $staged[$d.PackageFullName] = $d }
+    }
+}
+if ($staged.Count -gt 0) {
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $rows = foreach ($p in $staged.Values) {
+        robocopy $p.InstallLocation (Join-Path $stage $p.PackageFullName) /E /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -lt 8) { [pscustomobject]@{ name = $p.Name; full = $p.PackageFullName; fw = [bool]$p.IsFramework } }
+    }
+    @($rows) | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'packages.json') -Encoding UTF8
+    Write-Host "스토어 앱 $(@($rows).Count)개를 점검용으로 복사했습니다(이 PC 의 앱은 그대로)."
+} else {
+    Write-Host '이 PC 에 디블로터 목록의 스토어 앱이 없어 실제 앱 제거 점검은 건너뜁니다.'
+}
+
 $esc = { param($s) [System.Security.SecurityElement]::Escape($s) }
 $wsb = Join-Path $Out 'apexcare-check.wsb'
 $xml = @"

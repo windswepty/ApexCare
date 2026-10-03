@@ -25,6 +25,9 @@ export default function Debloater({ addToast }) {
   // 앱 항목별 설치 여부: 'installed' | 'not_installed' | 'unknown'. null = 아직 확인 중.
   // 설치되지 않은 앱은 고를 수 없게 한다(예전에는 골라 실행해야 '변경 없음' 을 알 수 있었다).
   const [installState, setInstallState] = useState(null);
+  // 설치된 앱 항목별로 지운 뒤에도 설치 파일이 남는지: true(되살릴 수 있음) | false(Windows 가 지움) | null(모름).
+  // Windows 는 이 계정에만 설치된 스토어 앱을 지우면 설치 파일까지 지운다. 그 앱은 '제거한 앱' 에서 되살릴 수 없다.
+  const [restorable, setRestorable] = useState({});
 
   const fetchInstallState = async () => {
     const a = api();
@@ -33,6 +36,7 @@ export default function Debloater({ addToast }) {
       const r = await a.getDebloatInstallState();
       const state = r?.items || {};
       setInstallState(state);
+      setRestorable(r?.restorable || {});
       // 이제 설치돼 있지 않은 앱(방금 제거한 앱 등)은 선택에서 뺀다. 예전에는 일부 실패 뒤 그 앱이 선택된 채
       // 비활성화돼 해제할 수 없었고, 다음 확인 창이 이미 지운 앱을 '제거합니다' 로 다시 나열했다.
       setSelectedIds(prev => prev.filter(id => state[id] !== 'not_installed'));
@@ -129,11 +133,24 @@ export default function Debloater({ addToast }) {
     if (chosen.length === 0) return;
     const irreversible = chosen.filter(x => !x.reversible);
     const reversible = chosen.filter(x => x.reversible);
+    const line = (x) => `  · ${x.name}${x.packages ? ` (${x.packages.join(', ')})` : ''}`;
+    const gone = irreversible.filter(x => restorable[x.id] === false);
+    const kept = irreversible.filter(x => restorable[x.id] === true);
+    const unsure = irreversible.filter(x => restorable[x.id] !== false && restorable[x.id] !== true);
     let msg = '';
-    if (irreversible.length > 0) {
-      msg += `아래 앱을 이 계정에서 제거합니다. 이 화면의 '제거한 앱' 에서 되살릴 수 있지만, `
-        + `Windows 가 설치 파일을 정리했으면 Microsoft Store 에서 다시 설치해야 합니다.\n`
-        + irreversible.map(x => `  · ${x.name}${x.packages ? ` (${x.packages.join(', ')})` : ''}`).join('\n') + '\n\n';
+    if (gone.length > 0) {
+      msg += `아래 앱은 이 계정에만 설치되어 있어, 제거하면 Windows 가 설치 파일까지 지웁니다. `
+        + `이 화면에서 되살릴 수 없고 Microsoft Store 에서 다시 설치해야 합니다.\n`
+        + gone.map(line).join('\n') + '\n\n';
+    }
+    if (kept.length > 0) {
+      msg += `아래 앱을 이 계정에서 제거합니다. 설치 파일이 남으므로 이 화면의 '제거한 앱' 에서 되살릴 수 있습니다.\n`
+        + kept.map(line).join('\n') + '\n\n';
+    }
+    if (unsure.length > 0) {
+      msg += `아래 앱을 이 계정에서 제거합니다. 되살릴 수 있는지(설치 파일이 남는지) 확인하지 못했습니다. `
+        + `설치 파일이 지워지면 Microsoft Store 에서 다시 설치해야 합니다.\n`
+        + unsure.map(line).join('\n') + '\n\n';
     }
     if (reversible.length > 0) {
       msg += `아래 정책을 바꿉니다. 원래 값을 기록해 두므로 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.\n`
@@ -216,7 +233,7 @@ export default function Debloater({ addToast }) {
           </div>
           <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">Windows 기본 앱 정리</h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xl">
-            잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(아래 '제거한 앱' 에서 되살릴 수 있습니다),
+            잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(설치 파일이 남는 앱은 아래 '제거한 앱' 에서 되살릴 수 있습니다),
             원격 분석·Cortana 정책을 바꿉니다('변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다).
           </p>
         </div>
@@ -283,12 +300,17 @@ export default function Debloater({ addToast }) {
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">설치 여부 확인 못 함</span>
                     )}
                   </div>
-                  <div className={`text-[11px] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500' : 'text-amber-500'}`}>
+                  <div className={`text-[11px] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500'
+                    : restorable[item.id] === false ? 'text-red-500' : 'text-amber-500'}`}>
                     {item.reversible
                       ? "되돌리기 가능 ('변경 내역 · 되돌리기')"
-                      : item.restorable
-                        ? "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기"
-                        : '되돌릴 수 없음 (Store 에서 재설치)'}
+                      : !item.restorable
+                        ? '되돌릴 수 없음 (Store 에서 재설치)'
+                        : restorable[item.id] === false
+                          ? '이 계정에만 설치됨 · 제거하면 설치 파일도 지워져 되살릴 수 없음 (Store 에서 재설치)'
+                          : restorable[item.id] === true
+                            ? "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기"
+                            : "이 계정에서 제거 · 설치 파일이 남으면 아래 '제거한 앱' 에서 되살리기"}
                   </div>
                   {item.note && <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{item.note}</div>}
                 </div>
@@ -305,7 +327,7 @@ export default function Debloater({ addToast }) {
               주의사항
             </h3>
             <p className="text-xs text-black/70 dark:text-white/70 leading-relaxed mb-4">
-              앱은 이 프로그램을 실행한 계정에서만 제거합니다. 아래 '제거한 앱' 에서 되살릴 수 있지만, Windows 가 설치 파일을 정리했으면 Microsoft Store 에서 다시 설치해야 합니다. 쓰고 있는 앱(예: 휴대폰과 연결)은 선택하지 마세요. 원격 분석·Cortana 항목은 정책만 바꾸며 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.
+              앱은 이 프로그램을 실행한 계정에서만 제거합니다. Windows 기본 설치 앱이나 다른 계정에도 설치된 앱은 설치 파일이 남아 아래 '제거한 앱' 에서 되살릴 수 있습니다. 이 계정에만 설치된 앱은 Windows 가 설치 파일까지 지우므로 Microsoft Store 에서 다시 설치해야 합니다(항목마다 표시합니다). 쓰고 있는 앱(예: 휴대폰과 연결)은 선택하지 마세요. 원격 분석·Cortana 항목은 정책만 바꾸며 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.
             </p>
           </div>
 

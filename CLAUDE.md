@@ -61,6 +61,8 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 - 기본 앱(Appx) 제거는 정확한 패키지 이름으로, APEX CARE 를 실행한 계정에서만 합니다. `-AllUsers`·`Remove-AppxProvisionedPackage`·와일드카드를
   쓰지 않습니다(설치 파일까지 사라져 되살릴 수 없습니다). 지우기 전에 `debloat_removed.json` 에 기록하고, 기록하지 못하면 지우지 않습니다.
   되살리기는 WindowsApps·SystemApps 안의 `AppxManifest.xml` 만 등록하고, 등록 뒤 설치됐는지 다시 확인합니다.
+  Windows 는 마지막 사용자에게서 지운 패키지의 설치 폴더를 곧바로 지웁니다. 그래서 지우기 전에 설치 파일이 남는지
+  (프로비저닝·다른 계정에도 설치·SystemApps — `debloater._files_kept`) 알아보고, 남지 않는 앱은 항목과 확인 창에 "되살릴 수 없음" 으로 보여 줍니다.
 - 클라우드 동기화의 온라인 전용 파일(OneDrive 등)은 읽거나 쓰기로 열지 않습니다(`file_finder._is_cloud_only`). 내용에 손대면 내려받아집니다.
 
 ### 시스템 변경 (레지스트리·전원·서비스)
