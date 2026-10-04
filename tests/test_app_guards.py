@@ -157,3 +157,12 @@ def test_user_installed_uninstaller_is_not_run_with_admin_rights(monkeypatch, tm
     assert r['success'] is False and started == []
     assert uninstaller.run_uninstall(str(pf / 'Foo' / 'uninst.exe') + '|/S')['success']
     assert started == [[str(pf / 'Foo' / 'uninst.exe'), '/S']]
+
+
+def test_installer_and_uninstaller_windows_all_carry_the_app_icon():
+    # 마법사 창에만 아이콘을 걸어, 중간에 뜨는 확인·경고 창과 제거 프로그램 창은 Windows 기본 아이콘으로 보였다
+    setup = open(os.path.join(ROOT, 'tools', 'setup_wizard.py'), encoding='utf-8').read()
+    un = open(os.path.join(ROOT, 'tools', 'uninstall.py'), encoding='utf-8').read()
+    assert 'app.setWindowIcon(_app_icon())' in setup and 'app.setWindowIcon(_app_icon())' in un
+    spec = open(os.path.join(ROOT, 'APEX CARE Uninstaller.spec'), encoding='utf-8').read()
+    assert "('public/setup_icon.ico', '.')" in spec                  # 제거 프로그램 exe 안에 아이콘 파일이 있어야 한다

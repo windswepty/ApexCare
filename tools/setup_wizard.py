@@ -422,8 +422,29 @@ class SetupWizard(QWizard):
         except Exception:
             return False
 
+def _app_icon():
+    base = getattr(sys, '_MEIPASS', os.path.abspath('.'))
+    for name in ('setup_icon.ico', os.path.join('public', 'setup_icon.ico')):
+        path = os.path.join(base, name)
+        if os.path.exists(path):
+            return QIcon(path)
+    return QIcon()
+
+
+def _set_taskbar_identity(app_id):
+    # 작업 표시줄이 이 창들을 한 단추로 묶고, 창 아이콘(위에서 건 APEX CARE 아이콘)을 쓰게 한다
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
+    _set_taskbar_identity('APEXCARE.Setup')
     app = QApplication(sys.argv)
+    # 마법사 창에만 걸면 중간에 뜨는 확인·경고 창(QMessageBox)은 Windows 기본 아이콘으로 보였다
+    app.setWindowIcon(_app_icon())
     app.setStyle("windowsvista")
     wizard = SetupWizard()
     wizard.show()

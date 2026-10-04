@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 import win32com.client
 
@@ -104,8 +105,24 @@ def _revert_system_changes(install_dir):
     return False, "되돌리지 못한 항목:\n" + ("\n".join(lines) if lines else f"(종료 코드 {rc})")
 
 
+def _app_icon():
+    # 제거 프로그램의 창은 모두 메시지 상자라 아이콘을 앱 전체에 건다. 없으면 Windows 기본 아이콘으로 보였다
+    base = getattr(sys, '_MEIPASS', os.path.abspath('.'))
+    for name in ('setup_icon.ico', os.path.join('public', 'setup_icon.ico')):
+        path = os.path.join(base, name)
+        if os.path.exists(path):
+            return QIcon(path)
+    return QIcon()
+
+
 def main():
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('APEXCARE.Uninstall')
+    except Exception:
+        pass
     app = QApplication(sys.argv)
+    app.setWindowIcon(_app_icon())
 
     removed_apps = _removed_app_count()
     # 사용자가 일부러 지운 앱을 프로그램 제거 때 다시 설치하지 않는다. 대신 그 사실을 먼저 알린다.

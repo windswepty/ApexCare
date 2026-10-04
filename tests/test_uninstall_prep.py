@@ -399,6 +399,8 @@ def _load_uninstaller(monkeypatch):
     qtw.QApplication, qtw.QMessageBox = object, QMessageBox
     qtc = types.ModuleType('PyQt6.QtCore')
     qtc.Qt = object
+    qtg = types.ModuleType('PyQt6.QtGui')
+    qtg.QIcon = object
     win32 = types.ModuleType('win32com.client')
 
     class Shell:
@@ -408,7 +410,7 @@ def _load_uninstaller(monkeypatch):
     win32com = types.ModuleType('win32com')
     win32com.client = win32
     for name, mod in (('PyQt6', types.ModuleType('PyQt6')), ('PyQt6.QtWidgets', qtw), ('PyQt6.QtCore', qtc),
-                      ('win32com', win32com), ('win32com.client', win32)):
+                      ('PyQt6.QtGui', qtg), ('win32com', win32com), ('win32com.client', win32)):
         monkeypatch.setitem(sys.modules, name, mod)
     spec = importlib.util.spec_from_file_location('apex_uninstaller', os.path.join(ROOT, 'tools', 'uninstall.py'))
     mod = importlib.util.module_from_spec(spec)

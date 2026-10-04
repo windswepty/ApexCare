@@ -1662,6 +1662,31 @@ def ui(window, action, name='', timeout=30):
     return {'ok': False, 'error': ((r.stderr or '') + (r.stdout or '')).strip()[-400:], 'names': []}
 
 
+def _icon_step(problems, what, title):
+    """제목이 title 인 창에 앱 아이콘이 걸려 있는지(WM_GETICON). 없으면 작업 표시줄에 Windows 기본 아이콘이 보인다.
+    아이콘이 없어도 설치·제거 점검은 계속한다(문제로만 남긴다)."""
+    import ctypes.wintypes as wt
+    u = ctypes.WinDLL('user32', use_last_error=True)
+    u.SendMessageW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+    u.SendMessageW.restype = ctypes.c_ssize_t
+    found = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def each(hwnd, _):
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(hwnd, buf, 256)
+        if buf.value == title and u.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+    u.EnumWindows(each, 0)
+    icons = [(u.SendMessageW(h, 0x7F, 1, 0), u.SendMessageW(h, 0x7F, 0, 0)) for h in found]
+    if not found:
+        problems.append(f'{what}: 창을 찾지 못해 아이콘을 확인하지 못했습니다')
+    elif not any(big and small for big, small in icons):
+        problems.append(f'{what}: 창 아이콘이 없습니다(작업 표시줄에 Windows 기본 아이콘이 보임) {icons}')
+    return True
+
+
 def _ui_step(problems, what, window, action, name='', timeout=30):
     res = ui(window, action, name, timeout)
     if not res.get('ok'):
@@ -1729,6 +1754,7 @@ def install_uninstall():
     proc = subprocess.Popen([setup], shell=False, cwd=DIST)
     try:
         ok = (_ui_step(problems, '사용권 동의', win, 'select', '조항에 동의합니다', 90)
+              and _icon_step(problems, '설치 마법사 창', win)
               and _ui_step(problems, '다음(사용권)', win, 'click', '다음')
               and _ui_step(problems, '준비 화면', win, 'wait', '대상 위치')
               and _ui_step(problems, '다음(설치 시작)', win, 'click', '다음')
@@ -1781,7 +1807,9 @@ def install_uninstall():
             pass
         proc = subprocess.Popen([uninst_exe], shell=False, cwd=install_dir)
         try:
-            if _ui_step(problems, '삭제 확인', 'APEX CARE 삭제', 'click', r'^(Yes|예)', 60):
+            if (_ui_step(problems, '삭제 확인 창', 'APEX CARE 삭제', 'wait', r'^(Yes|예)', 60)
+                    and _icon_step(problems, '제거 프로그램의 확인 창', 'APEX CARE 삭제')
+                    and _ui_step(problems, '삭제 확인', 'APEX CARE 삭제', 'click', r'^(Yes|예)', 10)):
                 # 되돌리기(최대 300초)가 끝나면 제거 프로그램이 끝나거나, 실패 목록 창을 띄운다
                 done = _wait(lambda: proc.poll() is not None
                              or ui('설정을 모두 되돌리지 못했습니다', 'exists', timeout=1).get('ok'), 330)
