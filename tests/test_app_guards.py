@@ -164,5 +164,8 @@ def test_installer_and_uninstaller_windows_all_carry_the_app_icon():
     setup = open(os.path.join(ROOT, 'tools', 'setup_wizard.py'), encoding='utf-8').read()
     un = open(os.path.join(ROOT, 'tools', 'uninstall.py'), encoding='utf-8').read()
     assert 'app.setWindowIcon(_app_icon())' in setup and 'app.setWindowIcon(_app_icon())' in un
-    spec = open(os.path.join(ROOT, 'APEX CARE Uninstaller.spec'), encoding='utf-8').read()
-    assert "('public/setup_icon.ico', '.')" in spec                  # 제거 프로그램 exe 안에 아이콘 파일이 있어야 한다
+    # *.spec 은 .gitignore 대상이라 새 클론·푸시 전 검사에는 없다(build_all.bat 도 그렇게 안내한다). 있을 때만 본다
+    spec_path = os.path.join(ROOT, 'APEX CARE Uninstaller.spec')
+    if os.path.exists(spec_path):
+        spec = open(spec_path, encoding='utf-8').read()
+        assert "('public/setup_icon.ico', '.')" in spec              # 제거 프로그램 exe 안에 아이콘 파일이 있어야 한다
