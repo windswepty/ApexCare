@@ -96,3 +96,88 @@ def test_health_tab_and_network_chip_are_on_screen():
     assert 'stats.netDownBps' in hdr and "'측정 중'" in hdr
     spec = open(os.path.join(ROOT, 'APEX CARE Payload.spec'), encoding='utf-8').read()
     assert "'backend.health'" in spec and "'backend.window_icon'" in spec
+
+
+def _nvme_log_bytes(warn=0, kelvin=310, spare=100, threshold=10, used=13, written=119159289, hours=29372,
+                    cycles=1305, unsafe=23, media=0, errlog=1):
+    d = bytearray(512)
+    d[0] = warn
+    d[1:3] = kelvin.to_bytes(2, 'little')
+    d[3], d[4], d[5] = spare, threshold, used
+    for off, v in ((48, written), (112, cycles), (128, hours), (144, unsafe), (160, media), (176, errlog)):
+        d[off:off + 16] = v.to_bytes(16, 'little')
+    return bytes(d)
+
+
+def test_nvme_health_log_is_decoded_as_the_disk_recorded_it():
+    # 실측(WDC SN570, 2026-10-04): Windows 카운터는 수명 0%·사용 시간·오류 없음, 디스크 기록은 13%·29372시간·0건
+    n = health.parse_nvme_health(_nvme_log_bytes())
+    assert n['percentUsed'] == 13 and n['powerOnHours'] == 29372 and n['temperatureC'] == 37
+    assert n['dataWrittenBytes'] == 119159289 * 512000 and n['powerCycles'] == 1305 and n['unsafeShutdowns'] == 23
+    assert n['mediaErrors'] == 0 and n['errorLogEntries'] == 1 and n['warnings'] == []
+    assert health.parse_nvme_health(b'\x00' * 100) is None
+    assert health.parse_nvme_health(_nvme_log_bytes(kelvin=0))['temperatureC'] is None     # 0K = 알려 주지 않음
+    w = health.parse_nvme_health(_nvme_log_bytes(warn=0b1100))['warnings']
+    assert [lvl for _, lvl in w] == ['위험', '위험']
+
+
+def test_nvme_disks_use_the_disk_record_over_windows_counters(monkeypatch):
+    rows = [{'id': '1', 'name': 'WDC', 'media': 'SSD', 'bus': 'NVMe', 'sizeBytes': 500107862016, 'health': 'Healthy',
+             'letters': ['C:'], 'temperature': 38, 'temperatureMax': 80, 'wear': 0, 'powerOnHours': None,
+             'readErrors': None, 'writeErrors': None},
+            {'id': '2', 'name': 'NVMe 읽기 실패', 'media': 'SSD', 'bus': 'NVMe', 'health': 'Healthy', 'wear': 4},
+            {'id': '3', 'name': '경고 켠 디스크', 'media': 'SSD', 'bus': 'NVMe', 'health': 'Healthy'}]
+    monkeypatch.setattr(debloater, '_run_ps_json', lambda *a: (True, rows, None))
+    logs = {'1': health.parse_nvme_health(_nvme_log_bytes()), '2': None,
+            '3': health.parse_nvme_health(_nvme_log_bytes(warn=0b1000))}
+    asked = []
+    monkeypatch.setattr(health, '_nvme_log', lambda n: asked.append(n) or logs[n])
+    d1, d2, d3 = health.disk_health()['disks']
+    assert asked == ['1', '2', '3']
+    assert d1['source'] == 'nvme' and d1['wearPct'] == 13 and d1['powerOnHours'] == 29372 and d1['mediaErrors'] == 0
+    assert d1['nvme']['unsafeShutdowns'] == 23 and d1['health'] == '정상'
+    # 디스크 기록을 못 읽으면 Windows 값 그대로(지어내지 않는다)
+    assert d2['source'] == 'windows' and d2['wearPct'] == 4 and d2['powerOnHours'] is None and d2['mediaErrors'] is None
+    # 디스크가 읽기 전용 경고를 켰으면 Windows 가 '정상' 이라 해도 위험으로 보인다
+    assert d3['health'] == '위험' and d3['warnings'] == ['디스크가 읽기 전용으로 바뀌었습니다']
+
+
+def test_nvme_reader_refuses_odd_disk_numbers_and_survives_blocked_calls():
+    assert health._nvme_log('../x') is None and health._nvme_log('999') is None
+    assert health._nvme_log('0') is None                          # fakewin 이 ctypes 를 막는다 → 예외 없이 None
+    assert 'GENERIC_WRITE' not in open(health.__file__, encoding='utf-8').read()
+
+
+def test_boot_log_that_stopped_recording_is_said_out_loud(monkeypatch):
+    # 실측(2026-10-04): 마지막 기록 7월 17일, 마지막 부팅 10월 3일, 진단 정책 서비스(DPS) 중지
+    rows = [{'kind': 'meta', 'lastBoot': '2026-10-03T14:41:00+09:00', 'dps': 'Stopped'},
+            {'kind': 'boot', 'at': '2026-07-17T11:49:00+09:00', 'bootMs': '73100'}]
+    monkeypatch.setattr(debloater, '_run_ps_json', lambda *a: (True, rows, None))
+    r = health.boot_history()
+    assert [b['seconds'] for b in r['boots']] == [73.1]                   # meta 줄은 부팅이 아니다
+    assert '2026-10-03' in r['stale'] and '2026-07-17' in r['stale'] and '진단 정책 서비스' in r['stale']
+    assert r['dps'] == 'Stopped'
+
+    rows[0].update(lastBoot='2026-07-17T11:40:00+09:00', dps='Running')    # 기록된 부팅이 마지막 부팅
+    assert health.boot_history()['stale'] is None
+
+    rows[0].update(lastBoot='2026-10-03T14:41:00+09:00')                    # 서비스는 도는데 기록이 빠짐
+    r = health.boot_history()
+    assert '기록되지 않았습니다' in r['stale'] and '진단 정책 서비스' not in r['stale']
+
+    # 방금 부팅했으면 Windows 가 아직 기록 중일 수 있다
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 10, 3, 5, 50, tzinfo=timezone.utc)
+    assert health._stale_note(health._parse_time('2026-07-17T11:49:00+09:00'),
+                              health._parse_time('2026-10-03T14:41:00+09:00'), 'Running', now=now) is None
+    assert health._stale_note(None, now, 'Stopped') is None
+
+    rows[:] = [{'kind': 'meta', 'lastBoot': None, 'dps': 'Stopped'}]       # 기록이 하나도 없고 서비스가 멈춤
+    r = health.boot_history()
+    assert r['boots'] == [] and '진단 정책 서비스' in r['stale'] and r['note']
+
+
+def test_health_tab_shows_disk_record_facts_and_stale_boot_log():
+    hc = open(os.path.join(ROOT, 'src', 'components', 'HealthCenter.jsx'), encoding='utf-8').read()
+    assert 'd.mediaErrors' in hc and 'n.unsafeShutdowns' in hc and 'boots.stale' in hc
+    assert "'기록된 마지막 부팅'" in hc and '디스크 경고' in hc

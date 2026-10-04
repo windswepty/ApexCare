@@ -24,7 +24,26 @@ function sizeText(gb) {
 function dateText(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const year = d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {};
+  return d.toLocaleString('ko-KR', { ...year, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// 디스크 제조사가 쓰는 10진 단위(TBW 와 같은 단위)
+function bytesText(b) {
+  if (typeof b !== 'number') return null;
+  if (b >= 1e12) return `${(b / 1e12).toFixed(1)} TB`;
+  if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
+  return `${Math.round(b / 1e6)} MB`;
+}
+
+function Fact({ label, value, warn }) {
+  if (value === null || value === undefined) return null;
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-xs">
+      <span className="text-gray-500 dark:text-gray-400">{label}</span>
+      <span className={`font-mono font-semibold ${warn ? 'text-amber-400' : 'text-black dark:text-white'}`}>{value}</span>
+    </div>
+  );
 }
 
 function Metric({ icon: Icon, label, value, hint, children }) {
@@ -44,8 +63,11 @@ function Metric({ icon: Icon, label, value, hint, children }) {
 
 function DiskCard({ d }) {
   const wear = typeof d.wearPct === 'number' ? d.wearPct : null;
-  const errors = (d.readErrors || 0) + (d.writeErrors || 0);
-  const knownErrors = typeof d.readErrors === 'number' || typeof d.writeErrors === 'number';
+  // NVMe 는 디스크 기록의 '복구하지 못한 데이터 오류', 그 밖에는 Windows 카운터의 읽기·쓰기 오류
+  const nvmeErrors = typeof d.mediaErrors === 'number';
+  const errors = nvmeErrors ? d.mediaErrors : (d.readErrors || 0) + (d.writeErrors || 0);
+  const knownErrors = nvmeErrors || typeof d.readErrors === 'number' || typeof d.writeErrors === 'number';
+  const n = d.nvme;
   return (
     <div className="glass-panel p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -70,7 +92,7 @@ function DiskCard({ d }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Metric icon={Gauge} label="수명 사용량 (SSD)"
           value={wear !== null ? `${wear}%` : d.media === 'HDD' ? '해당 없음 (HDD)' : null}
-          hint={wear !== null ? '100% 에 가까울수록 교체 시기' : null}>
+          hint={wear === null ? null : wear >= 100 ? '제조사가 정한 예상 수명을 다 썼습니다' : '100% 에 가까울수록 교체 시기'}>
           {wear !== null && (
             <div className="mt-1.5 w-full h-1.5 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
               <div className={`h-full rounded-full ${wear >= 90 ? 'bg-red-500' : wear >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -82,10 +104,34 @@ function DiskCard({ d }) {
           value={typeof d.temperatureC === 'number' ? `${d.temperatureC}°C` : null}
           hint={typeof d.temperatureMaxC === 'number' ? `디스크가 정한 상한 ${d.temperatureMaxC}°C` : null} />
         <Metric icon={Clock} label="사용 시간" value={hoursText(d.powerOnHours)} />
-        <Metric icon={AlertTriangle} label="고치지 못한 읽기·쓰기 오류"
+        <Metric icon={AlertTriangle} label={nvmeErrors ? '복구하지 못한 데이터 오류' : '고치지 못한 읽기·쓰기 오류'}
           value={knownErrors ? `${errors.toLocaleString()}건` : null}
           hint={knownErrors && errors > 0 ? '중요한 파일은 백업해 두세요' : null} />
       </div>
+
+      {d.warnings?.length > 0 && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 space-y-1">
+          {d.warnings.map((w) => <div key={w} className="flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 디스크 경고: {w}</div>)}
+        </div>
+      )}
+
+      {n && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5 rounded-xl bg-gray-50 dark:bg-zinc-900/40 p-3">
+          <Fact label="지금까지 쓴 양" value={bytesText(n.dataWrittenBytes)} />
+          <Fact label="지금까지 읽은 양" value={bytesText(n.dataReadBytes)} />
+          <Fact label="전원 켠 횟수" value={typeof n.powerCycles === 'number' ? `${n.powerCycles.toLocaleString()}회` : null} />
+          <Fact label="갑자기 꺼진 횟수" value={typeof n.unsafeShutdowns === 'number' ? `${n.unsafeShutdowns.toLocaleString()}회` : null} />
+          <Fact label="남은 예비 공간"
+            value={typeof n.availableSparePct === 'number'
+              ? `${n.availableSparePct}%${typeof n.spareThresholdPct === 'number' ? ` (기준 ${n.spareThresholdPct}%)` : ''}` : null}
+            warn={typeof n.availableSparePct === 'number' && typeof n.spareThresholdPct === 'number' && n.availableSparePct <= n.spareThresholdPct} />
+          <Fact label="디스크 오류 기록" value={typeof n.errorLogEntries === 'number' ? `${n.errorLogEntries.toLocaleString()}건` : null} />
+        </div>
+      )}
+      <p className="text-[0.6875rem] text-gray-500">
+        {d.source === 'nvme' ? '디스크가 직접 기록한 값입니다 (NVMe 건강 기록).' : 'Windows 저장소 관리가 알려 준 값입니다.'}
+        {n && ' 디스크 오류 기록은 명령 거부처럼 데이터 손상이 아닌 일도 포함합니다.'}
+      </p>
     </div>
   );
 }
@@ -168,12 +214,20 @@ export default function HealthCenter({ active = true }) {
         ) : !boots.ok ? (
           <div className="text-sm text-amber-400 flex gap-2"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {boots.error}</div>
         ) : list.length === 0 ? (
-          <div className="text-sm text-gray-500">{boots.note || '기록된 부팅이 없습니다.'}</div>
+          <div className="space-y-2">
+            <div className="text-sm text-gray-500">{boots.note || '기록된 부팅이 없습니다.'}</div>
+            {boots.stale && <div className="text-xs text-amber-400 flex gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {boots.stale}</div>}
+          </div>
         ) : (
           <>
+            {boots.stale && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-400 flex gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{boots.stale}</span>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl bg-gray-50 dark:bg-zinc-900/60 p-3">
-                <div className="text-[0.6875rem] text-gray-500">최근 부팅</div>
+                <div className="text-[0.6875rem] text-gray-500">{boots.stale ? '기록된 마지막 부팅' : '최근 부팅'}</div>
                 <div className="text-xl font-black font-mono text-black dark:text-white">{latest.seconds}초</div>
                 {diff !== null && Math.abs(diff) >= 1 && (
                   <div className={`text-[0.6875rem] font-bold ${diff < 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
