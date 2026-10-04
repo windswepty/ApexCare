@@ -363,6 +363,19 @@ export async function syncWindowIcon(setting, colors) {
   try {
     await api.setWindowIcon(setting ? await renderIconPng(colors) : '');
   } catch { /* 창 아이콘만 그대로 남는다 */ }
+  return syncPinnedIcon(setting, colors);        // 고정한 단추 결과({success, message})
+}
+
+// 작업 표시줄에 고정한 단추는 창 아이콘이 아니라 바로 가기의 아이콘을 보여 준다. 여러 크기로 칠해 보낸다.
+export const PINNED_ICON_SIZES = [256, 64, 48, 32, 24, 16];
+
+export async function syncPinnedIcon(setting, colors) {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || typeof api.setPinnedIcon !== 'function') return null;
+  try {
+    const pngs = setting ? await Promise.all(PINNED_ICON_SIZES.map((size) => renderIconPng(colors, size))) : '';
+    return await api.setPinnedIcon(pngs);
+  } catch { return null; /* 고정한 단추 아이콘만 그대로 남는다 */ }
 }
 
 // ── 글자·화면 크기, 움직임 줄이기 ─────────────────────────

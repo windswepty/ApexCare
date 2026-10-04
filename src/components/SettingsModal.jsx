@@ -86,7 +86,11 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
       const applied = applyTheme(a.id, a.accent, a.background);
       // 아이콘 색(강조색을 따르는 경우가 있어 색 조합이 바뀔 때마다 다시 칠한다)과 작업 표시줄의 창 아이콘
       const colors = applyIcon(a.icon, applied.id, a.accent, a.background);
-      if (a.icon || prev.icon) syncWindowIcon(a.icon, colors);
+      if (a.icon || prev.icon) {
+        syncWindowIcon(a.icon, colors).then((r) => {
+          if (r && r.success === false && addToast) addToast(`작업 표시줄 고정 단추: ${r.message}`, 'error');
+        });
+      }
       onAppearanceChange({ ...a, id: applied.id, ...applyDisplay(a) });
     };
     show(next);
@@ -442,8 +446,8 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                 앱 아이콘 색
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                사이드바·제목 표시줄·로딩 화면의 로고와 실행 중인 작업 표시줄 아이콘이 함께 바뀝니다.
-                바탕화면 바로 가기·고정해 둔 작업 표시줄 단추의 아이콘은 Windows 가 설치 파일에서 읽어 그대로입니다.
+                사이드바·제목 표시줄·로딩 화면의 로고와 작업 표시줄 아이콘(이 계정에서 고정해 둔 단추 포함)이 함께 바뀝니다.
+                바탕화면·시작 메뉴 바로 가기는 이 PC 의 모든 계정이 함께 쓰는 것이라 그대로 둡니다.
               </p>
             </div>
             <div role="radiogroup" aria-label="앱 아이콘 색" className="grid grid-cols-4 gap-2">

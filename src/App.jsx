@@ -19,7 +19,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
-import { applyTheme, applyDisplay, applyIcon, isIconSetting, syncWindowIcon, cachedAppearance } from './theme';
+import { applyTheme, applyDisplay, applyIcon, isIconSetting, syncWindowIcon, syncPinnedIcon, cachedAppearance } from './theme';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -107,6 +107,7 @@ export default function App() {
                 const icon = isIconSetting(saved?.icon) ? (saved.icon || '') : '';
                 const colors = applyIcon(icon, applied.id, saved?.accent, saved?.background);
                 if (icon) syncWindowIcon(icon, colors);       // 기본이면 창 아이콘은 원래 것 그대로
+                else syncPinnedIcon('');                      // 고정한 단추에 남은 색 아이콘이 있으면 원래대로
                 setAppearance({ id: applied.id, accent: saved?.accent || null, background: saved?.background || null, icon, ...display });
               } catch (e) {
                 console.error('Error loading UI appearance:', e);

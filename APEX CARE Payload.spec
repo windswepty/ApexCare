@@ -17,11 +17,14 @@ a = Analysis(
         'backend.safe_delete', 'backend.system_state', 'backend.perf_modes',
         'backend.process_boost', 'backend.storage', 'backend.perf_bench', 'backend.window_frame',
         'backend.single_instance', 'backend.machine_store', 'backend.window_icon', 'backend.health',
+        'backend.shortcut_icon',
         # main.py 가 --revert-for-uninstall 일 때만 import 한다(제거 프로그램이 부른다)
         'backend.uninstall_prep',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',
         'shutil', 'concurrent.futures', 'winreg', 'json', 'logging', 'os', 'sys', 'stat', 'uuid', 'struct', 'time',
-        'win32pdh', 'pythoncom', 'win32com'
+        'win32pdh', 'pythoncom', 'win32com',
+        # 고정한 작업 표시줄 단추의 아이콘(IShellLink·SHChangeNotify, backend/shortcut_icon.py)
+        'win32com.shell', 'win32com.shell.shell', 'win32com.shell.shellcon'
     ],
     hookspath=[],
     hooksconfig={},

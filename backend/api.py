@@ -363,6 +363,22 @@ class Api:
             ok = False
         return {"success": ok} if ok else {"success": False, "message": "창 아이콘을 바꾸지 못했습니다."}
 
+    def setPinnedIcon(self, pngs_base64):
+        """작업 표시줄에 고정한 APEX CARE 단추의 아이콘을 바꾼다(여러 크기의 PNG 목록). 빈 값이면 원래 아이콘으로."""
+        from backend import shortcut_icon, window_icon
+        try:
+            if not pngs_base64:
+                return shortcut_icon.restore()
+            if not isinstance(pngs_base64, list) or len(pngs_base64) > len(shortcut_icon.ICON_SIZES):
+                return {"success": False, "message": "아이콘 그림 형식이 올바르지 않습니다."}
+            pngs = [window_icon.decode_png(x) for x in pngs_base64]
+            if any(p is None for p in pngs):
+                return {"success": False, "message": "아이콘 그림 형식이 올바르지 않습니다."}
+            return shortcut_icon.apply_pngs(pngs)
+        except Exception as e:
+            log.warning(f"고정한 단추 아이콘을 바꾸지 못했습니다: {e}")
+            return {"success": False, "message": f"고정한 단추 아이콘을 바꾸지 못했습니다: {e}"}
+
     # --- 초기 설정 마법사 (첫 실행 때만) ---
     def getSetupWizardDone(self):
         return config_manager.get_setup_wizard_done()

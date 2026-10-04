@@ -1602,6 +1602,55 @@ def window_icon_real():
     return verdict(problems, [])
 
 
+@check('앱 아이콘 색: 고정한 작업 표시줄 단추(바로 가기)만 바꾸고, 기본으로 돌리면 원래대로')
+def pinned_icon_real():
+    """샌드박스에 처음부터 고정된 Edge 를 'APEX CARE' 로 보고 바꿔 본다(점검에서는 exe 경로만 Edge 로 바꾼다).
+    2026-10-04 실험: 바로 가기 아이콘을 바꾸고 알리면 작업 표시줄 단추가 곧바로 다시 그려졌다."""
+    from backend import config_manager, shortcut_icon as si
+    folder = si.pinned_dir()
+    edge = os.path.join(folder, 'Microsoft Edge.lnk')
+    if not os.path.exists(edge):
+        return 'SKIP', f'고정된 Edge 바로 가기가 없습니다({folder})', []
+    with si._Com():
+        names = sorted(n for n in os.listdir(folder) if n.lower().endswith('.lnk'))
+        before = {n: si.read_link(os.path.join(folder, n)) for n in names}
+    target = before['Microsoft Edge.lnk'][0]
+    real_own = si._own_exe
+    si._own_exe = lambda: target
+    problems = []
+    try:
+        with open(os.path.join(REPO, 'public', 'icon-tile.png'), 'rb') as f:
+            png = f.read()
+        r = si.apply_pngs([png])
+        if not r.get('success') or r.get('changed') != 1:
+            problems.append(f'바꾸지 못했습니다: {r}')
+        with si._Com():
+            now = {n: si.read_link(os.path.join(folder, n)) for n in names}
+        icon = now['Microsoft Edge.lnk'][1][0]
+        if not (icon and os.path.basename(icon).startswith(si._PREFIX) and os.path.exists(icon)):
+            problems.append(f'Edge 바로 가기 아이콘이 이 앱의 아이콘 파일이 아닙니다: {now["Microsoft Edge.lnk"]}')
+        others = [n for n in names if n != 'Microsoft Edge.lnk' and now[n] != before[n]]
+        if others:
+            problems.append(f'다른 단추까지 바뀌었습니다: {others}')
+        if now['Microsoft Edge.lnk'][0] != target:
+            problems.append('바로 가기 대상이 바뀌었습니다')
+        rec = config_manager.load_config().get(si.CONFIG_KEY) or {}
+        if list(rec.get(edge) or []) != list(before['Microsoft Edge.lnk'][1]):
+            problems.append(f'원래 아이콘 기록이 다릅니다: {rec}')
+        r = si.restore()
+        with si._Com():
+            after = {n: si.read_link(os.path.join(folder, n)) for n in names}
+        if not r.get('success') or after != before:
+            problems.append(f'기본으로 돌려도 원래와 다릅니다: {r} {after.get("Microsoft Edge.lnk")}')
+        if si.CONFIG_KEY in config_manager.load_config() or os.path.exists(icon or ''):
+            problems.append('되돌린 뒤 기록이나 아이콘 파일이 남았습니다')
+    finally:
+        si._own_exe = real_own
+        if si._records():
+            si.restore()
+    return verdict(problems, [])
+
+
 @check('원클릭 최적화: Windows Update 캐시·Prefetch 는 건드리지 않음')
 def one_click():
     from backend import optimizer

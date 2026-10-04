@@ -124,6 +124,17 @@ def revert_for_uninstall():
     except Exception as e:
         steps.append({'name': '낮춰 둔 앱의 우선순위·효율 모드 되돌리기', 'ok': False, 'detail': str(e)})
 
+    # 작업 표시줄에 고정한 단추의 아이콘(앱 아이콘 색). 아이콘 파일은 계정 데이터 폴더에 있어 앱을 지워도 남지만,
+    # 바로 가기를 원래 아이콘 위치로 돌려 둔다. 기록이 없으면 아무것도 하지 않는다.
+    try:
+        from backend import shortcut_icon
+        r = shortcut_icon.restore()
+        if r.get('restored') or r.get('failed'):
+            steps.append({'name': '고정한 작업 표시줄 단추 아이콘 되돌리기', 'ok': bool(r.get('success')),
+                          'detail': r.get('message') or f"{r.get('restored', 0)}개 되돌림"})
+    except Exception as e:
+        steps.append({'name': '고정한 작업 표시줄 단추 아이콘 되돌리기', 'ok': False, 'detail': str(e)})
+
     # 복귀할 '게임 전 모드' 는 더 없다. revert_everything 이 모드를 표준으로 기록했다.
     if config_manager.get_boost_restore_mode() is not None:
         saved = config_manager.set_boost_restore_mode(None)
