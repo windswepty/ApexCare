@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Monitor, Clock, Cpu, ArrowDown, ArrowUp } from 'lucide-react';
 import { clockLabel } from '../cpuClock';
 
-// 가동 시간 표시. 하루가 넘으면 '3일 4시간 5분' 처럼 날짜를 넣는다(예전에는 '76h 5m 2s').
 // 네트워크 속도(바이트/초) → 'MB/s' 등. 아직 재지 못했으면 '측정 중'
 export function rateLabel(bps) {
   if (typeof bps !== 'number' || !Number.isFinite(bps)) return '측정 중';
@@ -11,6 +10,7 @@ export function rateLabel(bps) {
   return `${Math.round(bps)} B/s`;
 }
 
+// 가동 시간 표시. 하루가 넘으면 '3일 4시간 5분' 처럼 날짜를 넣는다(예전에는 '76h 5m 2s').
 function uptimeLabel(totalSec) {
   if (typeof totalSec !== 'number' || !Number.isFinite(totalSec) || totalSec < 0) return '확인 중…';
   const s = Math.floor(totalSec);

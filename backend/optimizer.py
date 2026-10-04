@@ -472,18 +472,25 @@ def _run_deep_optimization():
         _optimization_state["running"] = False
 
 def start_deep_optimization():
-    if _optimization_state["running"]:
-        return {"success": False, "busy": True, "message": "이미 최적화가 실행 중입니다."}
-    # 저장공간 화면의 정리와 같은 상태·같은 폴더를 쓴다. 겹쳐 돌면 서로의 결과를 덮어쓴다.
-    if _junk_clean_state.get("status") == "running":
-        return {"success": False,
-                "message": "저장공간 화면에서 정크 정리가 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
-    if system_repair.get_trim_status().get("status") == "running":
-        return {"success": False,
-                "message": "디스크 최적화가 이미 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
-
-    t = threading.Thread(target=_run_deep_optimization, daemon=True)
-    t.start()
+    # 확인과 '실행 중' 표시를 한 번에 한다. 예전에는 표시를 스레드 안에서 해서, 버튼을 빠르게 두 번 누르면
+    # 둘 다 확인을 통과해 원클릭이 두 번 겹쳐 돌았다(같은 상태·같은 폴더를 덮어씀).
+    with _clean_lock:
+        if _optimization_state["running"]:
+            return {"success": False, "busy": True, "message": "이미 최적화가 실행 중입니다."}
+        # 저장공간 화면의 정리와 같은 상태·같은 폴더를 쓴다. 겹쳐 돌면 서로의 결과를 덮어쓴다.
+        if _junk_clean_state.get("status") == "running":
+            return {"success": False,
+                    "message": "저장공간 화면에서 정크 정리가 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
+        if system_repair.get_trim_status().get("status") == "running":
+            return {"success": False,
+                    "message": "디스크 최적화가 이미 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
+        _optimization_state["running"] = True
+    try:
+        t = threading.Thread(target=_run_deep_optimization, daemon=True)
+        t.start()
+    except Exception as e:
+        _optimization_state["running"] = False
+        return {"success": False, "message": f"최적화를 시작하지 못했습니다: {e}"}
     return {"success": True}
 
 def cancel_deep_optimization():
@@ -902,12 +909,17 @@ def clean_junk(category_ids, cancel_event=None, recycle_bytes_seen=None):
     global _junk_clean_thread, _junk_clean_state
     
     with _clean_lock:
+        # '실행 중' 을 먼저 본다. 예전에는 빈 목록이 오면 정리가 도는 중에도 상태를 '완료' 로 덮어써,
+        # 화면이 아직 지우고 있는 정리를 끝났다고 보였다.
+        if _junk_clean_state["status"] == "running":
+            return {"success": False, "message": "이미 정리 중입니다."}
+        if _optimization_state["running"]:
+            # 원클릭 최적화가 같은 상태·같은 폴더로 정리한다(첫 단계). 겹치면 서로의 결과를 덮어쓴다.
+            return {"success": False, "message": "원클릭 최적화가 진행 중입니다. 끝난 뒤 다시 시도해 주세요."}
         if not category_ids:
             _junk_clean_state["status"] = "success"
             _junk_clean_state["freed_mb"] = 0.0
             return {"success": True}
-        if _junk_clean_state["status"] == "running":
-            return {"success": False, "message": "이미 정리 중입니다."}
         _junk_clean_state["status"] = "running"
     
     _junk_cancel_event.clear()

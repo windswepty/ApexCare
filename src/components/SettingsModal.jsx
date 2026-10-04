@@ -184,7 +184,8 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   const bgSaved = bgValid && background === bgDraft.toLowerCase();
   const setBg = (hex) => { setBgDraft(hex); setBgText(hex); };
   const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion && !icon;
-  const shown = composeTheme(themeId, accent, background);       // 지금 화면의 색(아이콘 미리보기에 쓴다)
+  // 지금 화면의 색(아이콘 미리보기에 쓴다). 저장됐지만 읽기 어려워 쓰지 않는 강조색은 빼야 실제 아이콘과 같다.
+  const shown = composeTheme(themeId, savedButUnused ? null : accent, background);
   const iconCustom = Boolean(icon) && HEX_RE.test(icon);
 
   return (

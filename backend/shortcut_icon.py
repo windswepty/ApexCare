@@ -15,6 +15,8 @@ import logging
 import os
 import struct
 import sys
+import tempfile
+import threading
 
 from backend import config_manager
 
@@ -24,6 +26,8 @@ PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 _PREFIX = 'apex_icon_'
 CONFIG_KEY = 'ui_icon_shortcuts'
+# 바꾸기·되돌리기는 한 번에 하나만(화면 요청은 스레드마다 따로 온다. 겹치면 기록·아이콘 파일 정리가 엇갈린다).
+_lock = threading.RLock()
 
 
 def _data_dir():
@@ -89,10 +93,14 @@ def _write_ico(data):
     try:
         os.makedirs(folder, exist_ok=True)
         if not os.path.exists(path):
-            tmp = path + '.tmp'
-            with open(tmp, 'wb') as f:
-                f.write(data)
-            os.replace(tmp, path)
+            fd, tmp = tempfile.mkstemp(prefix=_PREFIX, suffix='.tmp', dir=folder)
+            try:
+                with os.fdopen(fd, 'wb') as f:
+                    f.write(data)
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)                  # 이 함수가 만든 임시 파일만 지운다
         with open(path, 'rb') as f:
             if f.read() != data:
                 return None
@@ -236,6 +244,11 @@ def _own_pins(exe):
 
 def apply_pngs(pngs):
     """고정한 단추 아이콘을 pngs(PNG bytes 목록)로 만든 ICO 로 바꾼다. {'success', 'changed', 'failed', 'message'}"""
+    with _lock:
+        return _apply_locked(pngs)
+
+
+def _apply_locked(pngs):
     exe = _own_exe()
     if not exe:
         return {'success': True, 'changed': 0, 'failed': [], 'message': '개발 실행에서는 바꾸지 않습니다.'}
@@ -276,10 +289,15 @@ def apply_pngs(pngs):
 
 def restore():
     """기록한 원래 아이콘 위치로 되돌린다. {'success', 'restored', 'failed', 'message'}"""
+    with _lock:
+        return _restore_locked()
+
+
+def _restore_locked():
     records = _records()
     if not records:
         return {'success': True, 'restored': 0, 'failed': [], 'message': ''}
-    done, failed = [], []
+    done, restored, failed = [], [], []      # done: 기록을 지울 것, restored: 실제로 되돌려 쓴 것
     with _Com():
         for path, icon in records.items():
             if not os.path.exists(path):          # 고정을 풀었다. 되돌릴 대상이 없다
@@ -291,14 +309,15 @@ def restore():
                 continue
             if write_icon(path, icon):
                 done.append(path)
+                restored.append(path)
             else:
                 failed.append(path)
-        if done:
-            notify([p for p in done if os.path.exists(p)])
+        if restored:
+            notify(restored)
     if done and not _save_records(lambda r: [r.pop(p, None) for p in done]):
-        return {'success': False, 'restored': len(done), 'failed': [os.path.basename(p) for p in failed],
+        return {'success': False, 'restored': len(restored), 'failed': [os.path.basename(p) for p in failed],
                 'message': '되돌렸지만 기록을 지우지 못했습니다.'}
     if not failed:
         _drop_unused_icons([])
-    return {'success': not failed, 'restored': len(done), 'failed': [os.path.basename(p) for p in failed],
+    return {'success': not failed, 'restored': len(restored), 'failed': [os.path.basename(p) for p in failed],
             'message': '' if not failed else f"되돌리지 못한 단추: {', '.join(os.path.basename(p) for p in failed)}"}

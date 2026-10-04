@@ -63,15 +63,9 @@ class Api:
     def cancelJunkClean(self):
         return optimizer.cancel_junk_clean()
 
-    def cleanTempFiles(self):
-        """Synchronous temp file clean for dashboard one-click optimization."""
-        try:
-            optimizer.clean_junk_background([1], cancel_event=None)
-            freed = optimizer._junk_clean_state.get("freed_mb", 0)
-            return {"success": True, "message": f"임시 파일 정리 완료 (약 {freed}MB 확보)", "freed_mb": freed}
-        except Exception as e:
-            return {"success": False, "message": "임시 파일 정리 실패", "error": str(e)}
-        
+    # 예전의 cleanTempFiles(동기 임시 파일 정리)는 지웠다. 화면 어디에서도 쓰지 않았고, 정리가 이미 돌고 있는지
+    # 확인하지 않고 같은 상태를 덮어쓰며, 건너뛴 파일이 있어도 '정리 완료' 라고 했다. 정리는 cleanJunk 한 곳에서 한다.
+
     def purgeRam(self):
         """대기 메모리를 비우고, 측정한 전후 크기를 그대로 돌려준다.
 

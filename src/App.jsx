@@ -78,14 +78,22 @@ export default function App() {
   };
 
   useEffect(() => {
+    // 앞선 확인이 끝나기 전에는 다시 묻지 않고, 준비된 뒤 처리는 한 번만 한다. 예전에는 0.2초마다 겹쳐 불러
+    // 첫 응답이 늦으면(GPU 이름 조회 등) 여러 응답이 한꺼번에 와서 설정 적용·창 아이콘 바꾸기가 동시에 여러 번 돌았다.
+    let inFlight = false;
+    let done = false;
     let checkInterval = setInterval(async () => {
+      if (inFlight || done) return;
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.getSystemStats === 'function') {
+        inFlight = true;
         try {
           const stats = await window.pywebview.api.getSystemStats();
           // 백엔드가 답했으면(통계를 못 읽어 error 여도) 준비된 것이다. 예전에는 error 면 영원히 다시 묻기만 해서,
           // 통계 하나를 못 읽는 PC 에서는 로딩 화면이 걷히지 않아 '되돌리기' 를 포함한 앱 전체를 쓸 수 없었다.
           // 각 화면은 값이 없으면 '측정 중·모름' 으로 보여 준다.
           if (stats) {
+            done = true;
+            clearInterval(checkInterval);
             // 대시보드가 잠깐 보였다 마법사로 바뀌지 않도록 준비 완료 전에 먼저 확인한다.
             // 읽지 못하면 띄우지 않는다(마법사의 튜닝은 선택 사항이고, 설정 창에서 다시 열 수 있다).
             if (typeof window.pywebview.api.getSetupWizardDone === 'function') {
@@ -120,10 +128,11 @@ export default function App() {
                 setCurrentMode(res.mode);
               }
             }
-            clearInterval(checkInterval);
           }
         } catch (e) {
           console.error('Error checking backend readiness:', e);
+        } finally {
+          inFlight = false;
         }
       }
     }, 200);

@@ -722,3 +722,30 @@ def test_dashboard_lists_every_drive_and_follows_plugging_in_and_out(monkeypatch
 
     dash = _read('src/components/Dashboard.jsx')
     assert 'sysInfo.drives.map' in dash and "d.system ? ' (Windows)'" in dash and "' (이동식)'" in dash
+
+
+def test_one_click_cannot_start_twice_and_blocks_storage_clean(monkeypatch):
+    # 예전에는 '실행 중' 표시를 스레드 안에서 해서, 빠르게 두 번 누르면 원클릭이 두 번 겹쳐 돌았다
+    started = []
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            started.append(target)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(optimizer.threading, 'Thread', FakeThread)
+    monkeypatch.setattr(system_repair, 'get_trim_status', lambda: {'status': 'idle'})
+    monkeypatch.setitem(optimizer._junk_clean_state, 'status', 'idle')
+    monkeypatch.setattr(optimizer, '_optimization_state', dict(optimizer._optimization_state, running=False))
+    assert optimizer.start_deep_optimization()['success'] is True
+    r = optimizer.start_deep_optimization()                        # 스레드가 아직 상태를 바꾸기 전
+    assert r['success'] is False and r.get('busy') and len(started) == 1
+    r = optimizer.clean_junk([1])                                  # 원클릭이 같은 폴더를 정리 중
+    assert r['success'] is False and '원클릭' in r['message'] and len(started) == 1
+
+
+def test_empty_clean_request_does_not_mark_a_running_clean_as_done(monkeypatch):
+    monkeypatch.setitem(optimizer._junk_clean_state, 'status', 'running')
+    r = optimizer.clean_junk([])
+    assert r['success'] is False and optimizer._junk_clean_state['status'] == 'running'

@@ -165,3 +165,10 @@ def test_windows_recovery_folders_are_blocked_only_at_drive_root():
     assert file_finder._blocked_reason('C:\\Recovery\\Customizations\\usmt.ppkg')
     assert file_finder._blocked_reason('D:\\Windows.old\\Users\\a\\big.vhdx')
     assert file_finder._blocked_reason('C:\\Users\\x\\Videos\\recovery\\clip.mp4') is None   # 사용자 폴더 속 같은 이름은 아니다
+
+
+@pytest.mark.parametrize('bad', ['1', 0, -5, True, None, float('nan')])
+def test_large_scan_threshold_from_the_screen_is_validated(disk, bad):
+    # 문자열 '1' 이면 '1' * 1048576 같은 거대한 문자열을 만들었고, 0·음수면 모든 파일이 '대용량' 으로 잡혔다
+    _write(disk.root / 'small.txt', 2 * MB)
+    assert file_finder.scan_large_files(min_mb=bad) == []                 # 기본 500MB 로 본다

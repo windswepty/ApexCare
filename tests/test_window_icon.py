@@ -64,3 +64,23 @@ def test_api_rejects_a_bad_picture_before_touching_the_window(monkeypatch):
     monkeypatch.setattr(wi, 'apply', lambda *a: (_ for _ in ()).throw(AssertionError('창을 건드리면 안 된다')))
     r = api.setWindowIcon('not-a-png')
     assert r['success'] is False and '형식' in r['message']
+
+
+def test_icon_changes_run_one_at_a_time(monkeypatch):
+    # 화면 요청은 스레드마다 따로 온다. 겹치면 한쪽이 다른 쪽이 막 건 아이콘을 DestroyIcon 할 수 있었다
+    from backend import shortcut_icon
+    held = []
+    monkeypatch.setattr(wi, '_apply_locked', lambda h, p: held.append(wi._lock.locked()) or True)
+    assert wi.apply(1, None) and held == [True]
+    monkeypatch.setattr(shortcut_icon, '_restore_locked', lambda: held.append(shortcut_icon._lock._is_owned()) or {})
+    shortcut_icon.restore()
+    assert held == [True, True]
+
+
+def test_startup_check_and_icon_sync_do_not_overlap():
+    import os
+    from tests.conftest import ROOT
+    app = open(os.path.join(ROOT, 'src', 'App.jsx'), encoding='utf-8').read()
+    assert 'if (inFlight || done) return;' in app and 'inFlight = false;' in app
+    theme = open(os.path.join(ROOT, 'src', 'theme.js'), encoding='utf-8').read()
+    assert 'return queued(async () => {' in theme and 'return queued(() => pinnedNow(' in theme

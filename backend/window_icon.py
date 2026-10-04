@@ -10,6 +10,7 @@ exe 파일·바로 가기의 아이콘은 바꾸지 않는다. 고정된 작업 
 import base64
 import binascii
 import logging
+import threading
 
 log = logging.getLogger('WindowIcon')
 
@@ -19,6 +20,8 @@ _WM_SETICON, _WM_GETICON = 0x0080, 0x007F
 _ICON_SMALL, _ICON_BIG = 0, 1
 
 _original = {}      # hwnd -> (큰 아이콘, 작은 아이콘)  처음 바꾸기 전의 것
+# 화면 요청은 스레드마다 따로 온다. 겹치면 한쪽이 다른 쪽이 막 건 아이콘을 지워(DestroyIcon) 창에 지워진 아이콘이 남을 수 있다.
+_lock = threading.Lock()
 _made = {}          # hwnd -> [이 모듈이 만든 HICON]  바꾼 뒤 지운다(새는 핸들이 없게)
 
 
@@ -57,6 +60,11 @@ def apply(hwnd, png):
     """png(bytes) 로 창 아이콘을 바꾼다. png 가 None 이면 처음 아이콘으로 되돌린다. 성공 여부."""
     if not hwnd:
         return False
+    with _lock:
+        return _apply_locked(hwnd, png)
+
+
+def _apply_locked(hwnd, png):
     u = _user32()
     if hwnd not in _original:
         _original[hwnd] = (u.SendMessageW(hwnd, _WM_GETICON, _ICON_BIG, 0),

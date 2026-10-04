@@ -157,6 +157,9 @@ def get_local_drives():
 
 def scan_large_files(min_mb=500):
     """Scan all local drives for files larger than min_mb."""
+    # 화면에서 온 값이다. 문자열이 오면 '500' * 1048576 처럼 거대한 문자열을 만들고, 0·음수면 모든 파일이 잡힌다.
+    if isinstance(min_mb, bool) or not isinstance(min_mb, (int, float)) or not (1 <= min_mb <= 1024 * 1024):
+        min_mb = 500
     drives = get_local_drives()
     min_bytes = min_mb * 1024 * 1024
     large_files = []

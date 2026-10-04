@@ -315,7 +315,11 @@ export function isIconSetting(v) {
 
 // 지금 색 조합에 아이콘 색을 적용한다(화면 안의 모든 로고가 이 변수를 쓴다). { tile, glyph } 를 돌려준다.
 export function applyIcon(setting, themeId, accentHex = null, bgHex = null) {
-  const colors = iconColors(setting, composeTheme(themeId, accentHex, bgHex));
+  // 화면과 같은 강조색을 쓴다. 읽기 어려워 화면이 쓰지 않은 강조색(applyTheme 의 rejectedAccent)으로 아이콘만 칠하지 않는다.
+  const base = findTheme(themeId);
+  const bg = bgHex && HEX_RE.test(bgHex) && fitBackground(base.id, bgHex) ? bgHex : null;
+  const accent = accentHex && HEX_RE.test(accentHex) && accentProblems(base.id, accentHex, bg).length === 0 ? accentHex : null;
+  const colors = iconColors(setting, composeTheme(base.id, accent, bg));
   const style = document.documentElement.style;
   style.setProperty('--icon-tile', colors.tile);
   style.setProperty('--icon-glyph', colors.glyph);
@@ -356,26 +360,41 @@ export async function renderIconPng({ tile, glyph }, size = 256) {
   return out.toDataURL('image/png').split(',')[1];
 }
 
+// 아이콘 바꾸기는 한 번에 하나씩, 누른 순서대로 한다. 색을 빠르게 여러 번 고르면 요청이 겹쳐 늦게 끝난 앞의 색이
+// 마지막에 남을 수 있었다(백엔드는 요청마다 다른 스레드에서 돈다).
+let iconQueue = Promise.resolve();
+function queued(task) {
+  const run = iconQueue.then(task, task);
+  iconQueue = run.catch(() => {});
+  return run;
+}
+
 // 작업 표시줄·Alt+Tab 의 창 아이콘도 같은 색으로. 기본('')이면 원래 아이콘으로 되돌린다. 실패해도 화면에는 영향이 없다.
-export async function syncWindowIcon(setting, colors) {
+export function syncWindowIcon(setting, colors) {
   const api = window.pywebview && window.pywebview.api;
-  if (!api || typeof api.setWindowIcon !== 'function') return;
-  try {
-    await api.setWindowIcon(setting ? await renderIconPng(colors) : '');
-  } catch { /* 창 아이콘만 그대로 남는다 */ }
-  return syncPinnedIcon(setting, colors);        // 고정한 단추 결과({success, message})
+  if (!api || typeof api.setWindowIcon !== 'function') return Promise.resolve(null);
+  return queued(async () => {
+    try {
+      await api.setWindowIcon(setting ? await renderIconPng(colors) : '');
+    } catch { /* 창 아이콘만 그대로 남는다 */ }
+    return pinnedNow(setting, colors);           // 고정한 단추 결과({success, message})
+  });
 }
 
 // 작업 표시줄에 고정한 단추는 창 아이콘이 아니라 바로 가기의 아이콘을 보여 준다. 여러 크기로 칠해 보낸다.
 export const PINNED_ICON_SIZES = [256, 64, 48, 32, 24, 16];
 
-export async function syncPinnedIcon(setting, colors) {
+async function pinnedNow(setting, colors) {
   const api = window.pywebview && window.pywebview.api;
   if (!api || typeof api.setPinnedIcon !== 'function') return null;
   try {
     const pngs = setting ? await Promise.all(PINNED_ICON_SIZES.map((size) => renderIconPng(colors, size))) : '';
     return await api.setPinnedIcon(pngs);
   } catch { return null; /* 고정한 단추 아이콘만 그대로 남는다 */ }
+}
+
+export function syncPinnedIcon(setting, colors) {
+  return queued(() => pinnedNow(setting, colors));
 }
 
 // ── 글자·화면 크기, 움직임 줄이기 ─────────────────────────

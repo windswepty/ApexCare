@@ -121,6 +121,7 @@ def test_restore_leaves_shortcuts_that_no_longer_carry_our_icon(links):
     links.writes.clear()
     r = si.restore()
     assert r['success'] and links.writes == [] and links.store[mine][1] == (r'D:\my\custom.ico', 0)
+    assert r['restored'] == 0                               # 되돌려 쓴 것이 없으면 '되돌림' 으로 세지 않는다
     assert si.CONFIG_KEY not in config_manager.load_config()
 
 

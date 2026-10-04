@@ -23,8 +23,8 @@ export default function Uninstaller({ addToast }) {
   const [isCleaning, setIsCleaning] = useState(false);
   const [activeApp, setActiveApp] = useState(null);
   const [step, setStep] = useState('list'); // 'list' -> 'wait_uninstall' -> 'leftovers'
-  const launchingRef = useRef(false);
-  const [viaSettings, setViaSettings] = useState(false);   // Windows 설정 → 앱에서 제거하도록 안내했다     // 제거 프로그램을 띄우는 중(두 번 눌러 두 개가 뜨지 않게)
+  const launchingRef = useRef(false);                      // 제거 프로그램을 띄우는 중(두 번 눌러 두 개가 뜨지 않게)
+  const [viaSettings, setViaSettings] = useState(false);   // Windows 설정 → 앱에서 제거하도록 안내했다
 
   const [cleanElapsed, setCleanElapsed] = useState(0);
 
