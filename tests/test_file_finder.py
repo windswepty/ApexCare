@@ -172,3 +172,51 @@ def test_large_scan_threshold_from_the_screen_is_validated(disk, bad):
     # 문자열 '1' 이면 '1' * 1048576 같은 거대한 문자열을 만들었고, 0·음수면 모든 파일이 '대용량' 으로 잡혔다
     _write(disk.root / 'small.txt', 2 * MB)
     assert file_finder.scan_large_files(min_mb=bad) == []                 # 기본 500MB 로 본다
+
+
+def test_search_reports_progress_and_can_be_cancelled(disk, monkeypatch):
+    # 예전에는 몇 분 걸리는 검색 동안 '검색 중' 만 보이고 멈출 수 없었다
+    for d in ('a', 'b', 'c'):
+        (disk.root / d).mkdir()
+        _write(disk.root / d / 'big.bin', 2 * MB)
+    r = file_finder.scan_large_files(min_mb=1)
+    p = file_finder.get_progress()
+    assert len(r) == 3 and p['running'] is False and p['cancelled'] is False
+    assert p['dirs'] >= 4 and p['files'] >= 3 and p['found'] == 3 and p['mode'] == 'large'
+    assert file_finder.cancel_scan()['success'] is False                 # 돌고 있지 않으면 멈출 것도 없다
+
+    # 첫 폴더를 본 뒤 중단 → 그때까지 찾은 것만, cancelled=True
+    real_walk = file_finder.os.walk
+
+    def walk_then_cancel(*a, **kw):
+        for i, item in enumerate(real_walk(*a, **kw)):
+            if i == 1:
+                file_finder._cancel.set()
+            yield item
+    monkeypatch.setattr(file_finder.os, 'walk', walk_then_cancel)
+    r = file_finder.scan_large_files(min_mb=1)
+    assert len(r) < 3 and file_finder.get_progress()['cancelled'] is True
+
+    # 다음 검색은 중단 표시 없이 처음부터
+    monkeypatch.setattr(file_finder.os, 'walk', real_walk)
+    assert len(file_finder.scan_large_files(min_mb=1)) == 3 and file_finder.get_progress()['cancelled'] is False
+
+
+def test_cancelled_duplicate_search_returns_only_fully_compared_groups(disk, monkeypatch):
+    for n in ('a1.bin', 'a2.bin'):
+        _write(disk.root / n, 11 * MB, fill=b'a')
+    for n in ('b1.bin', 'b2.bin'):
+        _write(disk.root / n, 12 * MB, fill=b'b')
+    hashed = []
+    real_hash = file_finder._hash_file
+
+    def hash_then_cancel(path, *a, **kw):
+        hashed.append(path)
+        if len(hashed) == 2:
+            file_finder._cancel.set()                   # 첫 묶음을 다 비교한 뒤 중단
+        return real_hash(path, *a, **kw)
+    monkeypatch.setattr(file_finder, '_hash_file', hash_then_cancel)
+    dups = file_finder.scan_duplicates()
+    p = file_finder.get_progress()
+    assert len(dups) == 2 and len({d['groupId'] for d in dups}) == 1  # 끝까지 비교한 한 묶음만
+    assert p['cancelled'] is True and p['groupsTotal'] == 2 and p['groupsDone'] == 1

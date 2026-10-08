@@ -369,6 +369,10 @@ function FileSection({ addToast, onDone }) {
   const [searched, setSearched] = useState(false);
   const [minMB, setMinMB] = useState(500);
   const [failures, setFailures] = useState([]);
+  // 검색 진행 상황(백엔드가 센 폴더·파일·찾은 수)과 중단 여부. 예전에는 몇 분 동안 '검색 중' 만 보이고 멈출 수 없었다.
+  const [progress, setProgress] = useState(null);
+  const [cancelled, setCancelled] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const run = async () => {
     const a = api();
@@ -376,16 +380,57 @@ function FileSection({ addToast, onDone }) {
     setBusy(true);
     setRows([]);
     setSelected(new Set());
+    setProgress(null);
+    setCancelled(false);
+    setStopping(false);
+    let done = false;
+    const follow = (async () => {
+      while (!done) {
+        await sleep(500);
+        if (done || !a.getFileScanProgress) break;
+        try {
+          const p = await a.getFileScanProgress();
+          if (!done && p) setProgress(p);
+        } catch { /* 다음 주기에 다시 묻는다 */ }
+      }
+    })();
     try {
       const res = mode === 'large'
         ? await a.findLargeFiles(minMB)
         : await a.findDuplicateFiles();
       setRows(Array.isArray(res) ? res : []);
       setSearched(true);
+      if (a.getFileScanProgress) {
+        const p = await a.getFileScanProgress();
+        setCancelled(Boolean(p?.cancelled));
+      }
     } catch (e) {
       addToast?.(`검색 실패: ${e}`, 'error');
+    } finally {
+      done = true;
+      await follow;
     }
+    setProgress(null);
+    setStopping(false);
     setBusy(false);
+  };
+
+  const stop = async () => {
+    const a = api();
+    if (!a?.cancelFileScan) return;
+    setStopping(true);
+    try {
+      await a.cancelFileScan();
+    } catch { /* 검색이 끝나면 버튼도 사라진다 */ }
+  };
+
+  const progressText = (p) => {
+    if (!p) return '검색을 시작하는 중…';
+    if (p.phase === 'compare') {
+      return `같은 크기 파일 묶음 ${p.groupsDone.toLocaleString()} / ${p.groupsTotal.toLocaleString()} 비교 중 · 중복 ${p.found.toLocaleString()}개`;
+    }
+    return `폴더 ${p.dirs.toLocaleString()}개 · 파일 ${p.files.toLocaleString()}개 확인`
+      + (mode === 'large' ? ` · ${p.found.toLocaleString()}개 찾음` : '');
   };
 
   const toggle = (p) => setSelected((s) => {
@@ -449,7 +494,7 @@ function FileSection({ addToast, onDone }) {
     <div className="glass-panel p-5 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {[['large', '대용량 파일'], ['dup', '중복 파일']].map(([k, label]) => (
-          <button key={k} onClick={() => { setMode(k); setRows([]); setSelected(new Set()); setSearched(false); setFailures([]); }}
+          <button key={k} onClick={() => { setMode(k); setRows([]); setSelected(new Set()); setSearched(false); setFailures([]); setCancelled(false); }}
             disabled={busy} aria-pressed={mode === k}
             className={`px-3.5 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 ${
               mode === k ? 'bg-cyan-500 text-black' : 'border border-black/10 dark:border-slate-700 text-gray-500'}`}>
@@ -483,12 +528,29 @@ function FileSection({ addToast, onDone }) {
 
       <div className="max-h-[420px] overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
         {busy && !rows.length && (
-          <p className="text-sm text-gray-500 py-8 text-center">모든 드라이브를 검색하는 중입니다. 파일이 많으면 몇 분 걸릴 수 있습니다…</p>
+          <div className="py-8 text-center space-y-3">
+            <p className="text-sm text-gray-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {stopping ? '멈추는 중…' : '모든 드라이브를 검색하는 중입니다. 파일이 많으면 몇 분 걸릴 수 있습니다.'}
+            </p>
+            <p className="text-xs font-mono text-gray-500">{progressText(progress)}</p>
+            <button onClick={stop} disabled={stopping}
+              className="text-xs font-bold text-rose-400 hover:text-rose-300 inline-flex items-center gap-1 disabled:opacity-40">
+              <XCircle className="w-3.5 h-3.5" /> 검색 중단
+            </button>
+          </div>
+        )}
+        {cancelled && !busy && (
+          <p className="text-xs text-amber-500 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            검색을 중단했습니다. 그때까지 {mode === 'large' ? '찾은 파일' : '끝까지 비교한 묶음'}만 보입니다.
+          </p>
         )}
         {!rows.length && !busy && (
           <p className="text-sm text-gray-500 py-8 text-center">
             {searched
-              ? (mode === 'large' ? '조건에 맞는 대용량 파일이 없습니다.' : '중복 파일이 없습니다.')
+              ? (cancelled ? '중단하기 전까지 찾은 것이 없습니다.'
+                : mode === 'large' ? '조건에 맞는 대용량 파일이 없습니다.' : '중복 파일이 없습니다.')
               : '검색 버튼을 눌러 시작하세요.'}
           </p>
         )}

@@ -3,6 +3,7 @@ import re
 import hashlib
 import concurrent.futures
 import logging
+import threading
 
 log = logging.getLogger('FileFinder')
 
@@ -127,6 +128,37 @@ def _blocked_reason(path, gaming_roots=()):
     return None
 
 
+# ── 진행 상황·중단 ───────────────────────────────────
+# 검색은 드라이브 전체를 돌아 몇 분 걸린다. 예전에는 끝날 때까지 '검색 중' 만 보이고 멈출 수 없었다.
+# 화면이 getFileScanProgress 로 지금까지 본 폴더·파일 수와 찾은 수를 읽고, cancelFileScan 으로 멈춘다.
+# 멈추면 그때까지 찾은 결과를 돌려주고 cancelled=True 로 알린다(중복 검사는 끝까지 비교한 묶음만 돌려준다).
+_scan_lock = threading.Lock()          # 검색은 한 번에 하나
+_cancel = threading.Event()
+_progress = {'running': False, 'mode': None, 'phase': '', 'dirs': 0, 'files': 0, 'found': 0,
+             'groupsDone': 0, 'groupsTotal': 0, 'cancelled': False}
+
+
+def get_progress():
+    return dict(_progress)
+
+
+def cancel_scan():
+    if not _progress['running']:
+        return {'success': False, 'message': '진행 중인 검색이 없습니다.'}
+    _cancel.set()
+    return {'success': True}
+
+
+def _begin(mode):
+    _cancel.clear()
+    _progress.update(running=True, mode=mode, phase='walk', dirs=0, files=0, found=0,
+                     groupsDone=0, groupsTotal=0, cancelled=False)
+
+
+def _end():
+    _progress.update(running=False, cancelled=_cancel.is_set())
+
+
 def _walk_user_files(top, exclude_dirs, gaming_roots=()):
     """드라이브를 돈다. 링크·정션인 폴더와 시스템 영역에는 들어가지 않는다.
 
@@ -134,6 +166,10 @@ def _walk_user_files(top, exclude_dirs, gaming_roots=()):
     두 경로로 잡혀 '중복 파일' 로 오인되고, 사용자가 사본이라 믿고 지운 것이 유일한 원본이 된다.
     """
     for root, dirs, files in os.walk(top, topdown=True, followlinks=False):
+        if _cancel.is_set():
+            return
+        _progress['dirs'] += 1
+        _progress['files'] += len(files)
         kept = []
         for d in dirs:
             if d in exclude_dirs or d.startswith('.'):
@@ -160,6 +196,15 @@ def scan_large_files(min_mb=500):
     # 화면에서 온 값이다. 문자열이 오면 '500' * 1048576 처럼 거대한 문자열을 만들고, 0·음수면 모든 파일이 잡힌다.
     if isinstance(min_mb, bool) or not isinstance(min_mb, (int, float)) or not (1 <= min_mb <= 1024 * 1024):
         min_mb = 500
+    with _scan_lock:
+        _begin('large')
+        try:
+            return _scan_large(min_mb)
+        finally:
+            _end()
+
+
+def _scan_large(min_mb):
     drives = get_local_drives()
     min_bytes = min_mb * 1024 * 1024
     large_files = []
@@ -194,6 +239,7 @@ def scan_large_files(min_mb=500):
                     "sizeMB": round(st.st_size / (1024*1024), 2),
                     "modified": st.st_mtime,
                 })
+                _progress['found'] = len(large_files)
                     
     # Sort descending by size
     large_files.sort(key=lambda x: x["sizeMB"], reverse=True)
@@ -219,6 +265,15 @@ def _hash_file(filepath, chunk_size=8192):
 
 def scan_duplicates():
     """Scan all local drives for duplicate files."""
+    with _scan_lock:
+        _begin('dup')
+        try:
+            return _scan_duplicates()
+        finally:
+            _end()
+
+
+def _scan_duplicates():
     drives = get_local_drives()
     
     # Exclude system folders AND game platforms
@@ -268,8 +323,11 @@ def scan_duplicates():
     
     # Second pass: hash check
     duplicates = []
+    _progress.update(phase='compare', groupsTotal=len(potential_dupes), groupsDone=0)
     
     for size, files in potential_dupes.items():
+        if _cancel.is_set():
+            break                          # 끝까지 비교한 묶음만 돌려준다(반쯤 비교한 묶음은 '중복' 이라고 하지 않는다)
         hashes = {}
         # We can use ThreadPoolExecutor to speed up hashing
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -292,6 +350,8 @@ def scan_duplicates():
                     f["groupId"] = group_id
                     f["sizeMB"] = round(f["size"] / (1024*1024), 2)
                     duplicates.append(f)
+        _progress['groupsDone'] += 1
+        _progress['found'] = len(duplicates)
                     
     # Sort by size descending, then by groupId
     duplicates.sort(key=lambda x: (-x["size"], x["groupId"]))

@@ -34,7 +34,6 @@ def _reset_backend_state():
 
     game_booster._applied.clear()
     game_booster._tamed_pids = set()
-    game_booster._eco_tamed_pids = set()
     game_booster._stop_event.clear()
     game_booster._booster_state.update(
         enabled=False, active=False, detected_game=None, boosted_pids=[],

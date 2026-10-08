@@ -139,7 +139,7 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 | `system_state.py` | 시스템 변경 저널 (원래 값 기록·확인·복구) |
 | `perf_modes.py` | 성능 모드 (표준·게이밍·에코) |
 | `process_boost.py` · `process_guard.py` | 프로세스 우선순위 변경·복구, 건드려도 되는지 판정 |
-| `game_booster.py` | 게임 감지, 부스트, 에코 억제 |
+| `game_booster.py` | 게임 감지, 부스트(바쁜 백그라운드 앱 양보 포함) |
 | `optimizer.py` | 정크 정리, 시작 프로그램, 원클릭 최적화, 하드웨어 맞춤 튜닝 |
 | `storage.py` · `file_finder.py` | 드라이브 현황, 대용량·중복 파일 |
 | `uninstaller.py` · `debloater.py` | 앱 제거·잔여물, 기본 앱 제거 |

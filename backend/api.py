@@ -267,6 +267,13 @@ class Api:
     def findDuplicateFiles(self):
         return file_finder.scan_duplicates()
 
+    def getFileScanProgress(self):
+        """대용량·중복 검색이 지금까지 본 폴더·파일 수, 찾은 수, 중단했는지."""
+        return file_finder.get_progress()
+
+    def cancelFileScan(self):
+        return file_finder.cancel_scan()
+
     def deleteFiles(self, paths):
         return file_finder.delete_files(paths)
 

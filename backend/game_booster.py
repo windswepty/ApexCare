@@ -22,11 +22,10 @@ import logging
 logging.basicConfig(level=logging.INFO, format='[GameBooster] %(message)s')
 log = logging.getLogger('GameBooster')
 
-# 에코·부스트 억제 기준: 작업 관리자 기준으로 전체 CPU 의 이 % 이상을 쓰는 프로세스만 건드린다.
+# 바쁜 백그라운드 앱 양보 기준: 작업 관리자 기준으로 전체 CPU 의 이 % 이상을 쓰는 프로세스만 건드린다.
 # 유휴 상태인 앱의 우선순위를 낮춰봐야 얻는 것은 없고, 그 앱이 깨어날 때 느려지기만 한다.
 # 예전 값 5.0 은 코어 하나를 100% 로 보는 단위였다(16스레드 PC 에서 작업 관리자 0.3%).
 ECO_CPU_THRESHOLD = 3.0
-ECO_INTERVAL_SEC = 10
 
 # system_state 저널에서 게임 부스트가 바꾼 레지스트리(Nagle)를 묶는 그룹
 BOOST_GROUP = 'boost'
@@ -790,22 +789,16 @@ def shutdown(timeout=8.0):
     t = _monitor_thread
     if t is not None and t.is_alive() and t is not threading.current_thread():
         t.join(timeout)
-    stop_eco_suppression_loop()
-    restore_background_apps()
     if _booster_state["active"] or _applied or _tamed_pids:
         _teardown()
     return {"success": True}
 
 
 # ─────────────────────────────────────────────
-# Eco Mode Background Suppression
+# 지금 쓰는 창의 앱 (바쁜 백그라운드 앱 양보에서 빼려고)
 # ─────────────────────────────────────────────
-
-_eco_suppression_thread = None
-_eco_stop_event = threading.Event()
-_eco_tamed_pids = set()
-ECO_OWNER = 'eco'
-
+# 예전에는 여기에 '에코 모드 백그라운드 억제' 루프가 있었지만 어디서도 시작되지 않았다(화면도 약속하지 않음).
+# 지웠다. 예전 실행이 owner 'eco' 로 남긴 우선순위 기록은 process_boost.recover_after_crash 가 그대로 되돌린다.
 
 def _window_pid(hwnd):
     pid = ctypes.wintypes.DWORD()
@@ -854,59 +847,3 @@ def _get_foreground_pid():
     except Exception as e:
         log.debug(f"Failed to get foreground PID: {e}")
     return None
-
-
-def _eco_suppression_thread_func():
-    """에코 모드에서 바쁜 백그라운드 앱의 우선순위를 낮춘다.
-
-    process_boost.find_throttle_candidates 가 고른 것만 건드린다.
-    CPU 임계값을 넘고, 게임이 아니고, 보호 목록에 없고, process_guard 를
-    통과한 프로세스만 후보가 된다.
-    """
-    global _eco_tamed_pids
-    from backend import process_boost
-
-    log.info("에코 억제 루프 시작")
-    process_boost.prime_cpu_measurement()   # cpu_percent 기준점 잡기
-
-    while not _eco_stop_event.is_set():
-        try:
-            fg_pid = _get_foreground_pid()
-            candidates = process_boost.find_throttle_candidates(
-                foreground_pid=fg_pid, cpu_threshold=ECO_CPU_THRESHOLD)
-            pids = {c['pid'] for c in candidates}
-
-            new_pids = pids - _eco_tamed_pids
-            if new_pids:
-                _eco_tamed_pids.update(_tame_processes(list(new_pids), owner=ECO_OWNER))
-
-            # 더 이상 바쁘지 않거나 종료된 프로세스는 원래대로 돌려준다.
-            gone = _eco_tamed_pids - pids
-            if gone:
-                _restore_processes(list(gone), owner=ECO_OWNER)
-                _eco_tamed_pids -= gone
-
-        except Exception as e:
-            log.warning(f"에코 억제 루프 오류: {e}")
-
-        _eco_stop_event.wait(ECO_INTERVAL_SEC)
-
-
-def start_eco_suppression_loop():
-    global _eco_suppression_thread
-    _eco_stop_event.clear()
-    if _eco_suppression_thread is None or not _eco_suppression_thread.is_alive():
-        _eco_suppression_thread = threading.Thread(target=_eco_suppression_thread_func, daemon=True)
-        _eco_suppression_thread.start()
-
-
-def stop_eco_suppression_loop():
-    _eco_stop_event.set()
-
-
-def restore_background_apps():
-    global _eco_tamed_pids
-    if _eco_tamed_pids:
-        log.info("Restoring priority for Eco-tamed background apps...")
-        _restore_processes(list(_eco_tamed_pids), owner=ECO_OWNER)
-        _eco_tamed_pids = set()
