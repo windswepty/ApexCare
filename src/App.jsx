@@ -19,7 +19,7 @@ import LoadingScreen from './components/LoadingScreen';
 import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
-import { applyTheme, applyDisplay, applyIcon, isIconSetting, syncWindowIcon, syncPinnedIcon, cachedAppearance } from './theme';
+import { applyTheme, applyDisplay, applyIcon, applyMode, isIconSetting, syncWindowIcon, syncPinnedIcon, cachedAppearance } from './theme';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -33,7 +33,6 @@ export default function App() {
   }, [activeTab]);
   const isMounted = (tab) => tab === activeTab || visitedTabs.has(tab);
   const [currentMode, setCurrentMode] = useState('standard');
-  const [isDarkMode] = useState(true);
   const [showLoading, setShowLoading] = useState(true);
   const [isBackendReady, setIsBackendReady] = useState(false);
   // 초기 설정 마법사는 첫 실행 때만 띄운다. 백엔드에서 기록을 읽기 전에는 띄우지 않는다.
@@ -44,6 +43,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   // 색 조합과 직접 고른 강조색(저장된 값). main.jsx 가 캐시 값으로 먼저 적용해 둔다.
   const [appearance, setAppearance] = useState(cachedAppearance);
+  const isDarkMode = appearance.mode !== 'light';
 
   // 같은 밀리초에 알림이 둘 뜨면 Date.now() 가 같아 하나를 닫을 때 둘 다 사라졌다. 순번을 쓴다.
   const toastSeq = useRef(0);
@@ -112,11 +112,12 @@ export default function App() {
                 const saved = await window.pywebview.api.getUiAppearance();
                 const applied = applyTheme(saved?.theme, saved?.accent, saved?.background);
                 const display = applyDisplay({ scale: saved?.scale, reduceMotion: saved?.reduceMotion });
+                const mode = applyMode(saved?.mode);
                 const icon = isIconSetting(saved?.icon) ? (saved.icon || '') : '';
                 const colors = applyIcon(icon, applied.id, saved?.accent, saved?.background);
                 if (icon) syncWindowIcon(icon, colors);       // 기본이면 창 아이콘은 원래 것 그대로
                 else syncPinnedIcon('');                      // 고정한 단추에 남은 색 아이콘이 있으면 원래대로
-                setAppearance({ id: applied.id, accent: saved?.accent || null, background: saved?.background || null, icon, ...display });
+                setAppearance({ id: applied.id, accent: saved?.accent || null, background: saved?.background || null, icon, mode, ...display });
               } catch (e) {
                 console.error('Error loading UI appearance:', e);
               }
@@ -139,12 +140,6 @@ export default function App() {
     return () => clearInterval(checkInterval);
   }, []);
 
-  // Force dark class on HTML element permanently
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-    document.body.classList.add('dark');
-  }, []);
-
   // 모드 적용은 PerformanceModes 컴포넌트가 직접 한다.
   //
   // 예전에는 currentMode 가 바뀌면 이 useEffect 가 백엔드를 호출했는데,
@@ -158,7 +153,7 @@ export default function App() {
   }, []);
   return (
     <ErrorBoundary>
-        <div className="h-screen w-screen bg-white dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
+        <div className="h-screen w-screen bg-gray-100 dark:bg-black text-black dark:text-white flex flex-col selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black relative overflow-hidden">
           
           {showInitialWizard ? (
             <InitialSetupWizard 

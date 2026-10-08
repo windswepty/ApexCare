@@ -90,6 +90,7 @@ const BG_CACHE_KEY = 'apexcare.uiBackground';
 const SCALE_CACHE_KEY = 'apexcare.uiScale';
 const MOTION_CACHE_KEY = 'apexcare.uiReduceMotion';
 const ICON_CACHE_KEY = 'apexcare.uiIcon';
+const MODE_CACHE_KEY = 'apexcare.uiMode';
 export const HEX_RE = /^#[0-9a-f]{6}$/i;
 
 export function findTheme(id) {
@@ -276,6 +277,10 @@ export function applyTheme(id, accentHex = null, bgHex = null) {
     theme[family].forEach((hex, i) => style.setProperty(`--${family}-${STEPS[i]}`, channels(hex)));
   }
   style.setProperty('--black', channels(theme.black));
+  // 밝은 화면에서 강조색 글자로 쓸 색: 흰 바탕에서 4.5:1 이 되는 가장 밝은 단계(없으면 가장 어두운 단계)
+  const onWhite = [6, 7, 8, 9, 10].map((i) => theme.accent[i]).find((hex) => contrast(hex, '#ffffff') >= 4.5)
+    || theme.accent[10];
+  style.setProperty('--accent-text-light', channels(onWhite));
   document.documentElement.dataset.theme = base.id;
   // 다음 실행 때 백엔드 응답 전에도 같은 색으로 뜨게 한다. 저장소를 못 써도 동작에는 지장 없다.
   try {
@@ -413,9 +418,24 @@ export function applyDisplay({ scale = 100, reduceMotion = false } = {}) {
   return { scale: s, reduceMotion: Boolean(reduceMotion) };
 }
 
+// ── 화면 밝기 ────────────────────────────────────────────
+export const UI_MODES = ['dark', 'light'];          // backend/config_manager.py 의 UI_MODES 와 같아야 한다
+
+export function applyMode(mode) {
+  const m = mode === 'light' ? 'light' : 'dark';
+  for (const el of [document.documentElement, document.body]) {
+    if (el) el.classList.toggle('dark', m === 'dark');
+  }
+  try {
+    localStorage.setItem(MODE_CACHE_KEY, m);
+  } catch { /* 무시 */ }
+  return m;
+}
+
 export function cachedAppearance() {
   try {
     return {
+      mode: localStorage.getItem(MODE_CACHE_KEY) === 'light' ? 'light' : 'dark',
       id: localStorage.getItem(CACHE_KEY) || DEFAULT_THEME_ID,
       accent: localStorage.getItem(ACCENT_CACHE_KEY) || null,
       background: localStorage.getItem(BG_CACHE_KEY) || null,
@@ -424,7 +444,7 @@ export function cachedAppearance() {
       icon: localStorage.getItem(ICON_CACHE_KEY) || '',
     };
   } catch {
-    return { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '' };
+    return { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '', mode: 'dark' };
   }
 }
 

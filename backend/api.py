@@ -374,6 +374,9 @@ class Api:
     def setUiIcon(self, icon):
         return config_manager.set_ui_icon(icon)
 
+    def setUiMode(self, mode):
+        return config_manager.set_ui_mode(mode)
+
     def setWindowIcon(self, png_base64):
         """작업 표시줄·Alt+Tab 의 창 아이콘을 바꾼다. 빈 값이면 원래 아이콘으로. 이 창에만 적용된다."""
         from backend import window_frame, window_icon

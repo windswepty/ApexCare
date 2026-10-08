@@ -18,7 +18,7 @@ const layer = (src, color) => ({
 
 export default function AppLogo({ className = 'w-10 h-10', tile, glyph }) {
   return (
-    <span role="img" aria-label="APEX CARE" className={`relative inline-block flex-shrink-0 ${className}`}>
+    <span role="img" aria-label="APEX CARE" className={`app-logo relative inline-block flex-shrink-0 ${className}`}>
       <span style={layer('/icon-tile.png', tile || 'var(--icon-tile, #ffffff)')} />
       <span style={layer('/icon-glyph.png', glyph || 'var(--icon-glyph, #000000)')} />
     </span>

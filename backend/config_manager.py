@@ -39,6 +39,8 @@ DEFAULT_CONFIG = {
     "ui_reduce_motion": False,
     # 앱 아이콘 색: "" 기본 | "accent" 강조색 | "dark" 어두운 바탕 | "#rrggbb" 직접 고른 바탕색
     "ui_icon": "",
+    # 화면 밝기: "dark" 어둡게 | "light" 밝게
+    "ui_mode": "dark",
     # 초기 설정 마법사를 한 번 닫았는지. 예전에는 앱을 켤 때마다 마법사가 떴다.
     "setup_wizard_done": False,
 }
@@ -416,14 +418,32 @@ def set_ui_icon(value):
     return {"success": True, "icon": value}
 
 
+UI_MODES = ("dark", "light")
+
+
+def get_ui_mode():
+    value = load_config().get("ui_mode")
+    return value if value in UI_MODES else DEFAULT_CONFIG["ui_mode"]
+
+
+def set_ui_mode(value):
+    """화면 밝기('dark'·'light')를 저장한다. 다시 읽어 확인한다."""
+    if value not in UI_MODES:
+        return {"success": False, "message": f"알 수 없는 화면 밝기입니다: {value}"}
+    if not update_config(lambda c: c.__setitem__("ui_mode", value)) or load_config().get("ui_mode") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 밝기로 열립니다."}
+    return {"success": True, "mode": value}
+
+
 def get_ui_appearance():
     """화면 설정 전부(색 조합·강조색·배경색·크기·움직임 줄이기·아이콘 색)."""
     return {"theme": get_ui_theme(), "accent": get_ui_accent(), "background": get_ui_background(),
-            "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion(), "icon": get_ui_icon()}
+            "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion(), "icon": get_ui_icon(),
+            "mode": get_ui_mode()}
 
 
 _UI_DEFAULTS = {k: DEFAULT_CONFIG[k] for k in ("ui_theme", "ui_accent", "ui_background", "ui_scale",
-                                               "ui_reduce_motion", "ui_icon")}
+                                               "ui_reduce_motion", "ui_icon", "ui_mode")}
 
 
 def reset_ui_appearance():

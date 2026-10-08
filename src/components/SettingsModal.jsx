@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor, Sparkles, ShieldCheck } from 'lucide-react';
+import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor, Sparkles, ShieldCheck, Moon, Sun } from 'lucide-react';
 import AppLogo from './AppLogo';
 import {
   THEMES, HEX_RE, DEFAULT_THEME_ID, UI_SCALES, applyTheme, applyDisplay, swatch, findTheme, composeTheme,
   accentProblems, readableAccent, resemblesWarningColor, fitBackground,
-  ICON_PRESETS, iconColors, applyIcon, syncWindowIcon,
+  ICON_PRESETS, iconColors, applyIcon, syncWindowIcon, applyMode,
 } from '../theme';
 
 // 키보드로 갈 수 있는 것(Tab 이 창 안에서만 돌게 할 때 쓴다)
@@ -14,7 +14,7 @@ const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabi
 // 이제 고르면 바로 적용하고, 백엔드가 저장에 성공했을 때만 성공을 알린다.
 // 저장에 실패하면 화면도 이전 색으로 되돌린다. 다음 실행 때 보일 색과 어긋나지 않게.
 export default function SettingsModal({ isOpen, onClose, addToast, appearance, onAppearanceChange, onOpenSetupWizard }) {
-  const { id: themeId, accent = null, background = null, scale = 100, reduceMotion = false, icon = '' } = appearance || {};
+  const { id: themeId, accent = null, background = null, scale = 100, reduceMotion = false, icon = '', mode = 'dark' } = appearance || {};
   const [saving, setSaving] = useState(null);   // 'theme:<id>' | 'accent' | 'background' | 'scale' | 'motion' | 'reset'
   const [draft, setDraft] = useState('');       // 편집 중인 강조색
   const [hexText, setHexText] = useState('');   // 직접 입력 칸
@@ -75,7 +75,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   }, [isOpen, themeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const api = window.pywebview && window.pywebview.api;
-  const current = { id: themeId, accent, background, scale, reduceMotion, icon };
+  const current = { id: themeId, accent, background, scale, reduceMotion, icon, mode };
 
   useEffect(() => {
     if (!isOpen || !api?.getRestorePointSetting) return;
@@ -117,7 +117,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
           if (r && r.success === false && addToast) addToast(`작업 표시줄 고정 단추: ${r.message}`, 'error');
         });
       }
-      onAppearanceChange({ ...a, id: applied.id, ...applyDisplay(a) });
+      onAppearanceChange({ ...a, id: applied.id, mode: applyMode(a.mode), ...applyDisplay(a) });
     };
     show(next);
     setSaving(key);
@@ -178,6 +178,12 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
       value ? '움직임 줄이기를 켰습니다.' : '움직임 줄이기를 껐습니다.');
   };
 
+  const saveMode = (value) => {
+    if (saving || value === mode) return;
+    commit('mode', { mode: value }, api && (() => api.setUiMode(value)),
+      value === 'light' ? '밝은 화면으로 바꿨습니다.' : '어두운 화면으로 바꿨습니다.');
+  };
+
   const saveIcon = (value) => {
     if (saving || value === icon) return;
     commit('icon', { icon: value }, api && (() => api.setUiIcon(value)),
@@ -186,7 +192,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
 
   const resetAll = () => {
     if (saving) return;
-    commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '' },
+    commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '', mode: 'dark' },
       api && (() => api.resetUiAppearance()), '화면 설정을 모두 기본값으로 되돌렸습니다.');
   };
 
@@ -209,7 +215,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   const bgPreview = composeTheme(themeId, accent, bgValid ? bgDraft : null);
   const bgSaved = bgValid && background === bgDraft.toLowerCase();
   const setBg = (hex) => { setBgDraft(hex); setBgText(hex); };
-  const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion && !icon;
+  const isDefault = themeId === DEFAULT_THEME_ID && !accent && !background && scale === 100 && !reduceMotion && !icon && mode === 'dark';
   // 지금 화면의 색(아이콘 미리보기에 쓴다). 저장됐지만 읽기 어려워 쓰지 않는 강조색은 빼야 실제 아이콘과 같다.
   const shown = composeTheme(themeId, savedButUnused ? null : accent, background);
   const iconCustom = Boolean(icon) && HEX_RE.test(icon);
@@ -528,6 +534,29 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
               <Monitor className="w-4 h-4 text-cyan-400" />
               화면
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">화면 밝기</div>
+              <div role="radiogroup" aria-label="화면 밝기" className="grid grid-cols-2 gap-2">
+                {[['dark', '어둡게', Moon], ['light', '밝게', Sun]].map(([m, label, Icon]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === m}
+                    disabled={saving !== null}
+                    onClick={() => saveMode(m)}
+                    className={`py-2 rounded-lg text-sm font-bold border transition-colors disabled:cursor-wait inline-flex items-center justify-center gap-1.5 ${
+                      mode === m
+                        ? 'border-cyan-400 bg-cyan-500/10 text-cyan-400'
+                        : 'border-black/10 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-1.5">

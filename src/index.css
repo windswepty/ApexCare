@@ -315,6 +315,26 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent-400) / 0.5); }
 .preserve-3d { transform-style: preserve-3d; }
 
+/* ── 밝은 화면 ───────────────────────────────────────────
+   화면 대부분은 어두운 배경을 기준으로 밝은 단계(400 등)의 색 글자를 쓴다. 흰 바탕에서는 그 글자가 거의 보이지 않아
+   (대비 약 1.7:1) 밝은 화면일 때만 어두운 단계로 바꾼다. 강조색 글자는 theme.js 가 고른 --accent-text-light(흰 바탕 4.5:1). */
+html:not(.dark) .text-cyan-300, html:not(.dark) .text-cyan-400, html:not(.dark) .text-cyan-500,
+html:not(.dark) .hover\:text-cyan-400:hover, html:not(.dark) .hover\:text-cyan-300:hover { color: rgb(var(--accent-text-light)); }
+html:not(.dark) .text-cyan-400\/70 { color: rgb(var(--accent-text-light) / 0.8); }
+html:not(.dark) .text-rose-300, html:not(.dark) .text-rose-400, html:not(.dark) .text-rose-500,
+html:not(.dark) .hover\:text-rose-300:hover, html:not(.dark) .hover\:text-rose-400:hover { color: #be123c; }
+html:not(.dark) .text-rose-400\/80 { color: rgb(190 18 60 / 0.85); }
+html:not(.dark) .text-red-400, html:not(.dark) .text-red-500 { color: #b91c1c; }
+html:not(.dark) .text-amber-300, html:not(.dark) .text-amber-400, html:not(.dark) .text-amber-500 { color: #b45309; }
+html:not(.dark) .text-emerald-300, html:not(.dark) .text-emerald-400, html:not(.dark) .text-emerald-500,
+html:not(.dark) .hover\:text-emerald-400:hover { color: #047857; }
+html:not(.dark) .text-sky-400, html:not(.dark) .hover\:text-sky-400:hover { color: #0369a1; }
+html:not(.dark) .text-purple-400 { color: #7e22ce; }
+html:not(.dark) .text-yellow-400 { color: #a16207; }
+html:not(.dark) ::-webkit-scrollbar-track { background: rgb(var(--slate-100)); }
+/* 기본 로고는 흰 바탕이라 밝은 화면에서 테두리가 사라진다. 모양을 따라 옅은 윤곽을 준다. */
+html:not(.dark) .app-logo { filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.45)); }
+
 /* 움직임 줄이기(환경 설정). 애니메이션·전환 효과를 끄고 바로 바뀌게 한다. 로딩 표시는 돌아야 진행 중임을 알 수 있어 남긴다. */
 .reduce-motion *:not(.animate-spin),
 .reduce-motion *::before,

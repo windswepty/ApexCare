@@ -193,7 +193,17 @@ def test_ui_background_scale_and_motion_are_validated_and_saved():
     # 손으로 고친 이상한 값은 기본값으로 읽는다
     cm.update_config(lambda c: c.update(ui_scale=9999, ui_background='#zzzzzz', ui_reduce_motion='1'))
     assert cm.get_ui_appearance() == {'theme': 'cyan', 'accent': None, 'background': None,
-                                      'scale': 100, 'reduceMotion': False, 'icon': ''}
+                                      'scale': 100, 'reduceMotion': False, 'icon': '', 'mode': 'dark'}
+
+
+def test_ui_mode_is_validated_and_reset():
+    assert cm.get_ui_mode() == 'dark'                                    # 기본은 어두운 화면
+    assert cm.set_ui_mode('light')['success'] and cm.get_ui_appearance()['mode'] == 'light'
+    assert cm.set_ui_mode('sepia')['success'] is False and cm.get_ui_mode() == 'light'
+    cm.update_config(lambda c: c.__setitem__('ui_mode', 7))
+    assert cm.get_ui_mode() == 'dark'                                    # 이상한 값은 기본으로 읽는다
+    cm.set_ui_mode('light')
+    assert cm.reset_ui_appearance()['success'] and cm.get_ui_mode() == 'dark'
 
 
 def test_reset_ui_appearance_puts_everything_back_at_once(monkeypatch):
