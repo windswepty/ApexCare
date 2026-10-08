@@ -146,7 +146,15 @@ class Api:
         """
         # 사용자가 직접 골랐다. 게임이 끝났다고 게임 전 모드로 되돌리면 이 선택을 덮어쓴다.
         game_booster.forget_power_mode_restore()
-        return perf_modes.apply_mode(mode)
+        # 바꾸기 전에 Windows 복원 지점(설정에서 끌 수 있다). '표준' 은 되돌리기만 해서 만들지 않는다.
+        rp = None
+        if mode in perf_modes.MODES and mode != 'standard' and perf_modes.is_admin():
+            from backend import restore_point
+            rp = restore_point.before_change(f"성능 모드({perf_modes.MODES[mode]['label']}) 적용 전")
+        res = perf_modes.apply_mode(mode)
+        if rp is not None and isinstance(res, dict):
+            res['restorePoint'] = rp
+        return res
 
     def listOptimizationModes(self):
         """모드 카드에 표시할 정보. 무엇이 바뀌는지 미리 보여주기 위한 것."""
@@ -259,6 +267,24 @@ class Api:
     def getBootHistory(self):
         from backend import health
         return health.boot_history()
+
+    def getBattery(self):
+        from backend import health
+        return health.battery()
+
+    def openServicesApp(self):
+        """Windows 서비스 앱을 연다(부팅 기록을 남기는 진단 정책 서비스를 사용자가 직접 시작하도록). 서비스는 바꾸지 않는다."""
+        root = os.environ.get('SystemRoot') or r'C:\Windows'
+        try:
+            os.startfile(os.path.join(root, 'System32', 'services.msc'))
+            return {'success': True}
+        except OSError as e:
+            return {'success': False, 'message': f'서비스 앱을 열지 못했습니다: {e}'}
+
+    def saveHealthReport(self):
+        """PC 상태 보고서(HTML)를 사용자가 고른 곳에 저장한다."""
+        from backend import report
+        return report.save(self._window)
 
     # --- File Finder Features ---
     def findLargeFiles(self, min_mb=500):
@@ -379,6 +405,15 @@ class Api:
         except Exception as e:
             log.warning(f"고정한 단추 아이콘을 바꾸지 못했습니다: {e}")
             return {"success": False, "message": f"고정한 단추 아이콘을 바꾸지 못했습니다: {e}"}
+
+    # --- 시스템을 바꾸기 전 Windows 복원 지점 ---
+    def getRestorePointSetting(self):
+        from backend import restore_point
+        return {'enabled': restore_point.enabled()}
+
+    def setRestorePointSetting(self, enabled):
+        from backend import restore_point
+        return restore_point.set_enabled(enabled)
 
     # --- 초기 설정 마법사 (첫 실행 때만) ---
     def getSetupWizardDone(self):

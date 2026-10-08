@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor, Sparkles } from 'lucide-react';
+import { Settings, X, Check, Palette, Pipette, AlertTriangle, Wand2, RotateCcw, PaintBucket, Monitor, Sparkles, ShieldCheck } from 'lucide-react';
 import AppLogo from './AppLogo';
 import {
   THEMES, HEX_RE, DEFAULT_THEME_ID, UI_SCALES, applyTheme, applyDisplay, swatch, findTheme, composeTheme,
@@ -21,6 +21,9 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   const [bgDraft, setBgDraft] = useState('');   // 편집 중인 배경색
   const [bgText, setBgText] = useState('');
   const [iconDraft, setIconDraft] = useState('#22d3ee');   // 아이콘 바탕색 직접 고르기
+  // 시스템을 바꾸기 전 Windows 복원 지점 만들기(null = 아직 읽지 못함)
+  const [rpEnabled, setRpEnabled] = useState(null);
+  const [rpSaving, setRpSaving] = useState(false);
 
   // 대화상자: 열면 닫기 버튼으로 초점을 옮기고, Tab 은 창 안에서만 돌고, Esc 로 닫는다. 닫으면 열었던 곳으로 돌려준다.
   // 예전에는 초점이 오버레이 뒤에 남아 Tab 이 가려진 창 닫기 버튼으로 갔다.
@@ -73,6 +76,29 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
 
   const api = window.pywebview && window.pywebview.api;
   const current = { id: themeId, accent, background, scale, reduceMotion, icon };
+
+  useEffect(() => {
+    if (!isOpen || !api?.getRestorePointSetting) return;
+    api.getRestorePointSetting().then((r) => setRpEnabled(r?.enabled !== false)).catch(() => setRpEnabled(null));
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleRestorePoint = async () => {
+    if (rpEnabled === null || rpSaving || !api?.setRestorePointSetting) return;
+    const next = !rpEnabled;
+    setRpSaving(true);
+    try {
+      const r = await api.setRestorePointSetting(next);
+      if (r?.success) {
+        setRpEnabled(next);
+        addToast?.(next ? '시스템을 바꾸기 전에 Windows 복원 지점을 만듭니다.' : '복원 지점을 만들지 않습니다.', 'success');
+      } else {
+        addToast?.(r?.message || '설정을 저장하지 못했습니다.', 'error');
+      }
+    } catch (e) {
+      addToast?.(`설정을 저장하지 못했습니다: ${e}`, 'error');
+    }
+    setRpSaving(false);
+  };
 
   // 적용 → 저장 → 실패 시 되돌림. patch: 바꿀 화면 설정 일부
   const commit = async (key, patch, save, okMessage) => {
@@ -552,6 +578,33 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             >
               <RotateCcw className="w-3.5 h-3.5" />
               {saving === 'reset' ? '되돌리는 중…' : isDefault ? '화면 설정이 모두 기본값입니다' : '화면 설정 모두 기본값으로'}
+            </button>
+          </section>
+
+          {/* ── 안전 ── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
+              안전
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={rpEnabled === true}
+              disabled={rpEnabled === null || rpSaving}
+              onClick={toggleRestorePoint}
+              className="w-full flex items-center justify-between gap-3 rounded-lg border border-black/10 dark:border-slate-700 px-3 py-2.5 text-left hover:border-slate-500 transition-colors disabled:cursor-wait"
+            >
+              <span>
+                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">바꾸기 전에 Windows 복원 지점 만들기</span>
+                <span className="block text-[0.6875rem] text-gray-500 dark:text-slate-400">
+                  성능 모드·기본 앱 정리·맞춤 튜닝 전에 만듭니다. Windows 는 24시간에 한 번만 만들고, 시스템 보호가 꺼져 있으면 만들 수 없습니다(그때도 결과를 알려 드립니다).
+                  {rpEnabled === null && ' 설정을 읽지 못했습니다.'}
+                </span>
+              </span>
+              <span className={`relative w-10 h-6 rounded-full flex-shrink-0 transition-colors ${rpEnabled ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-slate-700'}`}>
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${rpEnabled ? 'left-5' : 'left-1'}`} />
+              </span>
             </button>
           </section>
 

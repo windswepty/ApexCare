@@ -765,6 +765,12 @@ def _run_debloater(selected_ids):
                 account_problem = _account_problem(account)
             succeeded, failed, skipped = [], [], []
 
+            # 바꾸기 전에 Windows 복원 지점(설정에서 끌 수 있다). 못 만들어도 계속한다 — 결과는 화면에 그대로 보인다.
+            if any(i in _ITEMS_BY_ID for i in selected_ids):
+                from backend import restore_point
+                st["current_task"] = "Windows 복원 지점을 만드는 중..."
+                st["restore_point"] = restore_point.before_change('Windows 기본 앱 정리 전')
+
             for i, item_id in enumerate(selected_ids):
                 item = _ITEMS_BY_ID.get(item_id)
                 if not item:

@@ -180,6 +180,10 @@ export default function Debloater({ addToast }) {
                 if (!st.running) {
                   clearInterval(poll);
                   setIsScanning(false);
+                  // 바꾸기 전에 만든(또는 만들지 못한) Windows 복원 지점을 그대로 알린다
+                  if (st.restore_point && addToast) {
+                    addToast(st.restore_point.message, st.restore_point.ok ? 'info' : 'error');
+                  }
                   if (st.error) {
                     if (addToast) addToast("오류 발생: " + st.error, 'error');
                   } else {

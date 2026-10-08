@@ -411,6 +411,11 @@ export default function PerformanceModes({ currentMode, setCurrentMode, addToast
                     {result.failedCount > 0 && <span className="text-amber-500"> · 실패 {result.failedCount}건</span>}
                   </p>
                 )}
+                {result.restorePoint && (
+                  <p className={`text-xs mt-0.5 ${result.restorePoint.ok ? 'text-gray-500' : 'text-amber-500'}`}>
+                    {result.restorePoint.message}
+                  </p>
+                )}
               </div>
             </div>
             <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showSteps ? 'rotate-180' : ''}`} />

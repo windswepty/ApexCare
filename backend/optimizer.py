@@ -1284,6 +1284,10 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
                 "message": "아래 항목이 바뀝니다. '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다. 전원 플랜은 바꾸지 않습니다(성능 모드에서 고릅니다). Windows Update 및 보안 관련 서비스는 변경하지 않습니다."
             }
 
+        # 바꾸기 전에 Windows 복원 지점(설정에서 끌 수 있다). 못 만들어도 계속한다 — 결과에 그대로 담는다.
+        from backend import restore_point
+        rp = restore_point.before_change('하드웨어 맞춤 튜닝 전')
+
         steps = []
         if is_low_end:
             for svc in _LOW_END_DISABLE:
@@ -1323,6 +1327,7 @@ def apply_hardware_tailored_tuning(cpu_cores, ram_gb, consent=False):
             "failed": [s["name"] for s in failed],
             "failedCount": len(failed),
             "message": msg,
+            "restorePoint": rp,
         }
     except Exception as e:
         return {"success": False, "applied": False, "message": "맞춤 튜닝 적용에 실패했습니다.", "error": str(e)}
@@ -1689,6 +1694,11 @@ def toggle_startup_app(app_id, enabled):
             return {"success": False, "enabled": after, "id": _make_id(tag, name),
                     "message": f"'{shown}' 설정을 바꾸지 못했습니다" + (f": {why}" if why else ".")}
         log.info(f"시작 프로그램 {'켜기' if enabled else '끄기'}: {shown} ({tag})")
+        try:
+            from backend import health
+            health.record_startup_change(shown, enabled)          # 'PC 건강 진단' 의 부팅 시간 전후 비교용
+        except Exception as e:
+            log.debug(f"시작 프로그램 변경 시각을 남기지 못했습니다: {e}")
         return {"success": True, "enabled": enabled, "id": _make_id(tag, name), "origin": tag,
                 "message": f"'{shown}' 을 {'켰' if enabled else '껐'}습니다. 다음 로그인부터 적용됩니다."}
     except Exception as e:

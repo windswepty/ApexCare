@@ -146,7 +146,9 @@ GitHub Actions(`.github/workflows/tests.yml`)가 main 푸시와 PR 마다 우분
 | `system_repair.py` · `system_monitor.py` | TRIM·SFC·DISM·네트워크, 시스템 상태·프로세스 목록 |
 | `config_manager.py` | 설정 파일 |
 | `uninstall_prep.py` | APEX CARE 제거 전 되돌리기 (`main.py --revert-for-uninstall`) |
-| `health.py` | PC 건강 진단: 디스크 상태(Get-PhysicalDisk·신뢰성 카운터, NVMe 는 디스크의 건강 기록)·부팅 시간 기록. 읽기만 한다 |
+| `health.py` | PC 건강 진단: 디스크 상태(Get-PhysicalDisk·신뢰성 카운터, NVMe 건강 기록·SATA 장치 통계)·수명 추세·배터리·부팅 시간(시작 프로그램 변경 전후). 읽기만 한다 |
+| `restore_point.py` | 시스템을 바꾸기 전(성능 모드·기본 앱 정리·맞춤 튜닝) Windows 복원 지점. 새로 생겼는지 목록으로 확인, 시스템 보호를 켜지 않는다 |
+| `report.py` | PC 상태 보고서(HTML 한 장)를 사용자가 고른 곳에 저장 |
 | `window_icon.py` | 앱 아이콘 색을 실행 중인 창 아이콘(작업 표시줄)에 건다(WM_SETICON, 기본이면 처음 아이콘으로) |
 | `shortcut_icon.py` | 앱 아이콘 색을 이 계정이 작업 표시줄에 고정한 APEX CARE 바로 가기에 건다(원래 아이콘 위치를 먼저 기록, 기본이면 되돌림) |
 

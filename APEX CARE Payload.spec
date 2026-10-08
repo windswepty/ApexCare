@@ -17,7 +17,7 @@ a = Analysis(
         'backend.safe_delete', 'backend.system_state', 'backend.perf_modes',
         'backend.process_boost', 'backend.storage', 'backend.perf_bench', 'backend.window_frame',
         'backend.single_instance', 'backend.machine_store', 'backend.window_icon', 'backend.health',
-        'backend.shortcut_icon',
+        'backend.shortcut_icon', 'backend.restore_point', 'backend.report',
         # main.py 가 --revert-for-uninstall 일 때만 import 한다(제거 프로그램이 부른다)
         'backend.uninstall_prep',
         'ctypes', 'ctypes.wintypes', 'threading', 'psutil', 'subprocess',

@@ -181,3 +181,53 @@ def test_health_tab_shows_disk_record_facts_and_stale_boot_log():
     hc = open(os.path.join(ROOT, 'src', 'components', 'HealthCenter.jsx'), encoding='utf-8').read()
     assert 'd.mediaErrors' in hc and 'n.unsafeShutdowns' in hc and 'boots.stale' in hc
     assert "'기록된 마지막 부팅'" in hc and '디스크 경고' in hc
+
+
+def _ata_page(number, entries):
+    """장치 통계 페이지 하나. entries: {오프셋: 값 또는 (값, 지원, 유효)}"""
+    d = bytearray(512)
+    d[0:2] = (1).to_bytes(2, 'little')
+    d[2] = number
+    for off, v in entries.items():
+        value, supported, valid = (v if isinstance(v, tuple) else (v, True, True))
+        q = (value & ((1 << 48) - 1)) | (int(supported) << 63) | (int(valid) << 62)
+        d[off:off + 8] = q.to_bytes(8, 'little')
+    return bytes(d)
+
+
+def test_ata_device_statistics_are_read_only_when_supported_and_valid():
+    pages = {
+        1: _ata_page(1, {0x08: 812, 0x10: 15321, 0x18: 2_000_000_000, 0x28: (5, True, False)}),   # 읽은 양: 유효하지 않음
+        3: _ata_page(3, {0x20: 8, 0x38: 0}),
+        4: _ata_page(4, {0x08: 2}),
+        5: _ata_page(5, {0x08: 0xFE, 0x58: 60}),       # -2 °C 가 아니라 부호 있는 8비트: 0xFE = -2
+        7: _ata_page(7, {0x08: (0, False, False)}),     # SSD 수명: 지원하지 않음(HDD)
+    }
+    a = health.parse_ata_stats(pages, sector_bytes=512)
+    assert a['powerCycles'] == 812 and a['powerOnHours'] == 15321
+    assert a['dataWrittenBytes'] == 2_000_000_000 * 512 and a['dataReadBytes'] is None
+    assert a['reallocatedSectors'] == 8 and a['pendingSectors'] == 0 and a['mediaErrors'] == 2
+    assert a['temperatureC'] == -2 and a['temperatureMaxC'] == 60 and a['percentUsed'] is None
+    assert [lvl for _, lvl in a['warnings']] == ['주의'] and '재할당' in a['warnings'][0][0]
+    # 페이지 번호가 요청과 다르거나 개정 번호가 틀리면 그 페이지는 쓰지 않는다
+    bad = dict(pages)
+    bad[1] = _ata_page(2, {0x10: 99})
+    assert health.parse_ata_stats(bad)['powerOnHours'] is None
+    assert health.parse_ata_stats({}) is None and health.parse_ata_stats({1: b'\x00' * 512}) is None
+    # 섹터 크기를 모르면 쓴 양을 지어내지 않는다
+    assert health.parse_ata_stats(pages, sector_bytes=None)['dataWrittenBytes'] is None
+
+
+def test_sata_disks_use_device_statistics(monkeypatch):
+    rows = [{'id': '2', 'name': 'WDC WD20EZRZ', 'media': 'HDD', 'bus': 'SATA', 'health': 'Healthy',
+             'logicalSector': 512, 'serial': ' WD-123 ', 'wear': 0, 'powerOnHours': None}]
+    monkeypatch.setattr(debloater, '_run_ps_json', lambda *a: (True, rows, None))
+    stats = health.parse_ata_stats({1: _ata_page(1, {0x10: 40000}), 3: _ata_page(3, {0x20: 3, 0x38: 1}),
+                                    4: _ata_page(4, {0x08: 0}), 7: _ata_page(7, {0x08: 50})})
+    asked = []
+    monkeypatch.setattr(health, '_ata_stats', lambda n, s: asked.append((n, s)) or stats)
+    d = health.disk_health()['disks'][0]
+    assert asked == [('2', 512)] and d['source'] == 'ata' and d['serial'] == 'WD-123'
+    assert d['powerOnHours'] == 40000 and d['mediaErrors'] == 0
+    assert d['wearPct'] is None                                   # HDD 에 SSD 수명 값이 와도 쓰지 않는다
+    assert d['health'] == '주의' and len(d['warnings']) == 2 and d['ata']['reallocatedSectors'] == 3

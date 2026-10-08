@@ -187,6 +187,11 @@ export default function InitialSetupWizard({ stats, onComplete, isDarkMode }) {
                 {applyResult?.success ? '설정을 적용했습니다' : '일부 또는 전체를 적용하지 못했습니다'}
               </h2>
               <p className={`text-sm ${muted}`}>{applyResult?.message}</p>
+              {applyResult?.restorePoint && (
+                <p className={`text-xs mt-1 ${applyResult.restorePoint.ok ? muted : 'text-amber-500'}`}>
+                  {applyResult.restorePoint.message}
+                </p>
+              )}
             </div>
             <div className="p-8 space-y-2">
               {(applyResult?.steps || []).map((st, idx) => (

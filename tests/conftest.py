@@ -55,6 +55,19 @@ def fake_windows():
     fakewin.check()
 
 
+@pytest.fixture(autouse=True)
+def restore_points(monkeypatch):
+    """Windows 복원 지점 만들기를 가짜로. 만든 설명을 calls 에 남기고, 기본으로는 '시스템 보호 꺼짐' 처럼 실패한다."""
+    from backend import restore_point
+    state = {'calls': [], 'row': {'maxBefore': 0, 'newestSeq': None, 'error': '시스템 보호가 꺼져 있습니다(테스트)'}}
+
+    def fake(desc):
+        state['calls'].append(desc)
+        return True, [dict(state['row'])], None
+    monkeypatch.setattr(restore_point, '_create', fake)
+    return state
+
+
 @pytest.fixture
 def as_admin(monkeypatch):
     """perf_modes 는 관리자가 아니면 아무것도 하지 않는다. 가짜 환경에서는 관리자인 척한다."""

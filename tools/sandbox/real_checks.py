@@ -1539,7 +1539,7 @@ def other_account_signed_in():
     return verdict(problems, diff(before, snapshot('signed_in_after')))
 
 
-@check('PC 건강 진단: 디스크 상태·부팅 기록·네트워크 속도를 관리자 권한으로 읽고 아무것도 바꾸지 않음')
+@check('PC 건강 진단: 디스크 상태·부팅 기록·배터리·보고서·네트워크 속도를 관리자 권한으로 읽고 아무것도 바꾸지 않음')
 def health_read_only():
     from backend import health, system_monitor
     before = snapshot('health_before')
@@ -1559,6 +1559,16 @@ def health_read_only():
     if not b['ok']:
         problems.append(f"부팅 기록을 읽지 못했습니다: {b.get('error')}")
     info.append(f"부팅 기록 {len(b.get('boots', []))}건 {b.get('note') or ''}")
+    bt = health.battery()
+    if not bt['ok']:
+        problems.append(f"배터리 정보를 읽지 못했습니다: {bt.get('error')}")
+    info.append(f"배터리 {len(bt.get('batteries', []))}개")
+    # 보고서: 저장 창 없이 내용만 만들어 본다(실제 값으로 만들다 멈추거나 오류 나지 않는지)
+    from backend import report
+    html = report.build_html(report.collect())
+    if '<h1>PC 상태 보고서</h1>' not in html:
+        problems.append('보고서 내용을 만들지 못했습니다')
+    info.append(f'보고서 {len(html):,}자')
     system_monitor.net_rates()
     time.sleep(1.2)
     down, up = system_monitor.net_rates()
@@ -1600,6 +1610,28 @@ def window_icon_real():
     finally:
         root.destroy()
     return verdict(problems, [])
+
+
+@check('복원 지점: 변경 전에 만들고, 만들었는지는 Windows 의 목록으로 확인한다(못 만들면 그 이유를 말한다)')
+def restore_point_real():
+    """진짜 Checkpoint-Computer 를 부른다. 샌드박스는 시스템 보호가 없을 수 있어 '못 만듦' 도 정상 결과다.
+    확인하는 것: 멈추지 않고 끝나는지, '만들었음' 이라고 하면 실제로 목록에 새 지점이 있는지."""
+    from backend import restore_point
+    t0 = time.time()
+    r = restore_point.before_change('샌드박스 점검')
+    took = round(time.time() - t0, 1)
+    problems = []
+    if not isinstance(r, dict) or not r.get('message'):
+        problems.append(f'결과 형식이 올바르지 않습니다: {r}')
+        return verdict(problems, [])
+    if r.get('created'):
+        ps = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                             '@(Get-ComputerRestorePoint | Where-Object { $_.Description -like "APEX CARE: 샌드박스 점검*" }).Count'],
+                            capture_output=True, text=True, errors='replace', timeout=120)
+        if (ps.stdout or '').strip() in ('', '0'):
+            problems.append(f"'만들었음' 이라고 했지만 목록에 없습니다: {ps.stdout!r} {ps.stderr[-200:]!r}")
+    status, why, changes = verdict(problems, [])
+    return status, (why + f" 결과: {r['message']} ({took}초)").strip(), changes
 
 
 @check('앱 아이콘 색: 고정한 작업 표시줄 단추(바로 가기)만 바꾸고, 기본으로 돌리면 원래대로')
