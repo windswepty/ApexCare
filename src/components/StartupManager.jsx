@@ -3,15 +3,16 @@ import {
   Rocket,
   Power
 } from 'lucide-react';
+import { tr } from '../i18n';
 
 // 백엔드 get_startup_apps() 의 location 값 → 화면 표시 (백엔드가 locationLabel 을 주면 그것을 쓴다)
 const LOCATION_LABEL = {
-  HKCU: '현재 사용자',
-  HKLM: '모든 사용자',
-  HKLM32: '모든 사용자 (32비트)',
-  FOLDER: '시작프로그램 폴더 (현재 사용자)',
-  FOLDER_ALL: '시작프로그램 폴더 (모든 사용자)',
-  LEGACY: '예전 버전에서 끔',
+  HKCU: tr('현재 사용자'),
+  HKLM: tr('모든 사용자'),
+  HKLM32: tr('모든 사용자 (32비트)'),
+  FOLDER: tr('시작프로그램 폴더 (현재 사용자)'),
+  FOLDER_ALL: tr('시작프로그램 폴더 (모든 사용자)'),
+  LEGACY: tr('예전 버전에서 끔'),
 };
 
 export default function StartupManager({ addToast, active = true }) {
@@ -72,7 +73,7 @@ export default function StartupManager({ addToast, active = true }) {
     const newEnabled = !app.enabled;
 
     if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.toggleStartupApp === 'function')) {
-      if (addToast) addToast("API가 준비되지 않았습니다.", "error");
+      if (addToast) addToast(tr("API가 준비되지 않았습니다."), "error");
       return;
     }
 
@@ -83,13 +84,13 @@ export default function StartupManager({ addToast, active = true }) {
       if (res?.success) {
         // 결과는 레지스트리에서 다시 읽는다(예전 버전에서 끈 항목은 켜면 원래 위치로 옮겨 간다)
         await reload();
-        if (addToast) addToast(res.message || `[${appName}] 시작 프로그램 상태가 변경되었습니다.`, 'success');
+        if (addToast) addToast(res.message || tr("[{0}] 시작 프로그램 상태가 변경되었습니다.", [appName]), 'success');
       } else {
-        if (addToast) addToast(res?.message || `시작 프로그램(${appName}) 상태 변경에 실패했습니다.`, 'error');
+        if (addToast) addToast(res?.message || tr("시작 프로그램({0}) 상태 변경에 실패했습니다.", [appName]), 'error');
       }
     } catch (e) {
       console.error('Error toggling startup app:', e);
-      if (addToast) addToast(`시작 프로그램(${appName}) 상태 변경에 실패했습니다.`, 'error');
+      if (addToast) addToast(tr("시작 프로그램({0}) 상태 변경에 실패했습니다.", [appName]), 'error');
     } finally {
       setPendingId(null);
     }
@@ -97,7 +98,7 @@ export default function StartupManager({ addToast, active = true }) {
 
   const enabledCount = startupApps.filter(a => a.enabled).length;
   const disabledCount = startupApps.length - enabledCount;
-  const countText = (n) => (loadState === 'loading' ? '…' : loadState === 'error' ? '-' : `${n}개`);
+  const countText = (n) => (loadState === 'loading' ? '…' : loadState === 'error' ? '-' : tr("{0}개", [n]));
 
   return (
     <div className="space-y-6">
@@ -108,9 +109,9 @@ export default function StartupManager({ addToast, active = true }) {
             <Rocket className="w-4 h-4" />
             WINDOWS STARTUP PROGRAMS
           </div>
-          <h2 className="text-2xl font-black text-black dark:text-white">시작 프로그램 관리</h2>
+          <h2 className="text-2xl font-black text-black dark:text-white">{tr("시작 프로그램 관리")}</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-            Windows 로그인 시 자동으로 실행되도록 레지스트리(Run 키)와 시작프로그램 폴더에 등록된 프로그램을 켜고 끕니다. 작업 관리자와 같은 방식이라 등록 정보와 바로 가기 파일은 그대로 두고 켜짐/꺼짐만 바꿉니다. 끈 항목도 작업 관리자·Windows 설정에 그대로 보이고, '변경 내역 · 되돌리기' 의 '전부 원래대로' 로도 되돌릴 수 있습니다. 다음 로그인부터 적용됩니다.
+            {tr("Windows 로그인 시 자동으로 실행되도록 레지스트리(Run 키)와 시작프로그램 폴더에 등록된 프로그램을 켜고 끕니다. 작업 관리자와 같은 방식이라 등록 정보와 바로 가기 파일은 그대로 두고 켜짐/꺼짐만 바꿉니다. 끈 항목도 작업 관리자·Windows 설정에 그대로 보이고, '변경 내역 · 되돌리기' 의 '전부 원래대로' 로도 되돌릴 수 있습니다. 다음 로그인부터 적용됩니다.")}
           </p>
         </div>
       </div>
@@ -118,12 +119,12 @@ export default function StartupManager({ addToast, active = true }) {
       {/* Counts — 레지스트리에서 읽은 값만 보여준다 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs text-gray-500 dark:text-slate-400">켜진 시작 프로그램</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("켜진 시작 프로그램")}</span>
           <div className="text-3xl font-black font-mono text-cyan-400 my-1">{countText(enabledCount)}</div>
         </div>
 
         <div className="glass-panel p-4 text-center">
-          <span className="text-xs text-gray-500 dark:text-slate-400">꺼진 시작 프로그램</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("꺼진 시작 프로그램")}</span>
           <div className="text-3xl font-black font-mono text-slate-400 my-1">{countText(disabledCount)}</div>
         </div>
       </div>
@@ -132,24 +133,23 @@ export default function StartupManager({ addToast, active = true }) {
       <div className="glass-panel p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm">
-            등록된 시작 프로그램 목록{loadState === 'ok' ? ` (${startupApps.length})` : ''}
+            {tr("등록된 시작 프로그램 목록")}{loadState === 'ok' ? ` (${startupApps.length})` : ''}
           </h3>
-          <span className="text-xs text-gray-500 dark:text-slate-400">이름 순</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("이름 순")}</span>
         </div>
         <p className="text-[0.6875rem] text-gray-500 dark:text-slate-400">
-          각 프로그램이 부팅 시간에 주는 영향은 측정하지 않으므로 표시하지 않습니다.
-          작업 스케줄러·서비스로 시작되는 프로그램은 이 목록에 나오지 않습니다.
+          {tr("각 프로그램이 부팅 시간에 주는 영향은 측정하지 않으므로 표시하지 않습니다. 작업 스케줄러·서비스로 시작되는 프로그램은 이 목록에 나오지 않습니다.")}
         </p>
 
         <div className="space-y-2">
           {loadState === 'loading' && (
-            <p className="text-sm text-gray-500 py-6 text-center">시작 프로그램 목록을 읽는 중…</p>
+            <p className="text-sm text-gray-500 py-6 text-center">{tr("시작 프로그램 목록을 읽는 중…")}</p>
           )}
           {loadState === 'error' && (
-            <p className="text-sm text-rose-400 py-6 text-center">시작 프로그램 목록을 읽지 못했습니다.</p>
+            <p className="text-sm text-rose-400 py-6 text-center">{tr("시작 프로그램 목록을 읽지 못했습니다.")}</p>
           )}
           {loadState === 'ok' && startupApps.length === 0 && (
-            <p className="text-sm text-gray-500 py-6 text-center">등록된 시작 프로그램이 없습니다.</p>
+            <p className="text-sm text-gray-500 py-6 text-center">{tr("등록된 시작 프로그램이 없습니다.")}</p>
           )}
           {startupApps.map((app) => (
             <div
@@ -188,7 +188,7 @@ export default function StartupManager({ addToast, active = true }) {
                   type="button"
                   role="switch"
                   aria-checked={app.enabled}
-                  aria-label={`${app.name} 시작 프로그램 ${app.enabled ? '끄기' : '켜기'}`}
+                  aria-label={tr("{0} 시작 프로그램 {1}", [app.name, app.enabled ? tr('끄기') : tr('켜기')])}
                   disabled={pendingId !== null}
                   onClick={() => toggleApp(app.id, app.name)}
                   className={`toggle-switch ${app.enabled ? 'active' : ''} ${pendingId === app.id ? 'opacity-50 cursor-wait' : ''} disabled:cursor-not-allowed`}

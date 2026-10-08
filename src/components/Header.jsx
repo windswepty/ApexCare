@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Monitor, Clock, Cpu, ArrowDown, ArrowUp } from 'lucide-react';
 import { clockLabel } from '../cpuClock';
+import { tr } from '../i18n';
 
 // 네트워크 속도(바이트/초) → 'MB/s' 등. 아직 재지 못했으면 '측정 중'
 export function rateLabel(bps) {
-  if (typeof bps !== 'number' || !Number.isFinite(bps)) return '측정 중';
+  if (typeof bps !== 'number' || !Number.isFinite(bps)) return tr('측정 중');
   if (bps >= 1024 ** 2) return `${(bps / 1024 ** 2).toFixed(1)} MB/s`;
   if (bps >= 1024) return `${Math.round(bps / 1024)} KB/s`;
   return `${Math.round(bps)} B/s`;
@@ -12,15 +13,15 @@ export function rateLabel(bps) {
 
 // 가동 시간 표시. 하루가 넘으면 '3일 4시간 5분' 처럼 날짜를 넣는다(예전에는 '76h 5m 2s').
 function uptimeLabel(totalSec) {
-  if (typeof totalSec !== 'number' || !Number.isFinite(totalSec) || totalSec < 0) return '확인 중…';
+  if (typeof totalSec !== 'number' || !Number.isFinite(totalSec) || totalSec < 0) return tr('확인 중…');
   const s = Math.floor(totalSec);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
-  if (d > 0) return `${d}일 ${h}시간 ${m}분`;
-  if (h > 0) return `${h}시간 ${m}분 ${sec}초`;
-  return `${m}분 ${sec}초`;
+  if (d > 0) return tr("{0}일 {1}시간 {2}분", [d, h, m]);
+  if (h > 0) return tr("{0}시간 {1}분 {2}초", [h, m, sec]);
+  return tr("{0}분 {1}초", [m, sec]);
 }
 
 // 헤더에는 상태만 보여 준다. 예전의 표준·게이밍·에코 스위치는 화면의 선택만 바꾸고 실제 모드는 바꾸지 않아
@@ -29,8 +30,8 @@ export default function Header() {
   // 가동 시간은 '마지막으로 받은 값 + 받은 뒤 흐른 시간' 으로 센다. 백엔드 값을 받기 전에는 표시하지 않는다.
   const [uptimeBase, setUptimeBase] = useState(null);   // { sec, at }
   const [now, setNow] = useState(() => Date.now());
-  const [osLabel, setOsLabel] = useState('확인 중…');
-  const [cpuLabel, setCpuLabel] = useState('확인 중…');
+  const [osLabel, setOsLabel] = useState(tr('확인 중…'));
+  const [cpuLabel, setCpuLabel] = useState(tr('확인 중…'));
   // 지금 CPU 가 실제로 도는 속도. 성능 모드를 바꾸면 몇 초 안에 이 숫자가 달라진다.
   const [clock, setClock] = useState({ mhz: null, base: null });
   // 지금 네트워크 속도(받기·보내기). 앞선 측정과의 차이라 첫 값은 '측정 중'
@@ -105,7 +106,7 @@ export default function Header() {
         <div className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300">
           <Clock className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           <div>
-            <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">시스템 가동 시간</div>
+            <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">{tr("시스템 가동 시간")}</div>
             <div className="font-bold">{uptimeLabel(uptimeSec)}</div>
           </div>
         </div>
@@ -113,10 +114,10 @@ export default function Header() {
         {/* 네트워크 속도 */}
         <div
           className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300"
-          title="모든 네트워크 어댑터의 합계입니다(자기 자신과의 통신 제외). 몇 초 간격의 평균이라 순간 속도와 조금 다를 수 있습니다."
+          title={tr("모든 네트워크 어댑터의 합계입니다(자기 자신과의 통신 제외). 몇 초 간격의 평균이라 순간 속도와 조금 다를 수 있습니다.")}
         >
           <div>
-            <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">네트워크</div>
+            <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">{tr("네트워크")}</div>
             <div className="font-bold flex items-center gap-2">
               <span className="flex items-center gap-0.5"><ArrowDown className="w-3 h-3 text-emerald-400" />{rateLabel(net.down)}</span>
               <span className="flex items-center gap-0.5"><ArrowUp className="w-3 h-3 text-cyan-400" />{rateLabel(net.up)}</span>
@@ -130,11 +131,11 @@ export default function Header() {
           return (
             <div
               className="bg-white dark:bg-black border border-black/10 dark:border-white/10 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-mono text-black dark:text-white shadow-sm transition-colors duration-300"
-              title="작업 관리자의 '속도' 와 같은 값입니다. 성능 모드를 바꾸면 몇 초 뒤 달라집니다."
+              title={tr("작업 관리자의 '속도' 와 같은 값입니다. 성능 모드를 바꾸면 몇 초 뒤 달라집니다.")}
             >
               <Cpu className="w-4 h-4 text-gray-600 dark:text-gray-400" />
               <div>
-                <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">CPU 실제 속도</div>
+                <div className="text-[0.625rem] text-gray-500 dark:text-gray-400 font-sans">{tr("CPU 실제 속도")}</div>
                 <div className="font-bold">
                   {c.text}
                   {c.state && <span className={`ml-1.5 text-[0.625rem] font-sans ${c.stateClass}`}>{c.state}</span>}

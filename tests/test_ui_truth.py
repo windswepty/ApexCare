@@ -97,14 +97,14 @@ def test_nested_lists_scroll_with_the_mouse_wheel():
 def test_results_and_dialogs_reach_screen_readers_and_keyboard():
     app = _read('src/App.jsx')
     assert 'aria-live="polite"' in app and "role={toast.type === 'error' ? 'alert' : undefined}" in app
-    assert 'aria-label="알림 닫기"' in app
+    assert 'aria-label={tr("알림 닫기")}' in app
     modal = _read('src/components/SettingsModal.jsx')
     assert 'role="dialog" aria-modal="true"' in modal and "e.key === 'Escape'" in modal
     assert 'role="switch"' in _read('src/components/GameBooster.jsx')
     storage = _read('src/components/StorageCenter.jsx')
     assert storage.count('aria-pressed=') >= 4
     dash = _read('src/components/Dashboard.jsx')
-    assert 'aria-label="성공"' in dash and 'aria-label="실패"' in dash and 'aria-label="중지됨"' in dash
+    assert 'aria-label={tr("성공")}' in dash and 'aria-label={tr("실패")}' in dash and 'aria-label={tr("중지됨")}' in dash
 
 
 def test_window_can_always_be_closed():
@@ -140,9 +140,10 @@ def test_dashboard_does_not_wait_forever_for_values_it_could_not_read():
     dash = _read('src/components/Dashboard.jsx')
     assert "pctText(diskUsage, loaded ? 'unavailable' : undefined)" in dash
     assert "pctText(ramUsage, loaded ? 'unavailable' : undefined)" in dash
-    assert "return info.cpuModel !== '확인 중…' ? '?' : '…';" in dash
-    assert "sysInfo.cpuModel !== '확인 중…' ? '?' : '…'" in dash
-    assert "if (stats && stats.error)" in dash and "cpuModel: '읽지 못함'" in dash
+    # '받았는가' 는 화면 글자가 아니라 loaded 로 판단한다(영어 화면에서는 '확인 중…' 글자가 다르다)
+    assert "return info.loaded ? '?' : '…';" in dash and "sysInfo.loaded ? '?' : '…'" in dash
+    assert "!== '확인 중…'" not in dash and "=== '확인 중…'" not in dash
+    assert "if (stats && stats.error)" in dash and "cpuModel: tr('읽지 못함')" in dash
 
 
 def test_restore_center_names_what_failed():

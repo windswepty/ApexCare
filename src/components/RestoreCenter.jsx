@@ -5,21 +5,22 @@ import {
   History, RotateCcw, ShieldCheck, Loader2, CheckCircle2,
   AlertTriangle, Cpu, Zap, Network, Server, HardDrive, Gamepad2, ShieldOff, Rocket
 } from 'lucide-react';
+import { tr } from '../i18n';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 
 /** 백엔드가 쓰는 그룹 키를 사람이 읽을 이름으로. */
 const GROUP_META = {
-  perf_mode: { label: '성능 모드', icon: Zap, desc: '전원 플랜과 CPU 동작 설정' },
-  hw_tuning: { label: '하드웨어 맞춤 튜닝', icon: Server, desc: '사양에 맞춘 서비스 시작 설정' },
-  boost: { label: '게임 부스트', icon: Gamepad2, desc: 'Nagle 끄기 (네트워크 어댑터 레지스트리)' },
-  debloat: { label: '원격 분석·Cortana 정책', icon: ShieldOff, desc: "'Windows 기본 앱 정리' 가 바꾼 정책 레지스트리와 서비스" },
+  perf_mode: { label: tr('성능 모드'), icon: Zap, desc: tr('전원 플랜과 CPU 동작 설정') },
+  hw_tuning: { label: tr('하드웨어 맞춤 튜닝'), icon: Server, desc: tr('사양에 맞춘 서비스 시작 설정') },
+  boost: { label: tr('게임 부스트'), icon: Gamepad2, desc: tr('Nagle 끄기 (네트워크 어댑터 레지스트리)') },
+  debloat: { label: tr('원격 분석·Cortana 정책'), icon: ShieldOff, desc: tr("'Windows 기본 앱 정리' 가 바꾼 정책 레지스트리와 서비스") },
   // 백엔드가 startup:위치:이름 그룹을 하나로 모아 보낸다. 예전에는 내부 키가 제목으로 그대로 보였다.
-  startup: { label: '시작 프로그램 켜기·끄기', icon: Rocket, desc: '작업 관리자와 같은 켜짐/꺼짐 표시(StartupApproved). 되돌리면 바꾸기 전 상태로 돌아갑니다' },
-  legacy_network: { label: '이전 버전의 네트워크 튜닝', icon: Network, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
-  legacy_service: { label: '이전 버전의 서비스 설정', icon: Server, desc: '이전 버전이 settings.json 에 남긴 백업으로 되돌립니다' },
-  legacy_startup: { label: '이전 버전이 끈 시작 프로그램', icon: Rocket, desc: '이전 버전은 Run 에서 지우고 따로 보관했습니다. 되돌리면 원래 자리에 되살려 켭니다' },
-  기타: { label: '기타 변경', icon: HardDrive, desc: '' },
+  startup: { label: tr('시작 프로그램 켜기·끄기'), icon: Rocket, desc: tr('작업 관리자와 같은 켜짐/꺼짐 표시(StartupApproved). 되돌리면 바꾸기 전 상태로 돌아갑니다') },
+  legacy_network: { label: tr('이전 버전의 네트워크 튜닝'), icon: Network, desc: tr('이전 버전이 settings.json 에 남긴 백업으로 되돌립니다') },
+  legacy_service: { label: tr('이전 버전의 서비스 설정'), icon: Server, desc: tr('이전 버전이 settings.json 에 남긴 백업으로 되돌립니다') },
+  legacy_startup: { label: tr('이전 버전이 끈 시작 프로그램'), icon: Rocket, desc: tr('이전 버전은 Run 에서 지우고 따로 보관했습니다. 되돌리면 원래 자리에 되살려 켭니다') },
+  기타: { label: tr('기타 변경'), icon: HardDrive, desc: '' },
 };
 
 export default function RestoreCenter({ addToast, active = true }) {
@@ -70,10 +71,10 @@ export default function RestoreCenter({ addToast, active = true }) {
     const a = api();
     if (!a?.revertAllSystemChanges) return;
     if (!window.confirm(
-      '이 프로그램이 바꾼 모든 시스템 설정을 원래대로 되돌립니다.\n\n' +
-      '위 목록에 있는 전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정, 시작 프로그램 켜기·끄기가\n' +
-      '바꾸기 전에 기록해 둔 값으로 복구됩니다. 기록이 없는 설정은 건드리지 않습니다.\n\n' +
-      '성능 모드는 \'표준\' 으로 돌아갑니다. 제거한 기본 앱은 되살리지 않습니다(\'Windows 기본 앱 정리\' 화면에서 되살립니다).\n\n계속할까요?'
+      tr('이 프로그램이 바꾼 모든 시스템 설정을 원래대로 되돌립니다.\n\n') +
+      tr('위 목록에 있는 전원 플랜, CPU 속도 설정, 레지스트리 값, 서비스 시작 설정, 시작 프로그램 켜기·끄기가\n') +
+      tr('바꾸기 전에 기록해 둔 값으로 복구됩니다. 기록이 없는 설정은 건드리지 않습니다.\n\n') +
+      tr('성능 모드는 \'표준\' 으로 돌아갑니다. 제거한 기본 앱은 되살리지 않습니다(\'Windows 기본 앱 정리\' 화면에서 되살립니다).\n\n계속할까요?')
     )) return;
 
     setBusy(true);
@@ -81,9 +82,9 @@ export default function RestoreCenter({ addToast, active = true }) {
     try {
       const res = await a.revertAllSystemChanges();
       setResult(res);
-      addToast?.(res?.message || '되돌리기를 완료했습니다.', res?.success ? 'success' : 'error');
+      addToast?.(res?.message || tr('되돌리기를 완료했습니다.'), res?.success ? 'success' : 'error');
     } catch (e) {
-      addToast?.(`되돌리기 실패: ${e}`, 'error');
+      addToast?.(tr("되돌리기 실패: {0}", [e]), 'error');
     }
     setBusy(false);
     refresh();
@@ -97,7 +98,7 @@ export default function RestoreCenter({ addToast, active = true }) {
       const res = await a.restoreAllProcesses();
       addToast?.(restoreMessage(res), res?.ok ? 'success' : 'error');
     } catch (e) {
-      addToast?.(`복구 실패: ${e}`, 'error');
+      addToast?.(tr("복구 실패: {0}", [e]), 'error');
     }
     setBusy(false);
     refresh();
@@ -112,26 +113,25 @@ export default function RestoreCenter({ addToast, active = true }) {
         <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-semibold">
           <History className="w-4 h-4" /> RESTORE CENTER
         </div>
-        <h2 className="text-2xl font-black text-black dark:text-white tracking-tight mt-1">변경 내역 · 되돌리기</h2>
+        <h2 className="text-2xl font-black text-black dark:text-white tracking-tight mt-1">{tr("변경 내역 · 되돌리기")}</h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm mt-1 max-w-2xl">
-          이 프로그램이 시스템에서 바꾼 것을 전부 기록해 둡니다.
-          무엇이 바뀌었는지 여기서 확인하고, 언제든 원래대로 되돌릴 수 있습니다.
+          {tr("이 프로그램이 시스템에서 바꾼 것을 전부 기록해 둡니다. 무엇이 바뀌었는지 여기서 확인하고, 언제든 원래대로 되돌릴 수 있습니다.")}
         </p>
       </div>
 
       {loadState !== 'ok' ? (
         <div className="glass-panel p-8 text-center text-sm">
           {loadState === 'loading'
-            ? <p className="text-gray-500 flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 변경 기록을 읽는 중…</p>
-            : <p className="text-rose-400">변경 기록을 읽지 못했습니다. 잠시 뒤 다시 확인합니다.</p>}
+            ? <p className="text-gray-500 flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{' '}{tr("변경 기록을 읽는 중…")}</p>
+            : <p className="text-rose-400">{tr("변경 기록을 읽지 못했습니다. 잠시 뒤 다시 확인합니다.")}</p>}
         </div>
       ) : nothingToRevert ? (
         <div className="glass-panel p-8 text-center">
           <ShieldCheck className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-          <p className="font-bold text-black dark:text-white">되돌릴 설정 변경이 없습니다.</p>
+          <p className="font-bold text-black dark:text-white">{tr("되돌릴 설정 변경이 없습니다.")}</p>
           {/* 예전 문구 '이 프로그램을 쓰기 전과 같은 상태' 는 사실이 아닐 수 있었다. 지운 파일과 제거한 앱은 여기서 다루지 않는다. */}
           <p className="text-sm text-gray-500 mt-1">
-            이 프로그램이 기록해 둔 시스템 설정은 모두 원래 값으로 돌아가 있습니다.
+            {tr("이 프로그램이 기록해 둔 시스템 설정은 모두 원래 값으로 돌아가 있습니다.")}
           </p>
         </div>
       ) : (
@@ -140,15 +140,15 @@ export default function RestoreCenter({ addToast, active = true }) {
             <div className="glass-panel p-6">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="font-bold text-black dark:text-white">시스템 설정 변경 {pending.count}건</h3>
+                  <h3 className="font-bold text-black dark:text-white">{tr("시스템 설정 변경")}{' '}{pending.count}{tr("건")}</h3>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    바꾸기 전 원래 값을 기록해 두었습니다.
+                    {tr("바꾸기 전 원래 값을 기록해 두었습니다.")}
                   </p>
                 </div>
                 <button onClick={revertSystem} disabled={busy}
                   className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-cyan-500 text-black disabled:opacity-40">
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                  전부 원래대로
+                  {tr("전부 원래대로")}
                 </button>
               </div>
 
@@ -161,7 +161,7 @@ export default function RestoreCenter({ addToast, active = true }) {
                       <div className="flex items-center gap-2.5 mb-2">
                         <Icon className="w-4 h-4 text-cyan-400 shrink-0" />
                         <p className="font-bold text-sm text-black dark:text-white">{meta.label}</p>
-                        <span className="text-xs text-gray-500 font-mono ml-auto">{items.length}건</span>
+                        <span className="text-xs text-gray-500 font-mono ml-auto">{items.length}{tr("건")}</span>
                       </div>
                       {meta.desc && <p className="text-xs text-gray-500 mb-2">{meta.desc}</p>}
                       <ul className="space-y-1">
@@ -171,7 +171,7 @@ export default function RestoreCenter({ addToast, active = true }) {
                           </li>
                         ))}
                         {items.length > 8 && (
-                          <li className="text-xs text-gray-500">· 외 {items.length - 8}건</li>
+                          <li className="text-xs text-gray-500">{tr("· 외")}{' '}{items.length - 8}{tr("건")}</li>
                         )}
                       </ul>
                     </div>
@@ -187,16 +187,16 @@ export default function RestoreCenter({ addToast, active = true }) {
                 <Cpu className="w-5 h-5 text-cyan-400 shrink-0" />
                 <div className="min-w-0">
                   <p className="font-bold text-sm text-black dark:text-white">
-                    우선순위가 조정된 프로세스 {procCount}개
+                    {tr("우선순위가 조정된 프로세스")}{' '}{procCount}{tr("개")}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    프로그램을 끄면 자동으로 복구되지만, 지금 되돌릴 수도 있습니다.
+                    {tr("프로그램을 끄면 자동으로 복구되지만, 지금 되돌릴 수도 있습니다.")}
                   </p>
                 </div>
               </div>
               <button onClick={revertProcesses} disabled={busy}
                 className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm border border-black/10 dark:border-slate-700 hover:border-cyan-500 disabled:opacity-40">
-                <RotateCcw className="w-4 h-4" /> 되돌리기
+                <RotateCcw className="w-4 h-4" />{' '}{tr("되돌리기")}
               </button>
             </div>
           )}
@@ -234,11 +234,11 @@ export default function RestoreCenter({ addToast, active = true }) {
                       <li key={i} className="text-xs text-rose-400 break-words">· {f.what ? `${f.what}: ` : ''}{f.reason || f.key}</li>
                     ))}
                     {result.failed.length > 6 && (
-                      <li className="text-xs text-gray-500">· 외 {result.failed.length - 6}건</li>
+                      <li className="text-xs text-gray-500">{tr("· 외")}{' '}{result.failed.length - 6}{tr("건")}</li>
                     )}
                   </ul>
                   <p className="text-xs text-gray-500 mt-2">
-                    실패한 항목은 기록에 남아 있어 다시 시도할 수 있습니다.
+                    {tr("실패한 항목은 기록에 남아 있어 다시 시도할 수 있습니다.")}
                   </p>
                 </div>
               )}
@@ -251,8 +251,7 @@ export default function RestoreCenter({ addToast, active = true }) {
         <div className="glass-panel p-4 flex gap-3 border border-amber-500/30">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-            'Windows 기본 앱 정리' 에서 제거한 앱 <strong className="text-black dark:text-white">{removedApps}개</strong>는
-            '전부 원래대로' 로 되살아나지 않습니다. 그 화면의 '제거한 앱' 에서 되살릴 수 있습니다.
+            {tr("'Windows 기본 앱 정리' 에서 제거한 앱")}{' '}<strong className="text-black dark:text-white">{removedApps}{tr("개")}</strong>{tr("는 '전부 원래대로' 로 되살아나지 않습니다. 그 화면의 '제거한 앱' 에서 되살릴 수 있습니다.")}
           </div>
         </div>
       )}
@@ -260,11 +259,8 @@ export default function RestoreCenter({ addToast, active = true }) {
       <div className="glass-panel p-4 flex gap-3">
         <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
         <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-          파일 삭제는 여기에 기록되지 않습니다. 대신 사용자 파일은 모두
-          <strong className="text-black dark:text-white"> 휴지통을 거쳐</strong> 삭제되므로
-          Windows 휴지통에서 직접 복구하시면 됩니다.
-          임시 파일과 캐시는 휴지통을 거치지 않고 지워지며, 필요하면 Windows 와 각 프로그램이 다시 만듭니다.
-          휴지통 비우기로 지운 파일은 되돌릴 수 없습니다.
+          {tr("파일 삭제는 여기에 기록되지 않습니다. 대신 사용자 파일은 모두")}
+          <strong className="text-black dark:text-white">{' '}{tr("휴지통을 거쳐")}</strong>{' '}{tr("삭제되므로 Windows 휴지통에서 직접 복구하시면 됩니다. 임시 파일과 캐시는 휴지통을 거치지 않고 지워지며, 필요하면 Windows 와 각 프로그램이 다시 만듭니다. 휴지통 비우기로 지운 파일은 되돌릴 수 없습니다.")}
         </div>
       </div>
     </div>

@@ -363,6 +363,23 @@ def _other_account_journals():
     return out
 
 
+def _in_ui_language(res):
+    """제거 프로그램이 보여 줄 실패 항목 이름·설명을 화면 언어로 바꾼다(영어일 때만). 성패 값은 그대로 둔다."""
+    try:
+        from backend import ui_text
+        lang = ui_text.language()
+        if lang != 'en':
+            return res
+        out = dict(res)
+        out['failed'] = [dict(f, name=ui_text.translate(str(f.get('name', '')), lang),
+                              detail=ui_text.translate(str(f.get('detail', '')), lang))
+                         if isinstance(f, dict) else f for f in res.get('failed') or []]
+        return out
+    except Exception as e:                    # 번역하지 못해도 결과는 전한다
+        log.warning(f'결과 문장을 바꾸지 못했습니다: {e}')
+        return res
+
+
 def _write_result(res):
     path = result_path()
     tmp = path + '.tmp'
@@ -382,7 +399,7 @@ def main_cli():
                'failed': [{'name': '제거 전 되돌리기', 'ok': False, 'detail': str(e) or type(e).__name__}],
                'remaining': None}
     try:
-        _write_result(res)
+        _write_result(_in_ui_language(res))
     except Exception as e:
         log.error(f'결과 파일을 쓰지 못했습니다: {e}')
         return 1                              # 결과를 전하지 못하면 성공이라고 할 수 없다

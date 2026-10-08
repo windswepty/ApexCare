@@ -11,6 +11,7 @@ import {
   PackageX,
   Undo2
 } from 'lucide-react';
+import { tr } from '../i18n';
 
 const api = () => (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
 
@@ -66,9 +67,9 @@ export default function Debloater({ addToast }) {
     try {
       const res = await a.restoreRemovedDebloatApps(names || null);
       setRestoreResult(res);
-      if (addToast) addToast(res?.message || '되살리기를 마쳤습니다.', res?.success ? 'success' : 'error');
+      if (addToast) addToast(res?.message || tr('되살리기를 마쳤습니다.'), res?.success ? 'success' : 'error');
     } catch (e) {
-      if (addToast) addToast(`되살리기 실패: ${e}`, 'error');
+      if (addToast) addToast(tr("되살리기 실패: {0}", [e]), 'error');
     }
     setRestoring(false);
     fetchRemoved();
@@ -139,24 +140,24 @@ export default function Debloater({ addToast }) {
     const unsure = irreversible.filter(x => restorable[x.id] !== false && restorable[x.id] !== true);
     let msg = '';
     if (gone.length > 0) {
-      msg += `아래 앱은 이 계정에만 설치되어 있어, 제거하면 Windows 가 설치 파일까지 지웁니다. `
-        + `이 화면에서 되살릴 수 없고 Microsoft Store 에서 다시 설치해야 합니다.\n`
+      msg += tr("아래 앱은 이 계정에만 설치되어 있어, 제거하면 Windows 가 설치 파일까지 지웁니다. ", [])
+        + tr("이 화면에서 되살릴 수 없고 Microsoft Store 에서 다시 설치해야 합니다.\n", [])
         + gone.map(line).join('\n') + '\n\n';
     }
     if (kept.length > 0) {
-      msg += `아래 앱을 이 계정에서 제거합니다. 설치 파일이 남으므로 이 화면의 '제거한 앱' 에서 되살릴 수 있습니다.\n`
+      msg += tr("아래 앱을 이 계정에서 제거합니다. 설치 파일이 남으므로 이 화면의 '제거한 앱' 에서 되살릴 수 있습니다.\n", [])
         + kept.map(line).join('\n') + '\n\n';
     }
     if (unsure.length > 0) {
-      msg += `아래 앱을 이 계정에서 제거합니다. 되살릴 수 있는지(설치 파일이 남는지) 확인하지 못했습니다. `
-        + `설치 파일이 지워지면 Microsoft Store 에서 다시 설치해야 합니다.\n`
+      msg += tr("아래 앱을 이 계정에서 제거합니다. 되살릴 수 있는지(설치 파일이 남는지) 확인하지 못했습니다. ", [])
+        + tr("설치 파일이 지워지면 Microsoft Store 에서 다시 설치해야 합니다.\n", [])
         + unsure.map(line).join('\n') + '\n\n';
     }
     if (reversible.length > 0) {
-      msg += `아래 정책을 바꿉니다. 원래 값을 기록해 두므로 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.\n`
+      msg += tr("아래 정책을 바꿉니다. 원래 값을 기록해 두므로 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.\n", [])
         + reversible.map(x => `  · ${x.name}`).join('\n') + '\n\n';
     }
-    if (!window.confirm(msg + '계속할까요?')) {
+    if (!window.confirm(msg + tr('계속할까요?'))) {
       return;
     }
 
@@ -166,7 +167,7 @@ export default function Debloater({ addToast }) {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.startDebloater === 'function') {
         const res = await window.pywebview.api.startDebloater(chosen.map(x => x.id));   // 확인 창에 보인 것만
         if (!res?.success) {
-          if (addToast) addToast(res?.message || '시작하지 못했습니다.', 'error');
+          if (addToast) addToast(res?.message || tr('시작하지 못했습니다.'), 'error');
           setIsScanning(false);
           return;
         }
@@ -185,23 +186,23 @@ export default function Debloater({ addToast }) {
                     addToast(st.restore_point.message, st.restore_point.ok ? 'info' : 'error');
                   }
                   if (st.error) {
-                    if (addToast) addToast("오류 발생: " + st.error, 'error');
+                    if (addToast) addToast(tr("오류 발생: ") + st.error, 'error');
                   } else {
                     // 백엔드가 항목별 성패를 돌려준다. 하나도 못 지웠는데
                     // '완료'라고 띄우지 않도록 실제 결과를 그대로 보여준다.
                     const failed = st.failed || [];
                     const succeeded = st.succeeded || [];
                     const skipped = st.skipped || [];
-                    const skipNote = skipped.length > 0 ? ` (${skipped.length}개는 설치돼 있지 않아 변경 없음)` : '';
+                    const skipNote = skipped.length > 0 ? tr(" ({0}개는 설치돼 있지 않아 변경 없음)", [skipped.length]) : '';
                     if (failed.length > 0 && succeeded.length > 0) {
-                      if (addToast) addToast(`${succeeded.length}개 완료, ${failed.length}개 실패: ${failed.join(', ')}${skipNote}`, 'error');
+                      if (addToast) addToast(tr("{0}개 완료, {1}개 실패: {2}{3}", [succeeded.length, failed.length, failed.join(', '), skipNote]), 'error');
                     } else if (failed.length > 0) {
-                      if (addToast) addToast(`처리하지 못했습니다: ${failed.join(', ')}${skipNote}`, 'error');
+                      if (addToast) addToast(tr("처리하지 못했습니다: {0}{1}", [failed.join(', '), skipNote]), 'error');
                     } else if (succeeded.length > 0) {
-                      if (addToast) addToast(`${succeeded.length}개 항목을 처리했습니다.${skipNote}`, 'success');
+                      if (addToast) addToast(tr("{0}개 항목을 처리했습니다.{1}", [succeeded.length, skipNote]), 'success');
                       setSelectedIds([]);
                     } else {
-                      if (addToast) addToast(`바뀐 것이 없습니다${skipNote}.`, 'info');
+                      if (addToast) addToast(tr("바뀐 것이 없습니다{0}.", [skipNote]), 'info');
                       setSelectedIds([]);
                     }
                     fetchRemoved();
@@ -212,12 +213,12 @@ export default function Debloater({ addToast }) {
             } catch (e) {
               clearInterval(poll);
               setIsScanning(false);
-              if (addToast) addToast(`진행 상태를 확인하지 못했습니다: ${e}. 작업은 계속 진행 중일 수 있습니다.`, 'error');
+              if (addToast) addToast(tr("진행 상태를 확인하지 못했습니다: {0}. 작업은 계속 진행 중일 수 있습니다.", [e]), 'error');
             }
           }
         }, 500);
       } else {
-        if (addToast) addToast("API가 준비되지 않았습니다.", 'error');
+        if (addToast) addToast(tr("API가 준비되지 않았습니다."), 'error');
         setIsScanning(false);
       }
     } catch (e) {
@@ -235,10 +236,9 @@ export default function Debloater({ addToast }) {
             <ServerCrash className="w-4 h-4" />
             WINDOWS DEBLOATER
           </div>
-          <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">Windows 기본 앱 정리</h2>
+          <h2 className="text-2xl font-black text-black dark:text-white tracking-tight">{tr("Windows 기본 앱 정리")}</h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xl">
-            잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(설치 파일이 남는 앱은 아래 '제거한 앱' 에서 되살릴 수 있습니다),
-            원격 분석·Cortana 정책을 바꿉니다('변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다).
+            {tr("잘 쓰지 않는 Windows 기본 앱을 이 계정에서 제거하고(설치 파일이 남는 앱은 아래 '제거한 앱' 에서 되살릴 수 있습니다), 원격 분석·Cortana 정책을 바꿉니다('변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다).")}
           </p>
         </div>
         <div className="z-10 shrink-0">
@@ -251,18 +251,18 @@ export default function Debloater({ addToast }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="font-bold text-black dark:text-white">정리할 수 있는 항목{items.length ? ` (${items.length})` : ''}</h3>
+            <h3 className="font-bold text-black dark:text-white">{tr("정리할 수 있는 항목")}{items.length ? ` (${items.length})` : ''}</h3>
             <button
               onClick={selectAll}
               disabled={isScanning || selectableIds.length === 0}
               className="text-xs font-bold text-cyan-500 hover:text-cyan-400 transition-colors disabled:opacity-40"
             >
-              {allSelected ? '전체 해제' : '전체 선택'}
+              {allSelected ? tr('전체 해제') : tr('전체 선택')}
             </button>
           </div>
           {installState === null && items.some(x => x.kind === 'appx') && (
             <p className="px-2 text-[0.6875rem] text-gray-500 flex items-center gap-1.5">
-              <Loader2 className="w-3 h-3 animate-spin" /> 이 PC 에 설치된 앱을 확인하는 중…
+              <Loader2 className="w-3 h-3 animate-spin" />{' '}{tr("이 PC 에 설치된 앱을 확인하는 중…")}
             </p>
           )}
 
@@ -277,7 +277,7 @@ export default function Debloater({ addToast }) {
                 onClick={() => toggleItem(item.id)}
                 disabled={isScanning || !canPick}
                 aria-pressed={selectedIds.includes(item.id)}
-                title={!canPick && state === 'not_installed' ? '이 PC 에 설치되어 있지 않아 고를 수 없습니다' : undefined}
+                title={!canPick && state === 'not_installed' ? tr('이 PC 에 설치되어 있지 않아 고를 수 없습니다') : undefined}
                 className={`glass-panel p-4 flex items-center gap-3 text-left transition-all duration-300 border-2 disabled:cursor-not-allowed ${
                   selectedIds.includes(item.id)
                     ? 'border-red-500/50 bg-red-500/5'
@@ -295,26 +295,26 @@ export default function Debloater({ addToast }) {
                   <div className="font-bold text-sm text-black dark:text-white flex items-center gap-2 flex-wrap">
                     {item.name}
                     {state === 'installed' && (
-                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-500">설치됨</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-500">{tr("설치됨")}</span>
                     )}
                     {state === 'not_installed' && (
-                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-gray-500/15 text-gray-500">설치되어 있지 않음</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-gray-500/15 text-gray-500">{tr("설치되어 있지 않음")}</span>
                     )}
                     {state === 'unknown' && (
-                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">설치 여부 확인 못 함</span>
+                      <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">{tr("설치 여부 확인 못 함")}</span>
                     )}
                   </div>
                   <div className={`text-[0.6875rem] font-semibold mt-0.5 ${item.reversible ? 'text-emerald-500'
                     : restorable[item.id] === false ? 'text-red-500' : 'text-amber-500'}`}>
                     {item.reversible
-                      ? "되돌리기 가능 ('변경 내역 · 되돌리기')"
+                      ? tr("되돌리기 가능 ('변경 내역 · 되돌리기')")
                       : !item.restorable
-                        ? '되돌릴 수 없음 (Store 에서 재설치)'
+                        ? tr('되돌릴 수 없음 (Store 에서 재설치)')
                         : restorable[item.id] === false
-                          ? '이 계정에만 설치됨 · 제거하면 설치 파일도 지워져 되살릴 수 없음 (Store 에서 재설치)'
+                          ? tr('이 계정에만 설치됨 · 제거하면 설치 파일도 지워져 되살릴 수 없음 (Store 에서 재설치)')
                           : restorable[item.id] === true
-                            ? "이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기"
-                            : "이 계정에서 제거 · 설치 파일이 남으면 아래 '제거한 앱' 에서 되살리기"}
+                            ? tr("이 계정에서 제거 · 아래 '제거한 앱' 에서 되살리기")
+                            : tr("이 계정에서 제거 · 설치 파일이 남으면 아래 '제거한 앱' 에서 되살리기")}
                   </div>
                   {item.note && <div className="text-[0.6875rem] text-gray-500 mt-0.5 leading-snug">{item.note}</div>}
                 </div>
@@ -328,15 +328,15 @@ export default function Debloater({ addToast }) {
           <div className="glass-panel p-5 bg-red-500/5 border-red-500/20">
             <h3 className="font-bold text-red-500 mb-2 flex items-center gap-2">
               <ShieldAlert className="w-4 h-4" />
-              주의사항
+              {tr("주의사항")}
             </h3>
             <p className="text-xs text-black/70 dark:text-white/70 leading-relaxed mb-4">
-              앱은 이 프로그램을 실행한 계정에서만 제거합니다. Windows 기본 설치 앱이나 다른 계정에도 설치된 앱은 설치 파일이 남아 아래 '제거한 앱' 에서 되살릴 수 있습니다. 이 계정에만 설치된 앱은 Windows 가 설치 파일까지 지우므로 Microsoft Store 에서 다시 설치해야 합니다(항목마다 표시합니다). 쓰고 있는 앱(예: 휴대폰과 연결)은 선택하지 마세요. 원격 분석·Cortana 항목은 정책만 바꾸며 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.
+              {tr("앱은 이 프로그램을 실행한 계정에서만 제거합니다. Windows 기본 설치 앱이나 다른 계정에도 설치된 앱은 설치 파일이 남아 아래 '제거한 앱' 에서 되살릴 수 있습니다. 이 계정에만 설치된 앱은 Windows 가 설치 파일까지 지우므로 Microsoft Store 에서 다시 설치해야 합니다(항목마다 표시합니다). 쓰고 있는 앱(예: 휴대폰과 연결)은 선택하지 마세요. 원격 분석·Cortana 항목은 정책만 바꾸며 '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.")}
             </p>
           </div>
 
           <div className="glass-panel p-5 text-center">
-            <h3 className="font-bold text-black dark:text-white mb-2">선택된 항목: {selectedIds.length}개</h3>
+            <h3 className="font-bold text-black dark:text-white mb-2">{tr("선택된 항목:")}{' '}{selectedIds.length}{tr("개")}</h3>
             <button
               onClick={startDebloat}
               disabled={selectedIds.length === 0 || isScanning || restoring}
@@ -349,12 +349,12 @@ export default function Debloater({ addToast }) {
               {isScanning ? (
                 <>
                   <RotateCw className="w-5 h-5 animate-spin" />
-                  <span>진행 중...</span>
+                  <span>{tr("진행 중...")}</span>
                 </>
               ) : (
                 <>
                   <Trash2 className="w-5 h-5" />
-                  <span>선택 항목 제거·적용</span>
+                  <span>{tr("선택 항목 제거·적용")}</span>
                 </>
               )}
             </button>
@@ -384,10 +384,10 @@ export default function Debloater({ addToast }) {
             <div>
               <h3 className="font-bold text-black dark:text-white flex items-center gap-2">
                 <PackageX className="w-4 h-4 text-cyan-400" />
-                제거한 앱 {removedApps.length}개
+                {tr("제거한 앱")}{' '}{removedApps.length}{tr("개")}
               </h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                이 프로그램이 제거한 앱입니다. 앱의 설치 파일을 다시 등록해 되살립니다.
+                {tr("이 프로그램이 제거한 앱입니다. 앱의 설치 파일을 다시 등록해 되살립니다.")}
               </p>
             </div>
             {removedApps.length > 0 && (
@@ -397,7 +397,7 @@ export default function Debloater({ addToast }) {
                 className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-cyan-500 text-black disabled:opacity-40"
               >
                 {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Undo2 className="w-4 h-4" />}
-                모두 되살리기
+                {tr("모두 되살리기")}
               </button>
             )}
           </div>
@@ -411,8 +411,8 @@ export default function Debloater({ addToast }) {
                   </p>
                   <p className="text-[0.6875rem] text-gray-500 font-mono truncate">{app.name}</p>
                   <p className="text-[0.6875rem] text-gray-500">
-                    {app.removedAt} 제거{app.account ? ` · 계정 ${app.account}` : ''}
-                    {app.manifestFound === false && ' · 설치 파일이 남아 있지 않아 Microsoft Store 에서 다시 설치해야 합니다'}
+                    {app.removedAt}{' '}{tr("제거")}{app.account ? tr(" · 계정 {0}", [app.account]) : ''}
+                    {app.manifestFound === false && tr(' · 설치 파일이 남아 있지 않아 Microsoft Store 에서 다시 설치해야 합니다')}
                   </p>
                 </div>
                 <button
@@ -420,7 +420,7 @@ export default function Debloater({ addToast }) {
                   disabled={isScanning || restoring}
                   className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs border border-black/10 dark:border-slate-700 hover:border-cyan-500 disabled:opacity-40"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" /> 되살리기
+                  <RotateCcw className="w-3.5 h-3.5" />{' '}{tr("되살리기")}
                 </button>
               </div>
             ))}

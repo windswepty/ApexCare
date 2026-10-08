@@ -86,6 +86,8 @@ def tell_other_session(title='APEX CARE'):
     """다른 계정에서 실행 중이라 끝낸다는 것을 알린다."""
     try:
         u32 = ctypes.WinDLL('user32', use_last_error=True)
-        u32.MessageBoxW(None, OTHER_SESSION_MESSAGE, title, 0x40 | 0x10000)   # MB_ICONINFORMATION | MB_SETFOREGROUND
+        from backend import ui_text
+        text = ui_text.translate(OTHER_SESSION_MESSAGE, ui_text.language())
+        u32.MessageBoxW(None, text, title, 0x40 | 0x10000)   # MB_ICONINFORMATION | MB_SETFOREGROUND
     except Exception as e:
         log.warning(f"안내 창을 띄우지 못했습니다: {e}")

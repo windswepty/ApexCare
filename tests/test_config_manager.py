@@ -193,7 +193,8 @@ def test_ui_background_scale_and_motion_are_validated_and_saved():
     # 손으로 고친 이상한 값은 기본값으로 읽는다
     cm.update_config(lambda c: c.update(ui_scale=9999, ui_background='#zzzzzz', ui_reduce_motion='1'))
     assert cm.get_ui_appearance() == {'theme': 'cyan', 'accent': None, 'background': None,
-                                      'scale': 100, 'reduceMotion': False, 'icon': '', 'mode': 'dark'}
+                                      'scale': 100, 'reduceMotion': False, 'icon': '', 'mode': 'dark',
+                                      'language': None}
 
 
 def test_ui_mode_is_validated_and_reset():
@@ -229,3 +230,11 @@ def test_ui_icon_accepts_only_presets_and_colors():
     assert cm.get_ui_icon() == '#ff8800'
     cm.update_config(lambda c: c.__setitem__('ui_icon', 'javascript:alert(1)'))      # 손으로 고친 값
     assert cm.get_ui_icon() == ''
+
+
+def test_ui_language_is_validated_and_unset_by_default():
+    assert cm.get_ui_language() is None                                  # 고른 적 없음: 화면이 Windows 언어로 정한다
+    assert cm.set_ui_language('en')['success'] and cm.get_ui_appearance()['language'] == 'en'
+    assert cm.set_ui_language('fr')['success'] is False and cm.get_ui_language() == 'en'
+    cm.reset_ui_appearance()
+    assert cm.get_ui_language() == 'en'                                  # 화면 설정 초기화가 언어를 바꾸지 않는다

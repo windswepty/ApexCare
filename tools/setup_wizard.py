@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import shutil
 import subprocess
 from PyQt6.QtWidgets import (QApplication, QWizard, QWizardPage, QVBoxLayout, 
@@ -16,6 +17,29 @@ UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE"
 APP_EXE = "APEX CARE.exe"
 UNINSTALLER_EXE = "APEX CARE Uninstaller.exe"
 CREATE_NO_WINDOW = 0x08000000
+
+
+def _english():
+    """화면 언어: APEX CARE 에서 고른 언어가 있으면 그것, 없으면 Windows 표시 언어(한국어가 아니면 영어). 앱과 같은 규칙."""
+    try:
+        with open(os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "settings.json"), encoding="utf-8") as f:
+            chosen = json.load(f).get("ui_language")
+        if chosen in ("ko", "en"):
+            return chosen == "en"
+    except Exception:
+        pass
+    try:
+        import ctypes
+        return (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF) != 0x12     # LANG_KOREAN
+    except Exception:
+        return False
+
+
+ENGLISH = _english()
+
+
+def _T(ko, en):
+    return en if ENGLISH else ko
 
 
 def install_dir():
@@ -136,7 +160,7 @@ def remove_legacy_install(new_dir):
     except FileNotFoundError:
         pass
     except OSError as e:
-        problems.append(f"예전 프로그램 목록 항목: {e}")
+        problems.append(_T(f"예전 프로그램 목록 항목: {e}", f"Old program list entry: {e}"))
     old_exe = os.path.normcase(os.path.join(old, APP_EXE))
     for desk in _user_desktops():
         lnk = os.path.join(desk, "APEX CARE.lnk")
@@ -176,12 +200,15 @@ class InstallWorker(QThread):
             # 제거 프로그램이 없으면 설치하지 않는다. 예전에는 조용히 건너뛰어, 지울 방법이 없는 설치가 됐다.
             missing = [os.path.basename(p) for p in (payload_path, uninstaller_path) if not os.path.exists(p)]
             if missing:
-                self.finished_install.emit(False, f"설치 패키지가 손상되었습니다(없는 파일: {', '.join(missing)}).")
+                self.finished_install.emit(False, _T(f"설치 패키지가 손상되었습니다(없는 파일: {', '.join(missing)}).",
+                                                     f"The setup package is damaged (missing files: {', '.join(missing)})."))
                 return
 
             if app_running():
-                self.finished_install.emit(False, "APEX CARE 가 실행 중입니다(또는 실행 여부를 확인하지 못했습니다).\n"
-                                                  "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.")
+                self.finished_install.emit(False, _T("APEX CARE 가 실행 중입니다(또는 실행 여부를 확인하지 못했습니다).\n"
+                                                     "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.",
+                                                     "APEX CARE is running (or it could not be checked whether it is running).\n"
+                                                     "Close the APEX CARE window and install again."))
                 return
             target_dir = install_dir()
             os.makedirs(target_dir, exist_ok=True)
@@ -198,15 +225,20 @@ class InstallWorker(QThread):
                 copy_with_progress(payload_path, target_path, report(0))
                 copy_with_progress(uninstaller_path, uninst_target, report(sizes[0]))
             except PermissionError:
-                self.finished_install.emit(False, "APEX CARE 가 실행 중이라 파일을 바꿀 수 없습니다.\n"
-                                                  "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.")
+                self.finished_install.emit(False, _T("APEX CARE 가 실행 중이라 파일을 바꿀 수 없습니다.\n"
+                                                     "APEX CARE 창을 닫은 뒤 다시 설치해 주세요.",
+                                                     "Files cannot be replaced because APEX CARE is running.\n"
+                                                     "Close the APEX CARE window and install again."))
                 return
 
             try:
                 register_uninstall(target_dir, target_path, sum(sizes))
             except OSError as e:
-                self.finished_install.emit(False, f"'앱 및 기능' 에 등록하지 못했습니다: {e}\n"
-                                                  "파일은 복사됐지만 제거 목록에 나오지 않습니다. 다시 설치해 주세요.")
+                self.finished_install.emit(False, _T(f"'앱 및 기능' 에 등록하지 못했습니다: {e}\n"
+                                                     "파일은 복사됐지만 제거 목록에 나오지 않습니다. 다시 설치해 주세요.",
+                                                     f"Could not register in 'Apps & features': {e}\n"
+                                                     "The files were copied but will not appear in the uninstall list. "
+                                                     "Please install again."))
                 return
             self.legacy_problems = remove_legacy_install(target_dir)
             self.progress_update.emit(100)
@@ -218,11 +250,15 @@ class InstallWorker(QThread):
 class LicensePage(QWizardPage):
     def __init__(self):
         super().__init__()
-        self.setTitle("사용권 계약")
-        self.setSubTitle("소프트웨어를 설치하기 전에 사용권 계약서를 주의 깊게 읽어보시기 바랍니다.")
+        self.setTitle(_T("사용권 계약", "License agreement"))
+        self.setSubTitle(_T("소프트웨어를 설치하기 전에 사용권 계약서를 주의 깊게 읽어보시기 바랍니다.",
+                            "Please read the license agreement carefully before installing the software."))
         
         layout = QVBoxLayout(self)
-        desc = QLabel("아래의 사용권 계약에 동의하십니까? 동의하신다면 '동의함'을 선택하십시오.\n프로그램을 설치하려면 반드시 사용권 계약에 동의해야 합니다.")
+        desc = QLabel(_T("아래의 사용권 계약에 동의하십니까? 동의하신다면 '동의함'을 선택하십시오.\n프로그램을 설치하려면 반드시 사용권 계약에 동의해야 합니다.",
+                         "Do you accept the license agreement below? To install the program you must accept it.\n"
+                         "The license agreement is provided in Korean."))
+        desc.setWordWrap(True)
         layout.addWidget(desc)
         
         self.eula_box = QTextEdit()
@@ -230,8 +266,8 @@ class LicensePage(QWizardPage):
         self.eula_box.setStyleSheet("background-color: white; color: black; font-family: 'Malgun Gothic', sans-serif;")
         layout.addWidget(self.eula_box)
         
-        self.radio_accept = QRadioButton("사용권 계약의 조항에 동의합니다(&A)")
-        self.radio_reject = QRadioButton("사용권 계약의 조항에 동의하지 않습니다(&D)")
+        self.radio_accept = QRadioButton(_T("사용권 계약의 조항에 동의합니다(&A)", "I &accept the terms of the license agreement"))
+        self.radio_reject = QRadioButton(_T("사용권 계약의 조항에 동의하지 않습니다(&D)", "I &do not accept the terms of the license agreement"))
         self.radio_reject.setChecked(True)
         
         layout.addWidget(self.radio_accept)
@@ -245,27 +281,34 @@ class LicensePage(QWizardPage):
 class ReadyPage(QWizardPage):
     def __init__(self):
         super().__init__()
-        self.setTitle("설치 준비 완료")
-        self.setSubTitle("컴퓨터에 APEX CARE 설치를 시작할 준비가 되었습니다.")
+        self.setTitle(_T("설치 준비 완료", "Ready to install"))
+        self.setSubTitle(_T("컴퓨터에 APEX CARE 설치를 시작할 준비가 되었습니다.",
+                            "Setup is ready to install APEX CARE on this computer."))
         
         layout = QVBoxLayout(self)
-        desc = QLabel("계속하려면 [설치]를 클릭하십시오. 설정을 검토하거나 변경하려면 [뒤로]를 클릭하십시오.")
+        desc = QLabel(_T("계속하려면 [다음]을 클릭하십시오. 설정을 검토하거나 변경하려면 [뒤로]를 클릭하십시오.",
+                         "Click [Next] to continue, or [Back] to review or change settings."))
+        desc.setWordWrap(True)
         layout.addWidget(desc)
         
-        info = QLabel(f"\n대상 위치:\n{install_dir()} (이 PC 의 모든 사용자)\n\n"
-                      "예전 버전이 사용자 폴더(AppData\\Local\\APEX CARE)에 설치돼 있으면 그 프로그램 파일은 정리하고,\n"
-                      "설정과 변경 기록은 그대로 이어 씁니다.")
+        info = QLabel(_T(f"\n대상 위치:\n{install_dir()} (이 PC 의 모든 사용자)\n\n"
+                         "예전 버전이 사용자 폴더(AppData\\Local\\APEX CARE)에 설치돼 있으면 그 프로그램 파일은 정리하고,\n"
+                         "설정과 변경 기록은 그대로 이어 씁니다.",
+                         f"\nDestination location:\n{install_dir()} (all users of this PC)\n\n"
+                         "If an earlier version is installed in the user folder (AppData\\Local\\APEX CARE), its program "
+                         "files are cleaned up and its settings and change history are kept."))
         info.setWordWrap(True)
         layout.addWidget(info)
 
 class ProgressPage(QWizardPage):
     def __init__(self):
         super().__init__()
-        self.setTitle("설치 중")
-        self.setSubTitle("컴퓨터에 APEX CARE를 설치하는 중입니다. 잠시만 기다려 주십시오.")
+        self.setTitle(_T("설치 중", "Installing"))
+        self.setSubTitle(_T("컴퓨터에 APEX CARE를 설치하는 중입니다. 잠시만 기다려 주십시오.",
+                            "Installing APEX CARE on this computer. Please wait."))
         
         layout = QVBoxLayout(self)
-        self.lbl_status = QLabel("파일을 복사하는 중...")
+        self.lbl_status = QLabel(_T("파일을 복사하는 중...", "Copying files..."))
         layout.addWidget(self.lbl_status)
         
         self.progress = QProgressBar()
@@ -291,30 +334,33 @@ class ProgressPage(QWizardPage):
     def on_install_finished(self, success, path_or_err):
         if success:
             self.wizard().installed_path = path_or_err
-            self.lbl_status.setText("설치가 완료되었습니다.")
+            self.lbl_status.setText(_T("설치가 완료되었습니다.", "Installation complete."))
             self.is_done = True
             self.completeChanged.emit()
             self.wizard().next() # Auto proceed to finish page
         else:
-            self.lbl_status.setText("설치 실패.")
-            QMessageBox.critical(self, "설치 오류", f"설치 중 오류가 발생했습니다:\n{path_or_err}")
+            self.lbl_status.setText(_T("설치 실패.", "Installation failed."))
+            QMessageBox.critical(self, _T("설치 오류", "Setup error"),
+                                 _T(f"설치 중 오류가 발생했습니다:\n{path_or_err}", f"An error occurred during installation:\n{path_or_err}"))
             self.wizard().reject()
 
 class FinishPage(QWizardPage):
     def __init__(self):
         super().__init__()
-        self.setTitle("APEX CARE 설치 마법사 완료")
-        self.setSubTitle("컴퓨터에 프로그램 설치를 성공적으로 완료했습니다.")
+        self.setTitle(_T("APEX CARE 설치 마법사 완료", "Completing the APEX CARE Setup Wizard"))
+        self.setSubTitle(_T("컴퓨터에 프로그램 설치를 성공적으로 완료했습니다.",
+                            "The program has been installed on this computer."))
         
         layout = QVBoxLayout(self)
-        desc = QLabel("컴퓨터에 APEX CARE 설치가 완료되었습니다.\n마법사를 닫으려면 [종료]를 클릭하십시오.")
+        desc = QLabel(_T("컴퓨터에 APEX CARE 설치가 완료되었습니다.\n마법사를 닫으려면 [종료]를 클릭하십시오.",
+                         "APEX CARE has been installed on this computer.\nClick [Finish] to close the wizard."))
         layout.addWidget(desc)
         
-        self.chk_shortcut = QCheckBox("바탕 화면에 바로 가기 만들기")
+        self.chk_shortcut = QCheckBox(_T("바탕 화면에 바로 가기 만들기", "Create a desktop shortcut"))
         self.chk_shortcut.setChecked(True)
         layout.addWidget(self.chk_shortcut)
         
-        self.chk_run = QCheckBox("APEX CARE 실행하기")
+        self.chk_run = QCheckBox(_T("APEX CARE 실행하기", "Run APEX CARE"))
         self.chk_run.setChecked(True)
         layout.addWidget(self.chk_run)
         
@@ -326,7 +372,7 @@ class FinishPage(QWizardPage):
 class SetupWizard(QWizard):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("설치 - APEX CARE")
+        self.setWindowTitle(_T("설치 - APEX CARE", "APEX CARE Setup"))
         self.setWindowIcon(QIcon(self.resource_path("setup_icon.ico")))
         self.setFixedSize(500, 380)
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
@@ -343,10 +389,10 @@ class SetupWizard(QWizard):
         self.addPage(self.progress_page)
         self.addPage(self.finish_page)
         
-        self.setButtonText(QWizard.WizardButton.BackButton, "< 뒤로(&B)")
-        self.setButtonText(QWizard.WizardButton.NextButton, "다음(&N) >")
-        self.setButtonText(QWizard.WizardButton.CancelButton, "취소")
-        self.setButtonText(QWizard.WizardButton.FinishButton, "종료(&F)")
+        self.setButtonText(QWizard.WizardButton.BackButton, _T("< 뒤로(&B)", "< &Back"))
+        self.setButtonText(QWizard.WizardButton.NextButton, _T("다음(&N) >", "&Next >"))
+        self.setButtonText(QWizard.WizardButton.CancelButton, _T("취소", "Cancel"))
+        self.setButtonText(QWizard.WizardButton.FinishButton, _T("종료(&F)", "&Finish"))
         
         self.load_eula()
         self.finished.connect(self.on_finished)
@@ -363,7 +409,8 @@ class SetupWizard(QWizard):
     def closeEvent(self, event):
         if self._copying():
             event.ignore()
-            QMessageBox.information(self, "설치 중", "설치를 마칠 때까지 기다려 주세요.")
+            QMessageBox.information(self, _T("설치 중", "Installing"),
+                                    _T("설치를 마칠 때까지 기다려 주세요.", "Please wait until the installation finishes."))
             return
         super().closeEvent(event)
 
@@ -373,7 +420,7 @@ class SetupWizard(QWizard):
             with open(eula_path, "r", encoding="utf-8") as f:
                 self.license_page.eula_box.setText(f.read())
         else:
-            self.license_page.eula_box.setText("EULA 파일을 찾을 수 없습니다.")
+            self.license_page.eula_box.setText(_T("EULA 파일을 찾을 수 없습니다.", "The EULA file was not found."))
 
     def resource_path(self, relative_path):
         try:
@@ -386,15 +433,25 @@ class SetupWizard(QWizard):
         # '앱 및 기능' 등록은 설치 단계(InstallWorker)에서 이미 끝났다. 실패했으면 완료 화면까지 오지 않는다.
         if result == 1 and self.installed_path: # Accepted/Finished
             if not self.create_shortcut("AllUsersPrograms"):
-                QMessageBox.warning(self, "바로 가기", "시작 메뉴에 바로 가기를 만들지 못했습니다.\n"
-                                    f"APEX CARE 는 설치되었습니다: {self.installed_path}")
+                QMessageBox.warning(self, _T("바로 가기", "Shortcut"),
+                                    _T("시작 메뉴에 바로 가기를 만들지 못했습니다.\n"
+                                       f"APEX CARE 는 설치되었습니다: {self.installed_path}",
+                                       "Could not create the Start menu shortcut.\n"
+                                       f"APEX CARE has been installed: {self.installed_path}"))
             if self.finish_page.chk_shortcut.isChecked() and not self.create_shortcut("AllUsersDesktop"):
-                QMessageBox.warning(self, "바로 가기", "바탕 화면에 바로 가기를 만들지 못했습니다.\n"
-                                    f"APEX CARE 는 설치되었습니다: {self.installed_path}")
+                QMessageBox.warning(self, _T("바로 가기", "Shortcut"),
+                                    _T("바탕 화면에 바로 가기를 만들지 못했습니다.\n"
+                                       f"APEX CARE 는 설치되었습니다: {self.installed_path}",
+                                       "Could not create the desktop shortcut.\n"
+                                       f"APEX CARE has been installed: {self.installed_path}"))
             legacy = getattr(self.progress_page.worker, "legacy_problems", None) or []
             if legacy:
-                QMessageBox.warning(self, "예전 버전 정리", "예전 버전(사용자 폴더 설치)의 일부를 정리하지 못했습니다.\n"
-                                    "새 버전은 설치되었습니다. 아래 항목은 직접 지워 주세요:\n" + "\n".join(legacy[:5]))
+                QMessageBox.warning(self, _T("예전 버전 정리", "Earlier version cleanup"),
+                                    _T("예전 버전(사용자 폴더 설치)의 일부를 정리하지 못했습니다.\n"
+                                       "새 버전은 설치되었습니다. 아래 항목은 직접 지워 주세요:\n",
+                                       "Parts of the earlier version (installed in the user folder) could not be cleaned up.\n"
+                                       "The new version has been installed. Please delete these items yourself:\n")
+                                    + "\n".join(legacy[:5]))
             if self.finish_page.chk_run.isChecked():
                 try:
                     os.startfile(self.installed_path)

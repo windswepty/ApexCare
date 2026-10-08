@@ -1,0 +1,1112 @@
+{
+ "exact": {
+  " (결과를 저장하지 못해 앱을 다시 켜면 사라집니다)": " (the result could not be saved and will be gone when the app restarts)",
+  " (그 계정의 변경 기록 파일은 고치지 못했습니다)": " (that account's change history file could not be updated)",
+  " (원래 위치 모름)": " (original location unknown)",
+  " (일부 실패)": " (partly failed)",
+  " 권한(SeProfileSingleProcessPrivilege)을 켜지 못했습니다.": " Could not enable the privilege (SeProfileSingleProcessPrivilege).",
+  " 설정 파일에 저장하지 못해 다음 실행 때는 이전 상태로 시작합니다.": " It could not be saved to the settings file, so the previous state will be used next time.",
+  " 재부팅해야 완전히 적용됩니다. Winsock 초기화는 되돌릴 수 없으며, 그때 사라진 VPN·보안 프로그램의 네트워크 구성 요소는 해당 프로그램을 다시 설치해야 복구됩니다.": " A restart is needed for it to fully apply. A Winsock reset cannot be undone; network components of VPN or security programs removed by it are restored only by reinstalling those programs.",
+  " 제거함": " removed",
+  " 지금 휴지통 크기를 읽지 못했습니다.": " The current Recycle Bin size could not be read.",
+  " 휴지통에서 복구할 수 있습니다.": " They can be recovered from the Recycle Bin.",
+  "%TEMP%·Windows\\Temp 의 임시 파일과 브라우저(Chrome·Edge·웨일) 캐시를 지웁니다. 쿠키·로그인 정보는 지우지 않습니다. 휴지통을 거치지 않아 되돌릴 수 없습니다. 사용 중인 파일은 건너뜁니다.": "Deletes temporary files in %TEMP% and Windows\\Temp and browser caches (Chrome, Edge, Whale). Cookies and sign-in information are not deleted. It does not go through the Recycle Bin and cannot be undone. Files in use are skipped.",
+  "(게임 부스트)": "(game boost)",
+  "(구 API)": "(old API)",
+  "(부스트 억제)": "(boost suppression)",
+  "(사용자 지정)": "(custom)",
+  ". 그 계정의 작업 관리자 → 시작 앱에서 다시 켤 수 있습니다": ". They can be turned on again in that account's Task Manager → Startup apps",
+  "APEX CARE 기록 지우기": "Delete APEX CARE records",
+  "APEX CARE 자신 또는 APEX CARE가 사용 중인 프로세스는 제어할 수 없습니다.": "APEX CARE itself and processes APEX CARE uses cannot be controlled.",
+  "CPU 부스트 공격적으로": "CPU boost aggressive",
+  "CPU 부스트 끄기 (기본 클럭까지만)": "CPU boost off (base clock only)",
+  "CPU 부스트를 가장 공격적으로 쓰고 클럭을 높게 유지합니다. 코어·PCIe·USB 절전을 꺼서 깨어나는 지연을 없앱니다. 발열과 소비 전력은 늘어납니다.": "Uses CPU boost most aggressively and keeps clocks high. Turns off core, PCIe and USB power saving to remove wake-up delays. Heat and power use increase.",
+  "CPU 부스트를 끄고 속도 상한을 낮춰 발열·소음·소비 전력을 확실히 줄입니다. 무거운 작업과 게임은 느려집니다.": "Turns off CPU boost and lowers the speed limit to clearly reduce heat, noise and power use. Heavy work and games get slower.",
+  "CPU 성능 우선 (EPP 0)": "CPU performance first (EPP 0)",
+  "CPU 최대 속도 100%": "CPU maximum speed 100%",
+  "CPU 최대 속도 70%": "CPU maximum speed 70%",
+  "CPU 최소 속도 100%": "CPU minimum speed 100%",
+  "CPU 최소 속도 5%": "CPU minimum speed 5%",
+  "CPU 효율 우선 (EPP 80)": "CPU efficiency first (EPP 80)",
+  "Chrome·Edge·웨일 캐시를 찾지 못했습니다": "No Chrome, Edge or Whale cache was found",
+  "Cortana 끄기": "Turn off Cortana",
+  "Cortana 사용 안 함 정책을 켭니다. '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.": "Turns on the policy that disables Cortana. You can undo it under 'Change history · Undo'.",
+  "DISM 복구": "DISM repair",
+  "DNS 캐시 초기화": "Flush the DNS cache",
+  "DNS 캐시 초기화 중...": "Flushing the DNS cache...",
+  "DNS 캐시 초기화에 실패했습니다.": "Could not flush the DNS cache.",
+  "DNS 캐시를 초기화했습니다.": "DNS cache flushed.",
+  "MMCSS 배경 예약 축소": "Reduce MMCSS background reservation",
+  "MSN 뉴스·날씨 (Bing 앱)": "MSN News and Weather (Bing apps)",
+  "Nagle 끄기": "Nagle off",
+  "Nagle 끄기 기록(네트워크 재연결 뒤 반영)": "Nagle off recorded (takes effect after reconnecting to the network)",
+  "PCIe 절전 끄기 (그래픽카드 지연 감소)": "PCIe power saving off (lower graphics card latency)",
+  "PCIe 최대 절전": "PCIe maximum power saving",
+  "Prefetch 데이터": "Prefetch data",
+  "SFC 검사": "SFC scan",
+  "SysMain(수퍼패치) 서비스를 '사용 안 함'으로 변경합니다 — 다음 부팅부터 반영되고 재부팅 후에도 유지됩니다.": "Changes the SysMain (Superfetch) service to 'Disabled' — takes effect from the next restart and stays after restarts.",
+  "SysMain(수퍼패치) 서비스를 '자동 시작'으로 변경합니다 — 다음 부팅부터 반영됩니다.": "Changes the SysMain (Superfetch) service to 'Automatic' — takes effect from the next restart.",
+  "TCP 자동 튜닝": "TCP auto-tuning",
+  "USB 선택적 절전 끄기": "USB selective suspend off",
+  "USB 선택적 절전 켜기": "USB selective suspend on",
+  "Windows 11 의 '미디어 플레이어'(Microsoft.ZuneMusic)는 건드리지 않습니다. ": "Windows 11's 'Media Player' (Microsoft.ZuneMusic) is not touched. ",
+  "Windows Search(WSearch) 서비스를 '자동 시작'으로 변경합니다 — 이미 '자동(지연된 시작)'이면 그대로 둡니다.": "Changes the Windows Search (WSearch) service to 'Automatic' — left as is if already 'Automatic (delayed start)'.",
+  "Windows Update 가 내려받은 설치 파일. 설치가 끝난 파일은 필요 없지만, 받는 중이거나 설치 대기 중인 업데이트는 다시 내려받게 됩니다": "Installation files downloaded by Windows Update. Files already installed are not needed, but updates being downloaded or waiting to install will be downloaded again",
+  "Windows Update 다운로드 캐시": "Windows Update download cache",
+  "Windows 가 캐시로 잡아 둔 대기 메모리를 비웁니다. 실행 중인 프로그램은 건드리지 않습니다.": "Clears the standby memory Windows holds as cache. Running programs are not touched.",
+  "Windows 기본 앱 정리 전": "Before Windows built-in app cleanup",
+  "Windows 복구·업그레이드 폴더": "Windows recovery and upgrade folder",
+  "Windows 복원 지점을 만드는 중...": "Creating a Windows restore point...",
+  "Windows 부팅 성능 기록이 없습니다(진단 로그가 꺼져 있거나 아직 기록된 부팅이 없음).": "There are no Windows boot performance records (the diagnostic log is off or no boot has been recorded yet).",
+  "Windows 원격 분석 (Telemetry) 줄이기": "Reduce Windows telemetry",
+  "Windows 임시 파일 (%TEMP%, Windows\\Temp)": "Windows temporary files (%TEMP%, Windows\\Temp)",
+  "Windows 지도": "Windows Maps",
+  "Xbox 콘솔 도우미 (구 Xbox 앱)": "Xbox Console Companion (old Xbox app)",
+  "microsoft 기본": "Microsoft default",
+  "같은 이름이 여러 위치에 있어 어느 항목인지 알 수 없습니다.": "The same name exists in several locations, so it is unclear which item is meant.",
+  "개발 실행에서는 바꾸지 않습니다.": "Not changed in a development run.",
+  "건드릴 수 없는 프로세스라 건너뛰었습니다": "Skipped because the process must not be touched",
+  "게이밍": "Gaming",
+  "게이밍 전원 모드": "Gaming power mode",
+  "게임 라이브러리·시스템 폴더": "Game library or system folder",
+  "게임 로그인, Xbox Game Bar, 새 Xbox 앱은 건드리지 않습니다. ": "Game sign-in, Xbox Game Bar and the new Xbox app are not touched. ",
+  "게임 부스트 복귀 기록 지우기": "Delete the game boost return record",
+  "게임 부스트가 게이밍 전원 모드로 바꾸지 못한 상태라 어느 모드의 결과인지 알 수 없습니다. 게임이 끝난 뒤 측정해 주세요.": "Game boost could not switch to the Gaming power mode, so it is unclear which mode the result belongs to. Please measure after the game ends.",
+  "게임 자동 감지를 껐습니다.": "Automatic game detection turned off.",
+  "게임 자동 감지를 껐습니다. 게임 동안 적용했던 설정을 되돌렸습니다.": "Automatic game detection turned off. The settings applied during the game were undone.",
+  "게임 자동 감지를 켰습니다.": "Automatic game detection turned on.",
+  "고사양": "High-spec",
+  "고성능": "High performance",
+  "고정한 작업 표시줄 단추 아이콘 되돌리기": "Restore the pinned taskbar button icon",
+  "공격적": "Aggressive",
+  "공격적(보장 클럭)": "Aggressive (guaranteed clock)",
+  "관리자 권한이 필요할 수 있습니다": "Administrator rights may be required",
+  "관리자 권한이 필요합니다.": "Administrator rights are required.",
+  "구버전": "Old version",
+  "구버전 기록에 원래 값이 없어(그 버전도 바꾸지 못함) 건드리지 않고 기록만 정리했습니다": "The old version's record has no original value (that version did not change it either), so nothing was touched and only the record was cleaned up",
+  "구버전 기록을 찾지 못했습니다": "The old version's record was not found",
+  "구버전 네트워크 튜닝": "Old version network tuning",
+  "구버전 서비스 시작 설정": "Old version service startup settings",
+  "구버전 시작 프로그램": "Old version startup programs",
+  "권한 부족(관리자 권한 필요)": "Insufficient permission (administrator rights required)",
+  "균형 조정": "Balanced",
+  "그 계정의 레지스트리 파일(NTUSER.DAT)을 찾지 못했습니다": "That account's registry file (NTUSER.DAT) was not found",
+  "그 계정의 레지스트리를 내리지 못했습니다. 재부팅하면 풀리며, 그 전에 그 계정으로 로그인하면 임시 프로필로 열릴 수 있습니다": "Could not unload that account's registry. A restart releases it; signing in to that account before then may open a temporary profile",
+  "금융": "Finance",
+  "기록 형식이 올바르지 않아 건너뛰었습니다": "Skipped because the record has an invalid format",
+  "기록 형식이 올바르지 않아 건드리지 않았습니다": "Not touched because the record has an invalid format",
+  "기록된 원래 값의 형식이 올바르지 않아 건드리지 않았습니다": "Not touched because the recorded original value has an invalid format",
+  "기록된 원래 값이 없습니다.": "There is no recorded original value.",
+  "기본 앱 제거·되살리기": "Removing or restoring built-in apps",
+  "기타": "Other",
+  "꺼져": "off",
+  "꺼짐": "off",
+  "껐": "off",
+  "끔": "Off",
+  "끔(기본 클럭까지만)": "Off (base clock only)",
+  "날씨": "Weather",
+  "남은 폴더가 없습니다.": "No leftover folders.",
+  "낮음": "Low",
+  "낮춰 둔 앱의 우선순위·효율 모드 되돌리기": "Restore the priority and efficiency mode of lowered apps",
+  "네트워크 스로틀링": "Network throttling",
+  "네트워크 스로틀링 해제": "Remove network throttling",
+  "높음": "High",
+  "뉴스": "News",
+  "다른 Windows 사용자 계정에서 APEX CARE 가 실행 중입니다.\n\n성능 모드와 변경 기록은 PC 전체에 하나라서 한 번에 한 계정에서만 쓸 수 있습니다. 그 계정에서 APEX CARE 를 닫은 뒤 다시 실행해 주세요.": "APEX CARE is running in another Windows user account.\n\nPerformance modes and the change history are shared by the whole PC, so only one account can use them at a time. Close APEX CARE in that account and run it again.",
+  "다른 계정의 레지스트리를 열 권한을 얻지 못했습니다": "Could not get permission to open another account's registry",
+  "다른 위치로 이어진 링크(정션)라 지우지 않았습니다": "Not deleted because it is a link (junction) to another location",
+  "다른 정리 작업이 진행 중입니다. 끝난 뒤 다시 시도해 주세요.": "Another cleanup task is in progress. Please try again after it finishes.",
+  "다음 재부팅부터 완전히 반영됩니다": "take full effect from the next restart",
+  "대기 메모리 비우기": "Clear standby memory",
+  "대기 메모리 비우는 중...": "Clearing standby memory...",
+  "대기 메모리(Standby)를 한 번 비웁니다 — 일시적이며 실행 중인 프로그램은 건드리지 않습니다.": "Clears standby memory once — temporary, and running programs are not touched.",
+  "대기 메모리를 비우려면 관리자 권한이 필요합니다.": "Administrator rights are required to clear standby memory.",
+  "대기 메모리를 비우지 못했습니다.": "Could not clear standby memory.",
+  "대기 메모리를 비웠습니다. 전후 크기는 측정하지 못했습니다.": "Standby memory cleared. The before and after sizes could not be measured.",
+  "되돌렸지만 기록을 지우지 못했습니다.": "Reverted, but the record could not be deleted.",
+  "되돌리려면 관리자 권한이 필요합니다.": "Administrator rights are required to undo.",
+  "되돌릴 네트워크 튜닝 기록이 없습니다.": "There is no network tuning record to undo.",
+  "되돌릴 정보를 저장하지 못해 바꾸지 않았습니다": "Not changed because undo information could not be saved",
+  "되살리지 못했습니다. Microsoft Store 에서 다시 설치할 수 있습니다.": "Could not restore. You can reinstall it from the Microsoft Store.",
+  "되살린 값을 다시 읽으니 다릅니다": "The restored value reads back differently",
+  "되살릴 앱이 없습니다.": "No apps to restore.",
+  "드라이브 루트": "drive root",
+  "등록 뒤에도 설치돼 있지 않습니다": "Still not installed after registering",
+  "디블로터: Cortana 사용 안 함 정책 (AllowCortana=0)": "Debloater: disable Cortana policy (AllowCortana=0)",
+  "디블로터: 원격 분석 서비스(DiagTrack) '사용 안 함'": "Debloater: telemetry service (DiagTrack) 'Disabled'",
+  "디블로터: 원격 분석 수준 최소화 정책 (AllowTelemetry=0)": "Debloater: minimum telemetry level policy (AllowTelemetry=0)",
+  "디스크 최적화": "Disk optimization",
+  "디스크 최적화(TRIM)": "Disk optimization (TRIM)",
+  "디스크 최적화(TRIM) 중...": "Optimizing disks (TRIM)...",
+  "디스크 최적화가 이미 진행 중입니다. 끝난 뒤 다시 시도해 주세요.": "Disk optimization is already running. Please try again after it finishes.",
+  "디스크가 신뢰성이 떨어졌다고 보고했습니다": "The disk reported degraded reliability",
+  "디스크가 읽기 전용으로 바뀌었습니다": "The disk has switched to read-only",
+  "디아블로 IV": "Diablo IV",
+  "레인보우 식스 시즈": "Rainbow Six Siege",
+  "레지스트리 키가 없습니다": "The registry key does not exist",
+  "로스트아크": "Lost Ark",
+  "리그 오브 레전드": "League of Legends",
+  "링크(정션)": "Link (junction)",
+  "링크·폴더": "link or folder",
+  "맞춤 튜닝 복구에 실패했습니다.": "Could not undo tailored tuning.",
+  "맞춤 튜닝 적용에 실패했습니다.": "Could not apply tailored tuning.",
+  "맞춤 튜닝이 바꾼 설정 기록이 없어 되돌릴 것이 없습니다.": "There is no record of settings changed by tailored tuning, so there is nothing to undo.",
+  "메이플스토리": "MapleStory",
+  "명령은 인자 리스트로만 실행합니다.": "Commands are run only as argument lists.",
+  "명조: 워더링 웨이브": "Wuthering Waves",
+  "모든 드라이브에 Windows 디스크 최적화를 실행합니다(SSD 는 TRIM, HDD 는 조각 모음). HDD 는 오래 걸릴 수 있고, 시작되면 끝날 때까지 진행됩니다.": "Runs Windows disk optimization on all drives (TRIM for SSDs, defragmentation for HDDs). HDDs can take a long time, and once started it runs until finished.",
+  "모든 사용자": "All users",
+  "모든 사용자 (32비트)": "All users (32-bit)",
+  "목록을 본 뒤 그 프로세스가 끝나 다른 프로그램이 같은 번호를 받았습니다. 목록을 새로 고쳐 주세요.": "That process ended after the list was shown, and another program got the same ID. Please refresh the list.",
+  "바쁜 백그라운드 앱 양보": "Busy background apps yield",
+  "배터리": "Battery",
+  "변경 기록을 읽지 못했습니다(다른 프로그램이 잠시 잡고 있을 수 있습니다).": "Could not read the change history (another program may be holding it briefly).",
+  "변경 실패": "Change failed",
+  "변경한 항목이 없습니다.": "Nothing was changed.",
+  "보통": "Normal",
+  "보통 미만": "Below normal",
+  "보통 절전": "Moderate power saving",
+  "보통 초과": "Above normal",
+  "보호된 경로": "Protected path",
+  "보호된 시스템/사용자 폴더": "Protected system/user folder",
+  "보호된 시스템·프로그램 폴더": "Protected system or program folder",
+  "보호된 프로세스라 Windows 가 우선순위 변경을 막았습니다.": "Windows blocked the priority change because it is a protected process.",
+  "복구 실패": "Restore failed",
+  "복원 지점을 만들었는지 확인하지 못했습니다.": "Could not confirm whether the restore point was created.",
+  "붕괴: 스타레일": "Honkai: Star Rail",
+  "브라우저가 저장한 이미지·스크립트 캐시(모든 프로필). 쿠키·로그인·방문 기록은 지우지 않습니다. 브라우저가 열려 있으면 사용 중인 파일은 건너뜁니다": "Image and script caches saved by browsers (all profiles). Cookies, sign-ins and history are not deleted. If a browser is open, files in use are skipped",
+  "블레이드 & 소울": "Blade & Soul",
+  "사용 가능한 전원 플랜을 찾지 못했습니다.": "No usable power plan was found.",
+  "사용 가능한 플랜 없음": "No usable plan",
+  "사용 안 함": "Disabled",
+  "사용자가 선택한 최적화 모드가 없어 자동 적용하지 않았습니다.": "No optimization mode was chosen by the user, so nothing was applied automatically.",
+  "사용자가 직접 바꾼 우선순위라 건드리지 않았습니다.": "Not touched because the user changed this priority directly.",
+  "사이버펑크 2077": "Cyberpunk 2077",
+  "새 복원 지점은 만들지 않았습니다": "No new restore point was created",
+  "서비스 복구 실패": "Service restore failed",
+  "서비스 이름이 올바르지 않습니다": "The service name is invalid",
+  "선택 목록 형식이 올바르지 않습니다.": "The selection list format is invalid.",
+  "선택된 항목이 없습니다.": "Nothing is selected.",
+  "설정 파일에 '표준' 을 저장하지 못했습니다. 앱을 다시 켜면 이전 모드가 다시 적용될 수 있습니다": "'Standard' could not be saved to the settings file. The previous mode may be applied again when the app restarts",
+  "설정 파일에 고른 모드를 저장하지 못했습니다. 앱을 다시 켜면 이전 모드가 다시 적용될 수 있습니다.": "The chosen mode could not be saved to the settings file. The previous mode may be applied again when the app restarts.",
+  "설정 파일에 저장하지 못했습니다": "Could not save to the settings file",
+  "설정 파일에 저장하지 못했습니다.": "Could not save to the settings file.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때 마법사가 다시 뜰 수 있습니다.": "Could not save to the settings file. The wizard may appear again next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 밝기로 열립니다.": "Could not save to the settings file. The previous brightness will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 배경색으로 열립니다.": "Could not save to the settings file. The previous background color will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색 조합으로 열립니다.": "Could not save to the settings file. The previous color scheme will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 색으로 열립니다.": "Could not save to the settings file. The previous color will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 설정으로 열립니다.": "Could not save to the settings file. The previous setting will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 아이콘 색으로 열립니다.": "Could not save to the settings file. The previous icon color will be used next time.",
+  "설정 파일에 저장하지 못했습니다. 다음 실행 때는 이전 크기로 열립니다.": "Could not save to the settings file. The previous size will be used next time.",
+  "설정 파일의 최상위가 객체가 아닙니다": "The top level of the settings file is not an object",
+  "설정을 저장하지 못했습니다.": "Could not save the setting.",
+  "설치 상태 확인이 시간 안에 끝나지 않았습니다": "Checking the installation state timed out",
+  "설치 파일이 남아 있지 않습니다. ": "No installation files remain. ",
+  "설치돼 있지 않습니다 (변경 없음)": "Not installed (no change)",
+  "설치된 프로그램이 쓰는 폴더": "Folder used by an installed program",
+  "성공적으로 완료되었습니다.": "Completed successfully.",
+  "성능 모드 기록": "Performance mode record",
+  "성능 모드를 바꾸려면 관리자 권한으로 실행해야 합니다.": "Run as administrator to change performance modes.",
+  "수동": "Manual",
+  "숨기기 전에 작업 관리자에서 꺼 둔 항목이라 꺼진 채 되살렸습니다": "Restored as off because it had been turned off in Task Manager before it was hidden",
+  "스포츠": "Sports",
+  "시간 초과": "Timed out",
+  "시간 초과. ": "Timed out. ",
+  "시스템 설정 (성능 모드·튜닝·부스트)": "System settings (performance modes, tuning, boost)",
+  "시스템 설정 되돌리기": "Undo system settings",
+  "시스템 정보를 읽지 못했습니다.": "Could not read system information.",
+  "시스템 정크 및 임시 파일 정리 중...": "Cleaning system junk and temporary files...",
+  "시스템에 필요한 파일 형식": "File type the system needs",
+  "시작 중...": "Starting...",
+  "시작 프로그램 표시 기록이 아니라 건드리지 않았습니다": "Not touched because it is not a startup flag record",
+  "시작프로그램 폴더 (모든 사용자)": "Startup folder (all users)",
+  "시작프로그램 폴더 (현재 사용자)": "Startup folder (current user)",
+  "시작하지 못했습니다": "Could not start",
+  "실시간": "Realtime",
+  "실패": "Failed",
+  "실행 중인 정리 작업이 없습니다.": "No cleanup is running.",
+  "실행 중인 최적화가 없습니다.": "No optimization is running.",
+  "실행 파일은 절대 경로로만 실행합니다.": "Executables are run only by absolute path.",
+  "쓰기가 거부되었습니다(다른 프로그램이나 보안 정책이 이 값을 잠갔을 수 있습니다)": "Writing was denied (another program or a security policy may have locked this value)",
+  "아래 항목이 바뀝니다. '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다. 전원 플랜은 바꾸지 않습니다(성능 모드에서 고릅니다). Windows Update 및 보안 관련 서비스는 변경하지 않습니다.": "The items below will change. You can undo them under 'Change history · Undo'. The power plan is not changed (choose it in performance modes). Windows Update and security services are not changed.",
+  "아이콘 그림 형식이 올바르지 않습니다.": "The icon image format is invalid.",
+  "아이콘 파일을 저장하지 못했습니다.": "Could not save the icon file.",
+  "아직 진행 중입니다. 백그라운드에서 끝까지 진행되며, 저장공간 → 디스크 최적화에서 결과를 확인할 수 있습니다": "Still running. It continues in the background until finished; you can check the result under Storage → Disk optimization",
+  "아직 프로그램 목록에 남아 있습니다. 제거가 끝난 뒤 다시 확인해 주세요.": "It is still in the program list. Please check again after the uninstall finishes.",
+  "알 수 없음": "Unknown",
+  "앱 설치·업데이트·실행 중에 만들어진 임시 파일. 사용 중인 파일은 건너뜁니다": "Temporary files created while installing, updating and running apps. Files in use are skipped",
+  "앱을 빨리 띄우려고 Windows 가 기록해 둔 데이터. 지우면 다시 만들어지며, 그때까지 앱이 처음 한 번 느리게 켜질 수 있습니다": "Data Windows records to start apps faster. It is recreated after deletion; until then, apps may start slowly the first time",
+  "에코": "Eco",
+  "영화 및 TV": "Movies & TV",
+  "예비 공간이 기준 아래로 줄었습니다": "Available spare has dropped below the threshold",
+  "예전 버전에서 끔": "Turned off by an earlier version",
+  "오버워치": "Overwatch",
+  "온도가 기준을 벗어났습니다": "Temperature is outside the threshold",
+  "원격 분석 정책을 최소로 두고 DiagTrack 서비스를 '사용 안 함'으로 바꿉니다(다음 부팅부터). '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.": "Sets the telemetry policy to the minimum and changes the DiagTrack service to 'Disabled' (from the next restart). You can undo it under 'Change history · Undo'.",
+  "원래 값 복구 실패": "Could not restore the original value",
+  "원래 값을 기록하지 못해 바꾸지 않았습니다 (저널 저장 실패)": "Not changed because the original value could not be recorded (journal save failed)",
+  "원래 값을 읽기가 거부되어 바꾸지 않았습니다(보안 정책이 이 값을 잠갔을 수 있습니다)": "Not changed because reading the original value was denied (a security policy may have locked it)",
+  "원래 값을 읽지 못해 바꾸지 않았습니다": "Not changed because the original value could not be read",
+  "원래 값이 기록되지 않아 되돌리지 않았습니다. 필요하면 관리자 명령 프롬프트에서 'netsh int tcp set global autotuninglevel=normal' 을 실행하세요.": "Not undone because the original value was not recorded. If needed, run 'netsh int tcp set global autotuninglevel=normal' in an administrator command prompt.",
+  "원래 시작 유형을 읽지 못해 바꾸지 않았습니다(서비스가 없을 수 있음)": "Not changed because the original startup type could not be read (the service may not exist)",
+  "원래 아이콘을 기록하지 못해 바꾸지 않았습니다.": "Not changed because the original icon could not be recorded.",
+  "원래 없던 값을 지웠지만 아직 남아 있습니다": "The value that did not exist originally was deleted but still remains",
+  "원래 우선순위를 읽지 못해 바꾸지 않았습니다.": "Not changed because the original priority could not be read.",
+  "원래 위치 기록 형식이 올바르지 않습니다": "The original location record has an invalid format",
+  "원래 위치 기록이 허용된 시작 프로그램 위치가 아닙니다": "The recorded original location is not an allowed startup location",
+  "원래 전원 플랜 기록을 저장하지 못해 바꾸지 않았습니다": "Not changed because the original power plan record could not be saved",
+  "원래 플랜 유지": "Keep the original plan",
+  "원신": "Genshin Impact",
+  "원클릭 최적화": "One-click optimization",
+  "원클릭 최적화가 진행 중입니다. 끝난 뒤 다시 시도해 주세요.": "One-click optimization is running. Please try again after it finishes.",
+  "웹 브라우저 캐시": "Web browser cache",
+  "위험": "Danger",
+  "이 PC 는 정책으로 휴지통을 쓰지 않게 되어 있어, 지우면 복구할 수 없습니다. 지우지 않았습니다": "A policy on this PC disables the Recycle Bin, so deleted items could not be recovered. Not deleted",
+  "이 PC 에는 없는 설정이라 건너뛰었습니다": "Skipped because this PC does not have the setting",
+  "이 PC 의 전원 설정에 없는 항목입니다": "This item is not in this PC's power settings",
+  "이 계정의 앱이 아니라 건너뛰었습니다": "Skipped because it is not an app of this account",
+  "이 드라이브는 '휴지통을 사용하지 않고 바로 제거' 로 설정되어 있어 지우면 복구할 수 없습니다. 지우지 않았습니다": "This drive is set to 'Don't move files to the Recycle Bin', so deleted items could not be recovered. Not deleted",
+  "이 앱의 성능 모드가 바꾼 설정을 모두 원래대로 되돌립니다. 새로 바꾸는 것은 없습니다.": "Restores all settings changed by this app's performance modes. Nothing new is changed.",
+  "이 프로그램은 사용자 폴더에 설치돼 있어 APEX CARE(관리자 권한)가 제거 프로그램을 실행하지 않습니다. 열린 Windows 설정 → 앱에서 제거한 뒤 '제거를 마쳤습니다' 를 누르면 남은 폴더를 찾아 드립니다.": "This program is installed in a user folder, so APEX CARE (running as administrator) does not run its uninstaller. Uninstall it in the Windows Settings → Apps page that opened, then press 'Uninstall finished' to find leftover folders.",
+  "이 프로그램을 실행한 계정을 알 수 없어 앱을 제거하지 않았습니다": "The account that started this program is unknown, so no apps were removed",
+  "이름 모름": "Unknown name",
+  "이미 DISM 복구 작업이 실행 중입니다.": "A DISM repair is already running.",
+  "이미 SFC 무결성 검사가 실행 중입니다.": "An SFC integrity scan is already running.",
+  "이미 다른 정리 작업이 진행 중입니다.": "Another cleanup task is already in progress.",
+  "이미 디스크 최적화가 실행 중입니다.": "Disk optimization is already running.",
+  "이미 스캔 중입니다.": "Already scanning.",
+  "이미 이 상태라 바꾸지 않았습니다": "Already in this state, so not changed",
+  "이미 자동(지연된 시작)이라 바꾸지 않았습니다": "Already Automatic (delayed start), so not changed",
+  "이미 정리 중입니다.": "Already cleaning.",
+  "이미 최적화가 실행 중입니다.": "Optimization is already running.",
+  "이미 측정 중입니다.": "Already measuring.",
+  "이전 모드 설정 되돌리기": "Undo previous mode settings",
+  "이전 모드 설정 일부도 되돌리지 못해 지금은 표준 상태가 아닙니다. '변경 내역 · 되돌리기' 에서 남은 항목을 확인하세요.": "Some previous mode settings could not be undone either, so it is not in the standard state now. Check the remaining items under 'Change history · Undo'.",
+  "이전 모드 설정은 되돌렸으므로 지금은 표준 상태입니다.": "The previous mode's settings were undone, so it is now in the standard state.",
+  "이전 버전이 바꾼 SysMain·Windows Search 시작 설정": "SysMain and Windows Search startup settings changed by an earlier version",
+  "이전 버전이 바꾼 TCP 자동 튜닝·Nagle·네트워크 스로틀링": "TCP auto-tuning, Nagle and network throttling changed by an earlier version",
+  "일반 파일이 아닙니다(폴더·링크)": "Not a regular file (folder or link)",
+  "일부 이전 설정을 되돌리지 못했습니다. '변경 내역 · 되돌리기' 에서 남은 항목을 확인하세요.": "Some previous settings could not be undone. Check the remaining items under 'Change history · Undo'.",
+  "임시 파일·브라우저 캐시 정리": "Clean temporary files and browser caches",
+  "임시 파일·브라우저 캐시 정리 중...": "Cleaning temporary files and browser caches...",
+  "자동": "Automatic",
+  "자동(지연된 시작)": "Automatic (delayed start)",
+  "작업 표시줄에 고정한 APEX CARE 가 없습니다.": "APEX CARE is not pinned to the taskbar.",
+  "잘못된 프로세스 ID입니다. 목록을 새로고침한 뒤 다시 시도해 주세요.": "Invalid process ID. Refresh the list and try again.",
+  "저널 형식이 아닙니다": "Not in journal format",
+  "저사양": "Low-spec",
+  "저장공간 화면에서 정크 정리가 진행 중입니다. 끝난 뒤 다시 시도해 주세요.": "Junk cleanup is running on the Storage screen. Please try again after it finishes.",
+  "저장된 DNS 조회 결과를 비웁니다.": "Clears saved DNS lookup results.",
+  "저장된 명령줄 형식이 올바르지 않습니다": "The saved command line has an invalid format",
+  "저장을 취소했습니다.": "Save cancelled.",
+  "전원 손실 대비 백업 장치에 문제가 있습니다": "The power-loss backup device has a problem",
+  "전원 플랜 전환": "Switch power plan",
+  "전후 크기는 측정하지 못함": "before and after sizes not measured",
+  "절전": "Power saver",
+  "정리 대상 폴더 밖": "outside the folder being cleaned",
+  "정상": "Healthy",
+  "정크 파일 정리": "Junk file cleanup",
+  "제거 기록을 저장하지 못해 지우지 않았습니다": "Not removed because the removal record could not be saved",
+  "제거 명령을 해석하지 못했습니다.": "Could not parse the uninstall command.",
+  "제거 명령이 비어 있습니다.": "The uninstall command is empty.",
+  "제거 전 되돌리기": "Undo before uninstall",
+  "제거 프로그램을 실행했습니다. 화면의 안내를 따라 제거를 마쳐 주세요.": "The uninstaller has started. Follow the on-screen instructions to finish uninstalling.",
+  "제거가 확인되었습니다.": "Uninstall confirmed.",
+  "제거되지 않았습니다": "Not removed",
+  "제거하지 못했습니다": "Could not remove",
+  "젠레스 존 제로": "Zenless Zone Zero",
+  "존재하지 않음": "Does not exist",
+  "주의": "Warning",
+  "중단 요청 전에 휴지통 비우기가 이미 실행되어 되돌릴 수 없습니다": "Emptying the Recycle Bin had already run before the stop request and cannot be undone",
+  "지금 전원 설정이 선택한 모드와 달라 어느 모드의 결과인지 알 수 없습니다. 성능 모드를 다시 눌러 맞춘 뒤 측정해 주세요.": "The current power settings differ from the selected mode, so it is unclear which mode the result belongs to. Press the performance mode again to match it, then measure.",
+  "지운 뒤에도 값이 남아 있습니다": "The value remains after deleting it",
+  "진행 중인 검색이 없습니다.": "No search is in progress.",
+  "창 아이콘을 바꾸지 못했습니다.": "Could not change the window icon.",
+  "창이 없어 저장 창을 띄울 수 없습니다.": "There is no window, so the save dialog cannot be shown.",
+  "최고의 성능": "Ultimate Performance",
+  "최대 절전": "Maximum power saving",
+  "최적화 모드 초기화에 실패했습니다.": "Could not reset the optimization mode.",
+  "측정하는 동안 성능 모드가 바뀌어 결과를 버렸습니다. 모드를 바꾸지 말고 다시 측정해 주세요.": "The performance mode changed during the measurement, so the result was discarded. Measure again without changing modes.",
+  "켜져": "on",
+  "켜짐": "on",
+  "켬": "On",
+  "켰": "on",
+  "코어 파킹 해제": "Disable core parking",
+  "코어 파킹 허용": "Allow core parking",
+  "클라우드에만 있는 파일(이 PC 의 공간을 쓰지 않음)": "Cloud-only file (uses no space on this PC)",
+  "타이머 해상도 0.5ms": "Timer resolution 0.5 ms",
+  "파일이 존재하지 않습니다": "The file does not exist",
+  "폴더가 존재하지 않습니다": "The folder does not exist",
+  "표준": "Standard",
+  "표준 모드입니다. 되돌릴 성능 모드 설정이 없었습니다.": "Standard mode. There were no performance mode settings to undo.",
+  "프로그램 이름과 폴더명이 일치": "Folder name matches the program name",
+  "프로그램 이름과 폴더명이 일치(공용 설치 폴더 안)": "Folder name matches the program name (inside a shared install folder)",
+  "프로그램 이름이 올바르지 않습니다.": "The program name is invalid.",
+  "프로그램이 등록한 설치 경로": "Install path registered by the program",
+  "프로세스 정보를 읽을 수 없어 안전을 위해 차단했습니다. (보호된 시스템 프로세스일 수 있습니다)": "Blocked for safety because the process information could not be read. (It may be a protected system process)",
+  "프로세스 정보를 읽지 못해 건너뛰었습니다": "Skipped because the process information could not be read",
+  "프로세스 종료에 실패했습니다.": "Could not end the process.",
+  "프로세스가 이미 종료되었습니다.": "The process has already exited.",
+  "프로세스가 이미 종료됨": "The process has already exited",
+  "프로세스를 종료할 권한이 없습니다.": "No permission to end the process.",
+  "플랜을 되돌린 뒤 확인에 실패했습니다": "Verification after restoring the plan failed",
+  "피드백 허브": "Feedback Hub",
+  "하드웨어 맞춤 튜닝 전": "Before hardware-tailored tuning",
+  "하드웨어 정보를 읽지 못해 맞춤 튜닝을 적용할 수 없습니다.": "Hardware information could not be read, so tailored tuning cannot be applied.",
+  "해당 프로세스를 찾을 수 없습니다. 이미 종료되었을 수 있습니다.": "The process could not be found. It may already have exited.",
+  "허용되지 않은 인자": "Argument not allowed",
+  "허용된 폴더 범위 밖": "Outside the allowed folder range",
+  "현재 계정에서만 제거합니다. 이 화면의 '제거한 앱' 에서 되살릴 수 있고, 설치 파일이 사라졌으면 Microsoft Store 에서 다시 설치합니다.": "Removed for the current account only. You can restore it under 'Removed apps' on this screen, or reinstall it from the Microsoft Store if its installation files are gone.",
+  "현재 사용자": "Current user",
+  "현재 전원 플랜을 읽지 못해 바꾸지 않았습니다": "Not changed because the current power plan could not be read",
+  "형식이 맞지 않습니다": "invalid format",
+  "확인한 뒤 휴지통 내용이 바뀌어 휴지통을 비우지 않았습니다. 다시 검사한 뒤 정리해 주세요": "The Recycle Bin contents changed after checking, so it was not emptied. Please scan again and then clean",
+  "활성 전원 플랜을 읽지 못했습니다": "Could not read the active power plan",
+  "효율적": "Efficient",
+  "효율적 공격적": "Efficient aggressive",
+  "효율적 공격적(보장 클럭)": "Efficient aggressive (guaranteed clock)",
+  "휴대폰과 연결 (Phone Link)": "Phone Link",
+  "휴지통": "Recycle Bin",
+  "휴지통 비우기": "Empty the Recycle Bin",
+  "휴지통 안의 파일을 완전히 삭제합니다. 되돌릴 수 없습니다.": "Permanently deletes the files in the Recycle Bin. This cannot be undone.",
+  "휴지통 크기를 확인하지 못해 지우지 않았습니다": "Not deleted because the Recycle Bin size could not be checked",
+  "휴지통 크기를 확인하지 못해 휴지통을 비우지 않았습니다(되돌릴 수 없는 작업이라 확인 없이 하지 않습니다)": "The Recycle Bin size could not be checked, so it was not emptied (an irreversible action is not done without checking)",
+  "휴지통을 비웠지만 비운 용량은 측정하지 못해 확보 용량에 넣지 않았습니다": "The Recycle Bin was emptied, but the amount could not be measured, so it is not included in the space freed",
+  "휴지통이 없는 드라이브(USB 메모리·네트워크 등)라 지우면 복구할 수 없습니다. 지우지 않았습니다": "This drive has no Recycle Bin (USB drive, network, etc.), so deleted items could not be recovered. Not deleted"
+ },
+ "patterns": [
+  [
+   "\n=== APEX CARE: 스킵 파일 로그 [{0}] ===\n",
+   "\n=== APEX CARE: skipped file log [{0}] ===\n"
+  ],
+  [
+   " ({0}개는 되돌렸습니다).",
+   " ({0} were undone)."
+  ],
+  [
+   " / {0}개 실패",
+   " / {0} failed"
+  ],
+  [
+   " {0}개는 건너뛰었습니다.",
+   " {0} were skipped."
+  ],
+  [
+   " 가장 최근 복원 지점: {0}.",
+   " Most recent restore point: {0}."
+  ],
+  [
+   "'{0}' (Run 에서 지워 숨김)",
+   "'{0}' (removed from Run and hidden)"
+  ],
+  [
+   "'{0}' 설정을 바꾸지 못했습니다",
+   "Could not change the setting for '{0}'"
+  ],
+  [
+   "'{0}' 설정을 바꾸지 못했습니다.",
+   "Could not change the setting for '{0}'."
+  ],
+  [
+   "'{0}' 설정을 바꾸지 못했습니다: {1}",
+   "Could not change the setting for '{0}': {1}"
+  ],
+  [
+   "'{0}' 은 보호된 프로세스라 Windows 가 우선순위 변경을 막았습니다.",
+   "'{0}' is a protected process, so Windows blocked the priority change."
+  ],
+  [
+   "'{0}' 은 이미 {1} 있습니다.",
+   "'{0}' is already {1}."
+  ],
+  [
+   "'{0}' 은 이미 꺼져 있습니다.",
+   "'{0}' is already off."
+  ],
+  [
+   "'{0}' 은 프로그램이 이미 다시 등록해 두었습니다(지금 {1}). 예전 버전의 기록만 정리했습니다.",
+   "The program has already re-registered '{0}' (now {1}). Only the earlier version's record was cleaned up."
+  ],
+  [
+   "'{0}' 을 {1} 시작 프로그램에서 찾지 못했습니다. 이미 제거되었을 수 있습니다.",
+   "'{0}' was not found in startup programs ({1}). It may already have been removed."
+  ],
+  [
+   "'{0}' 을 {1}습니다. 다음 로그인부터 적용됩니다.",
+   "Turned {1} '{0}'. Takes effect from the next sign-in."
+  ],
+  [
+   "'{0}' 을 되살리지 못했습니다: {1}",
+   "Could not restore '{0}': {1}"
+  ],
+  [
+   "'{0}' 을 시작 프로그램 목록에서 찾지 못했습니다.",
+   "'{0}' was not found in the startup program list."
+  ],
+  [
+   "'{0}' 을(를) 설치된 프로그램 목록에서 찾지 못했습니다. 이미 제거되었을 수 있습니다.",
+   "'{0}' was not found in the list of installed programs. It may already have been removed."
+  ],
+  [
+   "'{0}' 이(가) 아직 설치된 프로그램 목록에 있습니다. 제거 창에서 제거를 마친 뒤 다시 눌러 주세요.",
+   "'{0}' is still in the list of installed programs. Finish uninstalling in the uninstall window, then press again."
+  ],
+  [
+   "'{0}' 프로세스는 이미 종료되었습니다.",
+   "The '{0}' process has already exited."
+  ],
+  [
+   "'{0}' 프로세스를 종료했습니다.",
+   "Ended the '{0}' process."
+  ],
+  [
+   "'{0}'에서 변경, 다음 부팅부터 반영",
+   "changed from '{0}', takes effect from the next restart"
+  ],
+  [
+   "'{0}'은(는) Windows 시스템 필수 프로세스입니다. 강제 종료하면 블루스크린이 발생하거나 PC가 즉시 재부팅될 수 있어 APEX CARE가 차단했습니다.",
+   "'{0}' is an essential Windows system process. Force-ending it can cause a blue screen or an immediate restart, so APEX CARE blocked it."
+  ],
+  [
+   "'{0}'은(는) Windows 시스템 필수 프로세스입니다. 우선순위를 변경하면 시스템 전체가 불안정해질 수 있어 APEX CARE가 차단했습니다.",
+   "'{0}' is an essential Windows system process. Changing its priority can make the whole system unstable, so APEX CARE blocked it."
+  ],
+  [
+   "'꺼짐' 표시를 쓰지 못했습니다: {0}",
+   "Could not write the 'off' flag: {0}"
+  ],
+  [
+   ", {0}개 실패",
+   ", {0} failed"
+  ],
+  [
+   ", {0}개 실패 — {1}",
+   ", {0} failed — {1}"
+  ],
+  [
+   ", 이 PC 에 없는 {0}개 건너뜀)",
+   ", {0} not on this PC skipped)"
+  ],
+  [
+   "APEX CARE 가 다른 계정({0})으로 실행 중입니다. 바탕 화면 계정({1})의 앱은 이 계정에서 지울 수 없어 제거하지 않았습니다",
+   "APEX CARE is running as a different account ({0}). Apps of the desktop account ({1}) cannot be removed from this account, so nothing was removed"
+  ],
+  [
+   "HKLM\\{0} 를 지우지 못했습니다",
+   "Could not delete HKLM\\{0}"
+  ],
+  [
+   "MMCSS·네트워크 스로틀링 항목은 {0}.",
+   "The MMCSS and network throttling items {0}."
+  ],
+  [
+   "Microsoft Store 에서 '{0}' 을(를) 검색해 다시 설치할 수 있습니다.",
+   "You can search for '{0}' in the Microsoft Store and reinstall it."
+  ],
+  [
+   "PowerSetActiveScheme 오류 {0}",
+   "PowerSetActiveScheme error {0}"
+  ],
+  [
+   "Windows 복원 지점을 만들었습니다({0}).",
+   "Windows restore point created ({0})."
+  ],
+  [
+   "Windows 복원 지점을 만들지 못했습니다: {0} (시스템 보호가 꺼져 있으면 만들 수 없습니다. 제어판 → 시스템 → 시스템 보호에서 켤 수 있습니다.)",
+   "Could not create a Windows restore point: {0} (it cannot be created while System Protection is off. You can turn it on in Control Panel → System → System Protection.)"
+  ],
+  [
+   "{0} {1} 중...",
+   "{1}: {0}..."
+  ],
+  [
+   "{0} 맞춤 튜닝 {1}개 항목 중 {2}개가 실패했습니다: {3} — {4}",
+   "{2} of {1} {0} tailored tuning items failed: {3} — {4}"
+  ],
+  [
+   "{0} 맞춤 튜닝을 적용했습니다. 서비스 시작 유형은 다음 부팅부터 반영되며, '변경 내역 · 되돌리기' 에서 되돌릴 수 있습니다.",
+   "{0} tailored tuning applied. Service startup types take effect from the next restart and can be undone under 'Change history · Undo'."
+  ],
+  [
+   "{0} 모드",
+   "{0} mode"
+  ],
+  [
+   "{0} 모드를 적용하지 못했습니다(전원 플랜을 바꾸지 못함{1}). ",
+   "Could not apply {0} mode (could not change the power plan{1}). "
+  ],
+  [
+   "{0} 모드를 적용했습니다. ({1}개 항목)",
+   "{0} mode applied. ({1} items)"
+  ],
+  [
+   "{0} 모드를 적용했습니다. ({1}개 항목, 이 PC 에 없는 {2}개 건너뜀)",
+   "{0} mode applied. ({1} items, {2} not on this PC skipped)"
+  ],
+  [
+   "{0} 모드를 적용했지만 {1}개 항목이 실패했습니다.",
+   "{0} mode applied, but {1} items failed."
+  ],
+  [
+   "{0} 복구",
+   "Restore {0}"
+  ],
+  [
+   "{0} 복구(구버전 백업)",
+   "Restore {0} (old version backup)"
+  ],
+  [
+   "{0} 시작 유형 → {1}",
+   "{0} startup type → {1}"
+  ],
+  [
+   "{0} 시작 유형 → 자동",
+   "{0} startup type → Automatic"
+  ],
+  [
+   "{0} 시작 유형을 {1} 로 바꾸지 못했습니다 (sc 코드 {2}, 현재 {3}) {4}",
+   "Could not change the {0} startup type to {1} (sc code {2}, now {3}) {4}"
+  ],
+  [
+   "{0} 위치에 쓰려면 관리자 권한이 필요합니다",
+   "Administrator rights are required to write to {0}"
+  ],
+  [
+   "{0} 작업이 진행 중입니다. 완료 후 종료하거나 먼저 중단해 주세요.",
+   "{0} is in progress. Quit after it finishes, or stop it first."
+  ],
+  [
+   "{0}: Windows 가 제거를 막아 둔 패키지입니다",
+   "{0}: Windows does not allow this package to be removed"
+  ],
+  [
+   "{0}: 설치 상태 확인 실패 ({1})",
+   "{0}: could not check installation state ({1})"
+  ],
+  [
+   "{0}: 시간 초과 — 제거가 계속 진행 중일 수 있습니다. 잠시 뒤 설치 여부를 다시 확인하세요",
+   "{0}: timed out — removal may still be in progress. Check whether it is installed again in a moment"
+  ],
+  [
+   "{0}: 제거됐는지 확인하지 못했습니다",
+   "{0}: could not confirm removal"
+  ],
+  [
+   "{0}MB 확보",
+   "{0} MB freed"
+  ],
+  [
+   "{0}MB 확보, 일부 건너뜀 — ",
+   "{0} MB freed, some skipped — "
+  ],
+  [
+   "{0}개 단계 성공",
+   "{0} steps succeeded"
+  ],
+  [
+   "{0}개 되돌림",
+   "{0} restored"
+  ],
+  [
+   "{0}개 되돌림, {1}개 실패 — ",
+   "{0} restored, {1} failed — "
+  ],
+  [
+   "{0}개 되살림, {1}개 실패. 실패한 앱은 Microsoft Store 에서 다시 설치할 수 있습니다.",
+   "{0} restored, {1} failed. Failed apps can be reinstalled from the Microsoft Store."
+  ],
+  [
+   "{0}개 백그라운드에서 진행 중",
+   "{0} running in the background"
+  ],
+  [
+   "{0}개 변경 없음",
+   "{0} unchanged"
+  ],
+  [
+   "{0}개 복구",
+   "{0} restored"
+  ],
+  [
+   "{0}개 복구했지만 {1}개 영역에서 실패가 있습니다. 실패한 항목은 기록에 남아 다시 시도할 수 있습니다.",
+   "Restored {0}, but there were failures in {1} areas. Failed items stay in the record so you can try again."
+  ],
+  [
+   "{0}개 설정을 원래대로 되돌렸습니다.",
+   "Restored {0} settings."
+  ],
+  [
+   "{0}개 실패",
+   "{0} failed"
+  ],
+  [
+   "{0}개 실패: {1}",
+   "{0} failed: {1}"
+  ],
+  [
+   "{0}개 앱을 되살렸습니다.",
+   "Restored {0} apps."
+  ],
+  [
+   "{0}개 완료",
+   "{0} done"
+  ],
+  [
+   "{0}개 제거, 실패: ",
+   "{0} removed, failed: "
+  ],
+  [
+   "{0}개 제거. ",
+   "{0} removed. "
+  ],
+  [
+   "{0}개 중 {1}개를 되돌리지 못했습니다: {2}",
+   "Could not undo {1} of {0}: {2}"
+  ],
+  [
+   "{0}개 파일을 휴지통으로 보냈습니다.",
+   "Sent {0} files to the Recycle Bin."
+  ],
+  [
+   "{0}개 폴더를 휴지통으로 보냈습니다.",
+   "Sent {0} folders to the Recycle Bin."
+  ],
+  [
+   "{0}개 항목 복구",
+   "Restore {0} items"
+  ],
+  [
+   "{0}개를 원래 자리에 되살렸습니다",
+   "Restored {0} to their original place"
+  ],
+  [
+   "{0}분 안에 끝나지 않아 중단했습니다.",
+   "Stopped because it did not finish within {0} minutes."
+  ],
+  [
+   "게시자({0}) 이름의 제조사 공용 폴더",
+   "Shared vendor folder named after the publisher ({0})"
+  ],
+  [
+   "게임 부스트: Nagle 끄기 — {0} (어댑터 {1})",
+   "Game boost: Nagle off — {0} (adapter {1})"
+  ],
+  [
+   "게임 자동 감지를 껐습니다. 게임 동안 적용했던 설정 중 {0}개를 되돌리지 못했습니다: {1}",
+   "Automatic game detection turned off. {0} of the settings applied during the game could not be undone: {1}"
+  ],
+  [
+   "게임 전 성능 모드({0})로 되돌리지 못했습니다",
+   "Could not return to the pre-game performance mode ({0})"
+  ],
+  [
+   "고사양 맞춤 튜닝: {0} 자동 시작",
+   "High-spec tailored tuning: {0} automatic"
+  ],
+  [
+   "고정한 단추 아이콘을 바꾸지 못했습니다: {0}",
+   "Could not change the pinned button icon: {0}"
+  ],
+  [
+   "구버전 네트워크 튜닝 복구: {0}",
+   "Old version network tuning restore: {0}"
+  ],
+  [
+   "그 계정의 레지스트리를 쓰지 못했습니다({0})",
+   "Could not write that account's registry ({0})"
+  ],
+  [
+   "그 계정의 레지스트리를 열지 못했습니다({0})",
+   "Could not open that account's registry ({0})"
+  ],
+  [
+   "기대 {0}, 실제 {1}",
+   "expected {0}, actual {1}"
+  ],
+  [
+   "기록을 읽지 못했습니다: {0}",
+   "Could not read the record: {0}"
+  ],
+  [
+   "남은 폴더 {0}개를 찾았습니다.",
+   "Found {0} leftover folders."
+  ],
+  [
+   "다른 계정({0})에서 끈 시작 프로그램 {1}개 되돌리기",
+   "Restore {1} startup programs turned off by another account ({0})"
+  ],
+  [
+   "다른 계정({0})에서 제거한 앱입니다. 그 계정으로 실행해 되살려 주세요.",
+   "This app was removed from another account ({0}). Run the program as that account to restore it."
+  ],
+  [
+   "다른 프로그램('{0}')도 같은 폴더를 설치 경로로 등록함",
+   "Another program ('{0}') also registers this folder as its install path"
+  ],
+  [
+   "다른 프로그램('{0}')의 설치 폴더를 품고 있음",
+   "Contains the install folder of another program ('{0}')"
+  ],
+  [
+   "대기 {0} GB → {1} GB",
+   "Standby {0} GB → {1} GB"
+  ],
+  [
+   "대기 메모리를 비우지 못했습니다 (NTSTATUS 0x{0}).{1}",
+   "Could not clear standby memory (NTSTATUS 0x{0}).{1}"
+  ],
+  [
+   "대기 메모리를 비우지 못했습니다: {0}",
+   "Could not clear standby memory: {0}"
+  ],
+  [
+   "대기 메모리를 비웠습니다: {0} GB → {1} GB",
+   "Standby memory cleared: {0} GB → {1} GB"
+  ],
+  [
+   "되돌리지 못한 단추: {0}",
+   "Buttons not reverted: {0}"
+  ],
+  [
+   "되돌리지 못했습니다: {0}",
+   "Could not undo: {0}"
+  ],
+  [
+   "되돌린 뒤 다시 읽으니 값이 다릅니다 (기대 {0}, 실제 {1})",
+   "Value differs when read back after undoing (expected {0}, actual {1})"
+  ],
+  [
+   "되살리기 중 오류가 났습니다: {0}",
+   "An error occurred while restoring: {0}"
+  ],
+  [
+   "디스크 정보를 읽지 못했습니다: {0}",
+   "Could not read disk information: {0}"
+  ],
+  [
+   "마지막 부팅({0})은 기록되지 않았습니다. Windows 의 마지막 기록은 {1} 입니다.",
+   "The last boot ({0}) was not recorded. Windows' last record is {1}."
+  ],
+  [
+   "맞춤 튜닝 설정 {0}개를 원래대로 되돌렸습니다.",
+   "Restored {0} tailored tuning settings."
+  ],
+  [
+   "바꾸지 못한 단추: {0}",
+   "Buttons not changed: {0}"
+  ],
+  [
+   "배터리 정보를 읽지 못했습니다: {0}",
+   "Could not read battery information: {0}"
+  ],
+  [
+   "변경 기록 파일을 읽지 못해 되돌리지 못했습니다 ({0})",
+   "Could not undo because the change history file could not be read ({0})"
+  ],
+  [
+   "보고서를 저장하지 못했습니다: {0}",
+   "Could not save the report: {0}"
+  ],
+  [
+   "보고서를 저장했습니다: {0}",
+   "Report saved: {0}"
+  ],
+  [
+   "복원 지점을 {0}초 안에 만들지 못했습니다. Windows 가 뒤에서 계속 만들고 있을 수 있습니다.",
+   "The restore point was not created within {0} seconds. Windows may still be creating it in the background."
+  ],
+  [
+   "복원 지점을 만들지 못했습니다: {0}",
+   "Could not create a restore point: {0}"
+  ],
+  [
+   "부팅 기록을 읽지 못했습니다: {0}",
+   "Could not read boot records: {0}"
+  ],
+  [
+   "부팅 시간은 Windows 의 '진단 정책 서비스(DPS)' 가 기록합니다. 이 서비스가 지금 실행 중이 아닙니다(상태: {0}). Windows 의 서비스 앱(services.msc)에서 이 서비스를 시작하면 그 뒤 부팅부터 다시 기록됩니다.",
+   "Boot times are recorded by Windows' 'Diagnostic Policy Service (DPS)'. This service is not running now (state: {0}). Start it in the Windows Services app (services.msc), and boots will be recorded again from then on."
+  ],
+  [
+   "사용자·시스템 폴더({0})를 품은 위치",
+   "a location containing a user or system folder ({0})"
+  ],
+  [
+   "색 형식이 올바르지 않습니다: {0}",
+   "Invalid color format: {0}"
+  ],
+  [
+   "서비스 앱을 열지 못했습니다: {0}",
+   "Could not open the Services app: {0}"
+  ],
+  [
+   "설정 후 확인에 실패했습니다 (현재 {0})",
+   "Verification after setting failed (now {0})"
+  ],
+  [
+   "설치 상태를 확인하지 못해 되살리지 않았습니다: {0}",
+   "Not restored because the installation state could not be checked: {0}"
+  ],
+  [
+   "설치 상태를 확인하지 못해 제거하지 않았습니다: {0}",
+   "Not removed because the installation state could not be checked: {0}"
+  ],
+  [
+   "설치 상태를 확인하지 못했습니다: {0}",
+   "Could not check the installation state: {0}"
+  ],
+  [
+   "성능 모드({0}) 적용 전",
+   "Before applying performance mode ({0})"
+  ],
+  [
+   "성능 모드가 바꾼 설정 {0}개를 되돌리지 못했습니다",
+   "Could not undo {0} settings changed by the performance mode"
+  ],
+  [
+   "성능 모드가 바꾼 설정 {0}개를 되돌리지 못했습니다 ({1}개는 되돌렸습니다).",
+   "Could not undo {0} settings changed by the performance mode ({1} were undone)."
+  ],
+  [
+   "성능 모드가 바꾼 설정 {0}개를 되돌리지 못했습니다.",
+   "Could not undo {0} settings changed by the performance mode."
+  ],
+  [
+   "셸 오류 코드 {0}",
+   "Shell error code {0}"
+  ],
+  [
+   "손상된 영역 {0}곳을 예비 영역으로 바꿨습니다(재할당 섹터)",
+   "{0} damaged areas were replaced with spare areas (reallocated sectors)"
+  ],
+  [
+   "시작 유형이 일반적이지 않아({0}) 건드리지 않았습니다",
+   "Not touched because the startup type is unusual ({0})"
+  ],
+  [
+   "시작 프로그램 '{0}' ({1}) {2}",
+   "Startup program '{0}' ({1}) {2}"
+  ],
+  [
+   "시작 프로그램 '{0}' 되살리기",
+   "Restore startup program '{0}'"
+  ],
+  [
+   "시작 프로그램 설정 변경에 실패했습니다: {0}",
+   "Could not change the startup program setting: {0}"
+  ],
+  [
+   "시작하지 못했습니다: {0}",
+   "Could not start: {0}"
+  ],
+  [
+   "쓰기 오류 {0}",
+   "Write error {0}"
+  ],
+  [
+   "쓴 뒤 다시 읽으니 값이 다름 (기대 {0}, 실제 {1})",
+   "Value differs when read back after writing (expected {0}, actual {1})"
+  ],
+  [
+   "아이콘 색 값이 올바르지 않습니다: {0}",
+   "Invalid icon color value: {0}"
+  ],
+  [
+   "알 수 없는 기록값 '{0}'",
+   "Unknown recorded value '{0}'"
+  ],
+  [
+   "알 수 없는 모드입니다: {0}",
+   "Unknown mode: {0}"
+  ],
+  [
+   "알 수 없는 색 조합입니다: {0}",
+   "Unknown color scheme: {0}"
+  ],
+  [
+   "알 수 없는 설정입니다: {0}",
+   "Unknown setting: {0}"
+  ],
+  [
+   "알 수 없는 시작 유형입니다: {0}",
+   "Unknown startup type: {0}"
+  ],
+  [
+   "알 수 없는 우선순위: {0}",
+   "Unknown priority: {0}"
+  ],
+  [
+   "알 수 없는 종류: {0}",
+   "Unknown kind: {0}"
+  ],
+  [
+   "알 수 없는 화면 밝기입니다: {0}",
+   "Unknown brightness: {0}"
+  ],
+  [
+   "어댑터 목록을 읽지 못했습니다: {0}",
+   "Could not read the adapter list: {0}"
+  ],
+  [
+   "오류 발생: {0}",
+   "Error: {0}"
+  ],
+  [
+   "오류: {0}",
+   "Error: {0}"
+  ],
+  [
+   "완료 — {0}",
+   "Done — {0}"
+  ],
+  [
+   "원래 값을 읽지 못해 바꾸지 않았습니다: {0}",
+   "Not changed because the original value could not be read: {0}"
+  ],
+  [
+   "원래 시작 유형({0})은 이 앱이 되돌리지 않습니다",
+   "This app does not restore the original startup type ({0})"
+  ],
+  [
+   "원래 전원 플랜({0})이 이 PC 에서 삭제되어 되돌릴 수 없습니다. Windows 설정 → 전원에서 쓸 플랜을 고르면 이 기록은 정리됩니다",
+   "The original power plan ({0}) was deleted from this PC and cannot be restored. Choose a plan in Windows Settings → Power and this record will be cleared"
+  ],
+  [
+   "웹 브라우저 캐시 ({0})",
+   "Web browser cache ({0})"
+  ],
+  [
+   "이 PC 에 없는 전원 플랜입니다 ({0})",
+   "This power plan does not exist on this PC ({0})"
+  ],
+  [
+   "이 PC 에는 '{0}' 와 '균형 조정' 전원 플랜이 없어 지금 쓰는 '{1}' 플랜 위에 세부 설정만 적용했습니다.",
+   "This PC has neither the '{0}' nor the 'Balanced' power plan, so only the detailed settings were applied on top of the current '{1}' plan."
+  ],
+  [
+   "이 PC 에는 '{0}' 전원 플랜이 없어 '균형 조정' 위에 세부 설정만 적용했습니다.",
+   "This PC has no '{0}' power plan, so only the detailed settings were applied on top of 'Balanced'."
+  ],
+  [
+   "이 PC 에는 '{0}' 전원 플랜이 없어, 적용하면 '{1}' 플랜 위에 세부 설정만 바꿉니다.",
+   "This PC has no '{0}' power plan, so applying it changes only the detailed settings on top of the '{1}' plan."
+  ],
+  [
+   "읽기 어려운 영역 {0}곳이 재할당을 기다립니다(대기 섹터)",
+   "{0} hard-to-read areas are waiting to be reallocated (pending sectors)"
+  ],
+  [
+   "임시 폴더 위치가 안전하지 않아 정리하지 않았습니다: {0} ({1})",
+   "The temporary folder location is not safe, so it was not cleaned: {0} ({1})"
+  ],
+  [
+   "작업 실패 (코드: {0})",
+   "Task failed (code: {0})"
+  ],
+  [
+   "저사양 맞춤 튜닝: {0} 사용 안 함",
+   "Low-spec tailored tuning: {0} disabled"
+  ],
+  [
+   "저장 창을 띄우지 못했습니다: {0}",
+   "Could not show the save dialog: {0}"
+  ],
+  [
+   "전원 플랜 → {0}",
+   "Power plan → {0}"
+  ],
+  [
+   "전환 후 확인 실패 (기대 {0}, 실제 {1})",
+   "Verification after switching failed (expected {0}, actual {1})"
+  ],
+  [
+   "정책: {0}",
+   "Policy: {0}"
+  ],
+  [
+   "제거 명령의 실행 파일 위치가 적혀 있지 않습니다: {0}\nWindows 의 '설정 → 앱' 에서 제거해 주세요.",
+   "The uninstall command does not specify the executable location: {0}\nPlease uninstall it in Windows 'Settings → Apps'."
+  ],
+  [
+   "제거 프로그램 실행 실패: {0}",
+   "Could not run the uninstaller: {0}"
+  ],
+  [
+   "제거 프로그램을 찾을 수 없습니다: {0}\n이미 삭제되었거나 경로가 바뀌었을 수 있습니다.",
+   "The uninstaller was not found: {0}\nIt may have been deleted or its path may have changed."
+  ],
+  [
+   "제거됐는지 확인하지 못했습니다: {0}",
+   "Could not confirm removal: {0}"
+  ],
+  [
+   "종료 코드 {0}",
+   "exit code {0}"
+  ],
+  [
+   "중지됨 — {0}단계 중 {1}단계 실행({2}). 이미 지운 파일은 되돌아오지 않습니다",
+   "Stopped — ran {1} of {0} steps ({2}). Files already deleted will not come back"
+  ],
+  [
+   "중지됨 — 그때까지 {0}MB 확보",
+   "Stopped — {0} MB freed until then"
+  ],
+  [
+   "지금 모드를 읽지 못했습니다: {0}",
+   "Could not read the current mode: {0}"
+  ],
+  [
+   "지원하지 않는 언어입니다: {0}",
+   "Unsupported language: {0}"
+  ],
+  [
+   "지원하지 않는 크기입니다: {0}",
+   "Unsupported size: {0}"
+  ],
+  [
+   "최적화를 시작하지 못했습니다: {0}",
+   "Could not start the optimization: {0}"
+  ],
+  [
+   "측정하지 못했습니다: {0}",
+   "Could not measure: {0}"
+  ],
+  [
+   "켜기·끄기 값이 아닙니다: {0}",
+   "Not an on/off value: {0}"
+  ],
+  [
+   "표준 모드로 돌아왔습니다. 성능 모드가 바꾼 설정 {0}개를 원래대로 되돌렸습니다.",
+   "Back to Standard mode. Restored {0} settings changed by the performance mode."
+  ],
+  [
+   "플랜 복구 실패 {0}",
+   "Plan restore failed {0}"
+  ],
+  [
+   "형식이 REG_SZ 가 아닙니다({0})",
+   "Type is not REG_SZ ({0})"
+  ],
+  [
+   "확인 실패: {0}",
+   "Check failed: {0}"
+  ],
+  [
+   "휴지통 최대 크기({0} GB)보다 커서 휴지통에 들어가지 않고 영구 삭제됩니다. 지우지 않았습니다",
+   "Larger than the Recycle Bin's maximum size ({0} GB), so it would be permanently deleted instead of going to the Recycle Bin. Not deleted"
+  ],
+  [
+   "휴지통에 넣을 수 있는 드라이브인지 확인하지 못해 지우지 않았습니다 ({0})",
+   "Not deleted because it could not be confirmed that the drive supports the Recycle Bin ({0})"
+  ],
+  [
+   "휴지통을 비우지 못했습니다 (코드 0x{0})",
+   "Could not empty the Recycle Bin (code 0x{0})"
+  ],
+  [
+   "휴지통을 비우지 못했습니다: {0}",
+   "Could not empty the Recycle Bin: {0}"
+  ]
+ ]
+}

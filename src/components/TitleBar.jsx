@@ -1,5 +1,6 @@
 import { Minus, Square, X, Settings } from 'lucide-react';
 import AppLogo from './AppLogo';
+import { tr } from '../i18n';
 
 export default function TitleBar({ onOpenSettings }) {
   const handleMinimize = () => {
@@ -24,9 +25,9 @@ export default function TitleBar({ onOpenSettings }) {
       const res = await api.closeWindow();
       if (res?.busy) {
         const ok = window.confirm(
-          `${res.reason} 작업이 진행 중입니다.\n\n` +
-          '지금 종료하면 작업이 중간에 끊기고, 되돌리기 정보가 저장되지 않을 수 있습니다.\n\n' +
-          '그래도 종료할까요?'
+          tr("{0} 작업이 진행 중입니다.\n\n", [res.reason]) +
+          tr('지금 종료하면 작업이 중간에 끊기고, 되돌리기 정보가 저장되지 않을 수 있습니다.\n\n') +
+          tr('그래도 종료할까요?')
         );
         if (ok) await api.closeWindow(true);
       }
@@ -48,32 +49,32 @@ export default function TitleBar({ onOpenSettings }) {
         <button
           onClick={onOpenSettings}
           className="w-10 h-9 hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white flex items-center justify-center transition-colors duration-300"
-          title="환경 설정"
-          aria-label="환경 설정"
+          title={tr("환경 설정")}
+          aria-label={tr("환경 설정")}
         >
           <Settings className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={handleMinimize}
           className="w-10 h-9 hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white flex items-center justify-center transition-colors duration-300"
-          title="최소화"
-          aria-label="최소화"
+          title={tr("최소화")}
+          aria-label={tr("최소화")}
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={handleMaximize}
           className="w-10 h-9 hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white flex items-center justify-center transition-colors duration-300"
-          title="최대화 / 이전 크기"
-          aria-label="최대화 / 이전 크기"
+          title={tr("최대화 / 이전 크기")}
+          aria-label={tr("최대화 / 이전 크기")}
         >
           <Square className="w-3 h-3" />
         </button>
         <button
           onClick={handleClose}
           className="w-10 h-9 hover:bg-rose-500 text-gray-500 dark:text-gray-400 hover:text-white dark:hover:text-white flex items-center justify-center transition-colors duration-300"
-          title="닫기"
-          aria-label="닫기"
+          title={tr("닫기")}
+          aria-label={tr("닫기")}
         >
           <X className="w-4 h-4" />
         </button>

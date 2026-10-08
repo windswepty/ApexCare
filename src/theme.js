@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 // UI 색 조합(테마).
 //
 // 컴포넌트는 Tailwind 의 cyan(강조색)·slate/gray/zinc(무채색)·black 클래스를 그대로 쓴다.
@@ -54,32 +55,32 @@ export const DEFAULT_THEME_ID = 'cyan';
 export const THEMES = [
   {
     id: 'cyan',
-    name: '시안',
-    description: '기본 색 조합',
+    name: tr('시안'),
+    description: tr('기본 색 조합'),
     accent: TW.cyan, slate: TW.slate, gray: TW.gray, zinc: TW.zinc, black: '#000000',
   },
   {
     id: 'graphite',
-    name: '그라파이트',
-    description: '차가운 무채색',
+    name: tr('그라파이트'),
+    description: tr('차가운 무채색'),
     accent: GRAPHITE_ACCENT, slate: TW.neutral, gray: TW.neutral, zinc: TW.neutral, black: '#000000',
   },
   {
     id: 'stone',
-    name: '스톤',
-    description: '따뜻한 무채색',
+    name: tr('스톤'),
+    description: tr('따뜻한 무채색'),
     accent: STONE_ACCENT, slate: STONE_NEUTRAL, gray: STONE_NEUTRAL, zinc: STONE_NEUTRAL, black: '#120e0b',
   },
   {
     id: 'midnight',
-    name: '미드나잇 블루',
-    description: '남색 배경과 파란 강조색',
+    name: tr('미드나잇 블루'),
+    description: tr('남색 배경과 파란 강조색'),
     accent: MIDNIGHT_ACCENT, slate: MIDNIGHT_NEUTRAL, gray: MIDNIGHT_NEUTRAL, zinc: MIDNIGHT_NEUTRAL, black: '#040a1e',
   },
   {
     id: 'violet',
-    name: '바이올렛',
-    description: '보라 배경과 보라 강조색',
+    name: tr('바이올렛'),
+    description: tr('보라 배경과 보라 강조색'),
     accent: VIOLET_ACCENT, slate: VIOLET_NEUTRAL, gray: VIOLET_NEUTRAL, zinc: VIOLET_NEUTRAL, black: '#0b0616',
   },
 ];
@@ -138,17 +139,17 @@ export function accentScale(hex) {
 // 컴포넌트에서 실제로 많이 쓰는 글자색/배경색 짝. accent: 강조색이 들어가는 짝.
 const I = Object.fromEntries(STEPS.map((s, i) => [s, i]));
 export const CONTRAST_PAIRS = [
-  { name: '강조 글자 / 페이지 배경', fg: t => t.accent[I[400]], bg: t => t.black, accent: true },
-  { name: '강조 글자 / 패널', fg: t => t.accent[I[400]], bg: t => t.zinc[I[900]], accent: true },
-  { name: '강조 글자 / 카드', fg: t => t.accent[I[400]], bg: t => t.slate[I[800]], accent: true },
-  { name: '진한 강조 글자 / 패널', fg: t => t.accent[I[500]], bg: t => t.zinc[I[900]], accent: true },
-  { name: '강조 버튼의 검은 글자', fg: t => t.black, bg: t => t.accent[I[500]], accent: true },
-  { name: '강조 버튼(마우스 올림)의 검은 글자', fg: t => t.black, bg: t => t.accent[I[400]], accent: true },
-  { name: '보조 글자 / 패널', fg: t => t.gray[I[400]], bg: t => t.zinc[I[900]] },
-  { name: '보조 글자 / 카드(900)', fg: t => t.slate[I[400]], bg: t => t.slate[I[900]] },
-  { name: '보조 글자 / 카드(800)', fg: t => t.slate[I[400]], bg: t => t.slate[I[800]] },
-  { name: '흐린 글자 / 페이지 배경', fg: t => t.slate[I[500]], bg: t => t.black },
-  { name: '본문 / 카드', fg: t => t.slate[I[200]], bg: t => t.slate[I[900]] },
+  { name: tr('강조 글자 / 페이지 배경'), fg: t => t.accent[I[400]], bg: t => t.black, accent: true },
+  { name: tr('강조 글자 / 패널'), fg: t => t.accent[I[400]], bg: t => t.zinc[I[900]], accent: true },
+  { name: tr('강조 글자 / 카드'), fg: t => t.accent[I[400]], bg: t => t.slate[I[800]], accent: true },
+  { name: tr('진한 강조 글자 / 패널'), fg: t => t.accent[I[500]], bg: t => t.zinc[I[900]], accent: true },
+  { name: tr('강조 버튼의 검은 글자'), fg: t => t.black, bg: t => t.accent[I[500]], accent: true },
+  { name: tr('강조 버튼(마우스 올림)의 검은 글자'), fg: t => t.black, bg: t => t.accent[I[400]], accent: true },
+  { name: tr('보조 글자 / 패널'), fg: t => t.gray[I[400]], bg: t => t.zinc[I[900]] },
+  { name: tr('보조 글자 / 카드(900)'), fg: t => t.slate[I[400]], bg: t => t.slate[I[900]] },
+  { name: tr('보조 글자 / 카드(800)'), fg: t => t.slate[I[400]], bg: t => t.slate[I[800]] },
+  { name: tr('흐린 글자 / 페이지 배경'), fg: t => t.slate[I[500]], bg: t => t.black },
+  { name: tr('본문 / 카드'), fg: t => t.slate[I[200]], bg: t => t.slate[I[900]] },
 ];
 
 // 기준: 본문 글자 4.5:1. 기본 테마가 이미 그보다 낮은 짝은 기본보다 나빠지지 않으면 통과.
@@ -297,9 +298,9 @@ export function applyTheme(id, accentHex = null, bgHex = null) {
 // 아이콘은 둥근 바탕(icon-tile.png)과 기호(icon-glyph.png) 두 겹의 마스크라 색을 따로 칠할 수 있다.
 // 설정 값: '' 기본(흰 바탕·검은 기호) | 'accent' 강조색 바탕 | 'dark' 어두운 바탕·강조색 기호 | '#rrggbb' 직접 고른 바탕색
 export const ICON_PRESETS = [
-  { id: '', name: '기본' },
-  { id: 'accent', name: '강조색' },
-  { id: 'dark', name: '어두운' },
+  { id: '', name: tr('기본') },
+  { id: 'accent', name: tr('강조색') },
+  { id: 'dark', name: tr('어두운') },
 ];
 
 // 바탕 위에서 더 잘 보이는 기호 색(검정·흰색)

@@ -281,10 +281,10 @@ class Api:
         except OSError as e:
             return {'success': False, 'message': f'서비스 앱을 열지 못했습니다: {e}'}
 
-    def saveHealthReport(self):
-        """PC 상태 보고서(HTML)를 사용자가 고른 곳에 저장한다."""
+    def saveHealthReport(self, language='ko'):
+        """PC 상태 보고서(HTML)를 사용자가 고른 곳에 저장한다. language: 화면 언어('ko'|'en')."""
         from backend import report
-        return report.save(self._window)
+        return report.save(self._window, language)
 
     # --- File Finder Features ---
     def findLargeFiles(self, min_mb=500):
@@ -376,6 +376,9 @@ class Api:
 
     def setUiMode(self, mode):
         return config_manager.set_ui_mode(mode)
+
+    def setUiLanguage(self, language):
+        return config_manager.set_ui_language(language)
 
     def setWindowIcon(self, png_base64):
         """작업 표시줄·Alt+Tab 의 창 아이콘을 바꾼다. 빈 값이면 원래 아이콘으로. 이 창에만 적용된다."""

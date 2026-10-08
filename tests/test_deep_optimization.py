@@ -58,7 +58,7 @@ def test_dashboard_asks_before_starting():
     run = src[src.index('const runMasterOptimization'):]
     run = run[:run.index('\n  };\n')]
     assert 'startingRef.current) return;' in run and 'startMasterOptimization()' in run
-    assert body.index('res?.busy') < body.index("title: '시작 실패'")
+    assert body.index('res?.busy') < body.index("title: tr('시작 실패')")
 
 
 def test_stopping_keeps_finished_steps_and_freed_space(recorded, monkeypatch):

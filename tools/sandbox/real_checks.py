@@ -31,6 +31,7 @@ if __name__ == '__main__':
 import ctypes  # noqa: E402
 import difflib  # noqa: E402
 import json  # noqa: E402
+import re  # noqa: E402
 import subprocess  # noqa: E402
 import time  # noqa: E402
 import traceback  # noqa: E402
@@ -1723,6 +1724,9 @@ def one_click():
 
 DIST = os.environ.get('APEX_DIST') or r'C:\apex\dist'
 UI_PS1 = os.path.join(REPO, 'tools', 'sandbox', 'ui_drive.ps1')
+# 설치·제거 프로그램은 APEX CARE 에서 고른 언어(없으면 Windows 표시 언어)로 뜬다. 창 이름은 두 언어 모두 받는다.
+UNINST_WIN = '^(APEX CARE 삭제|Uninstall APEX CARE)$'
+REVERT_FAIL_WIN = '^(설정을 모두 되돌리지 못했습니다|Not all settings could be restored)$'
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\APEX CARE'
 
 
@@ -1744,7 +1748,8 @@ def ui(window, action, name='', timeout=30):
 
 
 def _icon_step(problems, what, title):
-    """제목이 title 인 창에 앱 아이콘이 걸려 있는지(WM_GETICON). 없으면 작업 표시줄에 Windows 기본 아이콘이 보인다.
+    """제목이 title(정규식, ui_drive.ps1 의 -Window 와 같은 방식) 과 맞는 창에 앱 아이콘이 걸려 있는지(WM_GETICON).
+    없으면 작업 표시줄에 Windows 기본 아이콘이 보인다.
     아이콘이 없어도 설치·제거 점검은 계속한다(문제로만 남긴다)."""
     import ctypes.wintypes as wt
     u = ctypes.WinDLL('user32', use_last_error=True)
@@ -1756,7 +1761,7 @@ def _icon_step(problems, what, title):
     def each(hwnd, _):
         buf = ctypes.create_unicode_buffer(256)
         u.GetWindowTextW(hwnd, buf, 256)
-        if buf.value == title and u.IsWindowVisible(hwnd):
+        if re.search(title, buf.value) and u.IsWindowVisible(hwnd):
             found.append(hwnd)
         return True
     u.EnumWindows(each, 0)
@@ -1831,17 +1836,17 @@ def install_uninstall():
     legacy_dir = _plant_legacy_install()
 
     # ── 설치: 사용권 동의 → 다음 → 다음(설치) → 완료 화면에서 '실행하기' 끄고 종료
-    win = '설치 - APEX CARE'
+    win = '^(설치 - APEX CARE|APEX CARE Setup)$'
     proc = subprocess.Popen([setup], shell=False, cwd=DIST)
     try:
-        ok = (_ui_step(problems, '사용권 동의', win, 'select', '조항에 동의합니다', 90)
+        ok = (_ui_step(problems, '사용권 동의', win, 'select', '조항에 동의합니다|I accept', 90)
               and _icon_step(problems, '설치 마법사 창', win)
-              and _ui_step(problems, '다음(사용권)', win, 'click', '다음')
-              and _ui_step(problems, '준비 화면', win, 'wait', '대상 위치')
-              and _ui_step(problems, '다음(설치 시작)', win, 'click', '다음')
-              and _ui_step(problems, '완료 화면', win, 'wait', '실행하기', 120)
-              and _ui_step(problems, "'실행하기' 끄기", win, 'uncheck', '실행하기')
-              and _ui_step(problems, '종료', win, 'click', '종료'))
+              and _ui_step(problems, '다음(사용권)', win, 'click', '다음|Next')
+              and _ui_step(problems, '준비 화면', win, 'wait', '대상 위치|Destination location')
+              and _ui_step(problems, '다음(설치 시작)', win, 'click', '다음|Next')
+              and _ui_step(problems, '완료 화면', win, 'wait', '실행하기|Run APEX CARE', 120)
+              and _ui_step(problems, "'실행하기' 끄기", win, 'uncheck', '실행하기|Run APEX CARE')
+              and _ui_step(problems, '종료', win, 'click', '종료|Finish'))
         if ok and not _wait(lambda: proc.poll() is not None, 60):
             problems.append('종료를 눌렀는데 설치 마법사가 끝나지 않았습니다')
     finally:
@@ -1888,17 +1893,17 @@ def install_uninstall():
             pass
         proc = subprocess.Popen([uninst_exe], shell=False, cwd=install_dir)
         try:
-            if (_ui_step(problems, '삭제 확인 창', 'APEX CARE 삭제', 'wait', r'^(Yes|예)', 60)
-                    and _icon_step(problems, '제거 프로그램의 확인 창', 'APEX CARE 삭제')
-                    and _ui_step(problems, '삭제 확인', 'APEX CARE 삭제', 'click', r'^(Yes|예)', 10)):
+            if (_ui_step(problems, '삭제 확인 창', UNINST_WIN, 'wait', r'^(Yes|예)', 60)
+                    and _icon_step(problems, '제거 프로그램의 확인 창', UNINST_WIN)
+                    and _ui_step(problems, '삭제 확인', UNINST_WIN, 'click', r'^(Yes|예)', 10)):
                 # 되돌리기(최대 300초)가 끝나면 제거 프로그램이 끝나거나, 실패 목록 창을 띄운다
                 done = _wait(lambda: proc.poll() is not None
-                             or ui('설정을 모두 되돌리지 못했습니다', 'exists', timeout=1).get('ok'), 330)
+                             or ui(REVERT_FAIL_WIN, 'exists', timeout=1).get('ok'), 330)
                 if proc.poll() is None:
-                    names = ui('설정을 모두 되돌리지 못했습니다', 'names', timeout=2).get('names', [])
+                    names = ui(REVERT_FAIL_WIN, 'names', timeout=2).get('names', [])
                     problems.append(f'되돌리기 실패 창이 떴습니다: {names[:10]}' if done
                                     else '제거 프로그램이 330초 안에 끝나지 않았습니다')
-                    _ui_step(problems, "실패 창 '아니요'", '설정을 모두 되돌리지 못했습니다', 'click', r'^(No|아니요)', 5)
+                    _ui_step(problems, "실패 창 '아니요'", REVERT_FAIL_WIN, 'click', r'^(No|아니요)', 5)
         finally:
             if proc.poll() is None:
                 proc.kill()
@@ -1914,7 +1919,7 @@ def install_uninstall():
                      and reg_get('HKLM', UNINSTALL_KEY, 'DisplayName') is None, 90)
         # 결과 창(모든 에디션에서 뜨는 PowerShell 메시지 상자)이 떠야 한다. 예전 'msg *' 는 Home 에 없었다.
         if gone:
-            if _ui_step(problems, "제거 완료 안내 창", 'APEX CARE', 'wait', '제거되었습니다', 60):
+            if _ui_step(problems, "제거 완료 안내 창", 'APEX CARE', 'wait', '제거되었습니다|has been uninstalled', 60):
                 # 메시지 상자의 '확인' 은 UI Automation 에 Pane 으로 보여 누를 수 없다. 사용자가 확인을 누른 것처럼
                 # 그 창을 띄운 PowerShell(배치가 띄운 것)만 끝낸다. 그래야 배치가 이어서 자기 폴더를 지운다.
                 import psutil

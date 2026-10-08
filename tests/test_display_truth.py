@@ -53,7 +53,7 @@ def test_dashboard_free_space_comes_from_backend_not_rounded_subtraction():
     assert 'parseFloat(stats.diskTotalGB) - parseFloat(stats.diskUsedGB)' not in src
     assert "'diskFreeGB'" in _read('backend/system_monitor.py')
     # 'Storage' 는 시스템 드라이브만 잰 값이었다. 그 드라이브 문자를 백엔드에서 받아 쓴다(C: 가 아닐 수 있다)
-    assert '>Storage<' not in src and "{sysInfo.systemDrive || '시스템'} 드라이브" in src
+    assert '>Storage<' not in src and "{sysInfo.systemDrive || tr('시스템')}{' '}{tr(\"드라이브\")}" in src
     assert 'C: 드라이브</span>' not in src
 
 
@@ -603,7 +603,7 @@ def test_startup_changes_are_grouped_under_one_readable_heading():
 
 def test_ui_wording_matches_what_the_features_do():
     sidebar = _code('src/components/Sidebar.jsx')
-    labels = re.findall(r"label: '([^']*)'", sidebar)
+    labels = re.findall(r"label: tr\('([^']*)'\)", sidebar)
     assert labels and not any('하드코어' in x or '적출' in x or '완전 삭제' in x for x in labels), labels
     assert '적출' not in _code('src/components/Debloater.jsx')
     assert '찌꺼기 완전 삭제' not in _code('src/components/Uninstaller.jsx')
@@ -626,12 +626,12 @@ def test_ui_wording_matches_what_the_features_do():
 def test_screens_do_not_claim_states_before_reading_them():
     # 받기 전에 '0개'·'자동 감지 꺼짐'·'되돌릴 변경이 없습니다' 를 보여 주지 않는다
     game = _code('src/components/GameBooster.jsx')
-    assert 'useState(null)' in game and "!status ? '확인 중…'" in game
+    assert 'useState(null)' in game and "!status ? tr('확인 중…')" in game
     restore = _code('src/components/RestoreCenter.jsx')
     assert "loadState === 'ok' && pending.count === 0" in restore
     startup = _code('src/components/StartupManager.jsx')
     assert "loadState === 'loading' ? '…'" in startup
-    assert "useState('확인 중…')" in _code('src/components/Header.jsx')
+    assert "useState(tr('확인 중…'))" in _code('src/components/Header.jsx')
 
 
 def test_failed_system_stats_are_not_shown_as_zero():

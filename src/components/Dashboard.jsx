@@ -13,6 +13,7 @@ import {
   Monitor
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { tr, locale } from '../i18n';
 
 // 탭을 바꿔도 그래프를 이어 가려고 모듈 변수에 둔다. 칸은 null(아직 재지 않음)로 시작한다.
 // 예전에는 0 으로 채워, 앱을 켜자마자 '지난 75초 동안 0%' 인 그래프가 그려졌다(재지 않은 과거를 지어냄).
@@ -21,7 +22,7 @@ let globalCpuHistory = Array(HISTORY_POINTS).fill(null);
 let globalGpuHistory = Array(HISTORY_POINTS).fill(null);
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
-const pctText = (v, state) => (isNum(v) ? `${v}%` : state === 'unavailable' ? '측정 불가' : '측정 중');
+const pctText = (v, state) => (isNum(v) ? `${v}%` : state === 'unavailable' ? tr('측정 불가') : tr('측정 중'));
 const barWidth = (v) => `${isNum(v) ? Math.max(0, Math.min(100, v)) : 0}%`;
 
 const renderLineGraph = (history, state) => {
@@ -30,12 +31,12 @@ const renderLineGraph = (history, state) => {
 
   // 이 PC 에서 잴 수 없는 값이면 기록이 모일 일도 없다. 예전에는 '기록을 모으는 중…' 이 끝나지 않았다.
   if (state === 'unavailable') {
-    return <p className="text-[0.6875rem] text-gray-500">이 PC 에서는 잴 수 없습니다</p>;
+    return <p className="text-[0.6875rem] text-gray-500">{tr("이 PC 에서는 잴 수 없습니다")}</p>;
   }
   // 잰 칸만 잇는다. 재지 않은 칸(null)은 그리지 않는다.
   const measured = history.map((val, i) => ({ val, i })).filter((p) => isNum(p.val));
   if (measured.length < 2) {
-    return <p className="text-[0.6875rem] text-gray-500">기록을 모으는 중…</p>;
+    return <p className="text-[0.6875rem] text-gray-500">{tr("기록을 모으는 중…")}</p>;
   }
   const points = measured.map(({ val, i }) => {
     const x = (i / (HISTORY_POINTS - 1)) * width;
@@ -75,7 +76,7 @@ const renderLineGraph = (history, state) => {
 
 // 원클릭 최적화가 실제로 하는 일 (backend/optimizer.py _run_deep_optimization 과 같은 순서)
 // backend/optimizer.get_deep_optimization_plan 의 단계 이름과 같다(백엔드가 없을 때 보여 줄 목록)
-const OPTIMIZATION_STEPS = ['임시 파일·브라우저 캐시 정리', '대기 메모리 비우기', 'DNS 캐시 초기화', '디스크 최적화(TRIM)'];
+const OPTIMIZATION_STEPS = [tr('임시 파일·브라우저 캐시 정리'), tr('대기 메모리 비우기'), tr('DNS 캐시 초기화'), tr('디스크 최적화(TRIM)')];
 
 // 설치 용량과 Windows 가 쓸 수 있는 용량이 다르면(내장 그래픽 예약 등) 둘 다 보여 준다.
 // 예전에는 쓸 수 있는 용량만 'Total' 로 보여 16GB PC 가 15.4GB 로 보였다.
@@ -84,9 +85,9 @@ function ramTotalLabel(info) {
   const usable = Number(info.ramTotalGB);
   const installed = Number(info.ramInstalledGB);
   // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않았으면 '?'
-  if (!(usable > 0)) return info.cpuModel !== '확인 중…' ? '?' : '…';
+  if (!(usable > 0)) return info.loaded ? '?' : '…';
   if (installed > 0 && installed - usable >= 0.1) {
-    return `설치 ${installed.toFixed(1)} GB · 하드웨어 예약 ${(installed - usable).toFixed(1)} GB`;
+    return tr("설치 {0} GB · 하드웨어 예약 {1} GB", [installed.toFixed(1), (installed - usable).toFixed(1)]);
   }
   return `${usable.toFixed(1)} GB`;
 }
@@ -99,7 +100,7 @@ function sizeText(v) {
 }
 
 function driveName(d) {
-  return `${d.label} 드라이브${d.system ? ' (Windows)' : d.removable ? ' (이동식)' : ''}`;
+  return tr("{0} 드라이브{1}", [d.label, d.system ? ' (Windows)' : d.removable ? tr(' (이동식)') : '']);
 }
 
 export default function Dashboard({ addToast, active = true }) {
@@ -118,7 +119,7 @@ export default function Dashboard({ addToast, active = true }) {
     error: null
   });
 
-  const [lastOptimized, setLastOptimized] = useState(() => localStorage.getItem('apex_last_optimized') || '기록 없음');
+  const [lastOptimized, setLastOptimized] = useState(() => localStorage.getItem('apex_last_optimized') || tr('기록 없음'));
   const [totalFreed, setTotalFreed] = useState(() => parseFloat(localStorage.getItem('apex_total_freed')) || 0);
 
   // 실시간 값. null = 아직 받지 못함('측정 중'). 0 으로 시작하면 받기 전에도 '0%' 로 보였다.
@@ -129,9 +130,11 @@ export default function Dashboard({ addToast, active = true }) {
   const [diskUsage, setDiskUsage] = useState(null);
 
   // 받기 전에는 모든 값이 null 이고 화면은 '…' 을 보여 준다(0 GB 같은 지어낸 값을 그리지 않는다).
+  // loaded: 백엔드 값을 한 번이라도 받았는가(화면 글자로 판단하지 않는다 — 영어 화면에서는 글자가 다르다)
   const [sysInfo, setSysInfo] = useState({
-    cpuModel: '확인 중…',
-    gpuModel: '확인 중…',
+    loaded: false,
+    cpuModel: tr('확인 중…'),
+    gpuModel: tr('확인 중…'),
     cpuCores: null,
     cpuThreads: null,
     ramTotalGB: null,
@@ -145,11 +148,11 @@ export default function Dashboard({ addToast, active = true }) {
     drives: null           // 연결된 모든 드라이브. 꽂거나 빼면 다음 갱신(3초) 때 생기고 사라진다
   });
   // 받기 전에는 '…', 받았는데 값이 없으면(이 PC 에서 읽지 못함) '?'. 예전에는 끝날 일 없는 '…' 가 계속 보였다.
-  const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : sysInfo.cpuModel !== '확인 중…' ? '?' : '…');
+  const gb = (v) => (isNum(Number(v)) && v !== null && v !== '' ? `${v} GB` : sysInfo.loaded ? '?' : '…');
   // 받기 전에는 '…', 받았는데 Windows 가 알려 주지 않은 값은 '?' (0 으로 지어내지 않는다)
-  const loaded = sysInfo.cpuModel !== '확인 중…';
+  const loaded = sysInfo.loaded;
   const count = (v) => (isNum(v) && v > 0 ? v : loaded ? '?' : '…');
-  const coresText = `${count(sysInfo.cpuCores)}코어 / ${count(sysInfo.cpuThreads)}스레드`;
+  const coresText = tr("{0}코어 / {1}스레드", [count(sysInfo.cpuCores), count(sysInfo.cpuThreads)]);
 
   // Live sparkline histories
   const [cpuHistory, setCpuHistory] = useState(globalCpuHistory);
@@ -168,13 +171,13 @@ export default function Dashboard({ addToast, active = true }) {
       setLastRun((run) => {
         if (!run || !run.pendingCount) return run;
         const steps = run.steps.map((x) => (x.pending
-          ? { ...x, pending: false, ok, detail: ok ? (st.summary || '끝났습니다') : (st.error || '실패했습니다') }
+          ? { ...x, pending: false, ok, detail: ok ? (st.summary || tr('끝났습니다')) : (st.error || tr('실패했습니다')) }
           : x));
         return { ...run, steps, pendingCount: 0, failedCount: steps.filter((x) => !x.ok && !x.pending && !x.cancelled).length };
       });
       if (addToast) {
-        addToast(ok ? '백그라운드에서 돌던 디스크 최적화가 끝났습니다.'
-          : `백그라운드에서 돌던 디스크 최적화가 실패했습니다${st.error ? `: ${st.error}` : '.'}`, ok ? 'success' : 'error');
+        addToast(ok ? tr('백그라운드에서 돌던 디스크 최적화가 끝났습니다.')
+          : tr("백그라운드에서 돌던 디스크 최적화가 실패했습니다{0}", [st.error ? `: ${st.error}` : '.']), ok ? 'success' : 'error');
       }
     } catch {
       // 다음 주기에 다시 묻는다
@@ -188,7 +191,7 @@ export default function Dashboard({ addToast, active = true }) {
           // 읽기에 실패하면(error) 이전 값을 그대로 둔다. 0 으로 바꾸지 않는다.
           if (stats && stats.error) {
             // 백엔드가 통계를 읽지 못했다. '확인 중…' 이 끝나지 않게 '읽지 못함' 으로 바꾼다(다음 주기에 다시 묻는다).
-            setSysInfo((prev) => (prev.cpuModel === '확인 중…' ? { ...prev, cpuModel: '읽지 못함', gpuModel: '읽지 못함' } : prev));
+            setSysInfo((prev) => (prev.loaded ? prev : { ...prev, loaded: true, cpuModel: tr('읽지 못함'), gpuModel: tr('읽지 못함') }));
           } else if (stats) {
             const cpu = isNum(stats.cpuUsage) ? stats.cpuUsage : null;
             const gpu = isNum(stats.gpuUsage) ? stats.gpuUsage : null;
@@ -210,10 +213,11 @@ export default function Dashboard({ addToast, active = true }) {
             });
 
             setSysInfo({
-              cpuModel: stats.cpuModel || '알 수 없음',
+              loaded: true,
+              cpuModel: stats.cpuModel || tr('알 수 없음'),
               cpuCores: stats.cpuCores ?? null,
               cpuThreads: stats.cpuThreads ?? null,
-              gpuModel: stats.gpuModel || '알 수 없음',
+              gpuModel: stats.gpuModel || tr('알 수 없음'),
               ramTotalGB: stats.ramTotalGB ?? null,
               ramInstalledGB: stats.ramInstalledGB ?? null,
               // '사용 중' 은 작업 관리자·RAM 화면과 같은 값(수정됨 목록 제외)을 쓴다. 성능 카운터를 못 읽었으면
@@ -266,7 +270,7 @@ export default function Dashboard({ addToast, active = true }) {
           console.error('Error polling optimization status:', err);
           clearInterval(optPollInterval.current);
           setIsScanning(false);
-          setModalMessage({ title: '오류 발생', text: '최적화 상태 확인 중 시스템 오류가 발생했습니다.', isError: true });
+          setModalMessage({ title: tr('오류 발생'), text: tr('최적화 상태 확인 중 시스템 오류가 발생했습니다.'), isError: true });
         }
       }
     }, 1000);
@@ -294,9 +298,9 @@ export default function Dashboard({ addToast, active = true }) {
     const planLines = (plan?.steps || []).map((s, i) => `${i + 1}. ${s.name}\n    ${s.detail}`);
     const body = planLines.length ? planLines.join('\n') : OPTIMIZATION_STEPS.map((n, i) => `${i + 1}. ${n}`).join('\n');
     const excluded = plan?.excluded?.length
-      ? `\n\n하지 않는 것: ${plan.excluded.join(', ')} (저장공간 화면에서 직접 고를 수 있습니다)`
+      ? tr("\n\n하지 않는 것: {0} (저장공간 화면에서 직접 고를 수 있습니다)", [plan.excluded.join(', ')])
       : '';
-    if (!window.confirm(`원클릭 최적화를 시작합니다.\n\n${body}${excluded}\n\n계속할까요?`)) return;
+    if (!window.confirm(tr("원클릭 최적화를 시작합니다.\n\n{0}{1}\n\n계속할까요?", [body, excluded]))) return;
 
     setOptStatus({ running: true, progress_pct: 0, eta_seconds: 0, current_task: '', freed_mb: 0, error: null });
     setIsScanning(true);
@@ -310,7 +314,7 @@ export default function Dashboard({ addToast, active = true }) {
           return;
         }
         if (!res || !res.success) {
-          setModalMessage({ title: '시작 실패', text: res?.message || '최적화 시작에 실패했습니다.', isError: true });
+          setModalMessage({ title: tr('시작 실패'), text: res?.message || tr('최적화 시작에 실패했습니다.'), isError: true });
           setIsScanning(false);
           return;
         }
@@ -322,7 +326,7 @@ export default function Dashboard({ addToast, active = true }) {
       }
     } catch (e) {
       console.error(e);
-      setModalMessage({ title: '오류 발생', text: '통합 최적화 도중 오류가 발생했습니다. 관리자 권한을 확인해주세요.', isError: true });
+      setModalMessage({ title: tr('오류 발생'), text: tr('통합 최적화 도중 오류가 발생했습니다. 관리자 권한을 확인해주세요.'), isError: true });
       setIsScanning(false);
     }
   };
@@ -341,7 +345,7 @@ export default function Dashboard({ addToast, active = true }) {
     // 중지·오류여도 이미 지운 용량은 확보한 것이다
     const freedMB = Number(status.freed_mb) || 0;
     if (steps.length) {
-      const now = new Date().toLocaleDateString('ko-KR');
+      const now = new Date().toLocaleDateString(locale());
       localStorage.setItem('apex_last_optimized', now);
       setLastOptimized(now);
       const newTotalFreed = totalFreed + freedMB;
@@ -349,15 +353,15 @@ export default function Dashboard({ addToast, active = true }) {
       setTotalFreed(newTotalFreed);
     }
 
-    const bg = pendingCount ? ' 디스크 최적화는 백그라운드에서 계속 진행됩니다.' : '';
+    const bg = pendingCount ? tr(' 디스크 최적화는 백그라운드에서 계속 진행됩니다.') : '';
     if (cancelled) {
       setModalMessage({
-        title: '최적화를 중지했습니다',
-        text: `${steps.length}단계까지 실행했습니다. 이미 지운 파일은 되돌아오지 않습니다.${bg} 단계별 결과는 화면에서 확인하세요.`,
+        title: tr('최적화를 중지했습니다'),
+        text: tr("{0}단계까지 실행했습니다. 이미 지운 파일은 되돌아오지 않습니다.{1} 단계별 결과는 화면에서 확인하세요.", [steps.length, bg]),
         isError: false,
       });
     } else if (error) {
-      setModalMessage({ title: '오류 발생', text: `${error}${steps.length ? ' 그 전까지의 단계 결과는 화면에서 확인하세요.' : ''}`, isError: true });
+      setModalMessage({ title: tr('오류 발생'), text: `${error}${steps.length ? tr(' 그 전까지의 단계 결과는 화면에서 확인하세요.') : ''}`, isError: true });
     } else if (failedCount === 0 && steps.length > 0) {
       if (pendingCount === 0) {
         try {
@@ -365,14 +369,14 @@ export default function Dashboard({ addToast, active = true }) {
         } catch {
           // 장식일 뿐이다. 실패해도 결과 표시는 이어 간다
         }
-        if (addToast) addToast(`원클릭 최적화를 마쳤습니다 (${steps.length}단계 모두 성공).`, 'success');
+        if (addToast) addToast(tr("원클릭 최적화를 마쳤습니다 ({0}단계 모두 성공).", [steps.length]), 'success');
       } else if (addToast) {
-        addToast(`원클릭 최적화: ${steps.length - pendingCount}단계를 마쳤습니다.${bg}`, 'info');
+        addToast(tr("원클릭 최적화: {0}단계를 마쳤습니다.{1}", [steps.length - pendingCount, bg]), 'info');
       }
     } else if (addToast) {
       addToast(steps.length
-        ? `원클릭 최적화: ${steps.length}단계 중 ${failedCount}단계 실패.${bg} 결과를 확인하세요.`
-        : '원클릭 최적화 결과를 받지 못했습니다.', 'error');
+        ? tr("원클릭 최적화: {0}단계 중 {1}단계 실패.{2} 결과를 확인하세요.", [steps.length, failedCount, bg])
+        : tr('원클릭 최적화 결과를 받지 못했습니다.'), 'error');
     }
     setIsScanning(false);
   };
@@ -405,7 +409,7 @@ export default function Dashboard({ addToast, active = true }) {
                   modalMessage.isError ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-black hover:bg-black/80 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black'
                 }`}
               >
-                확인
+                {tr("확인")}
               </button>
             </div>
           </div>
@@ -428,11 +432,11 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
 
             <h2 className="text-3xl font-black tracking-tight text-black dark:text-white transition-colors duration-300">
-              원클릭 최적화
+              {tr("원클릭 최적화")}
             </h2>
 
             <div className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed transition-colors duration-300">
-              아래 네 가지를 차례로 실행하고 단계별 결과를 보여줍니다.
+              {tr("아래 네 가지를 차례로 실행하고 단계별 결과를 보여줍니다.")}
               <ol className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
                 {OPTIMIZATION_STEPS.map((name, i) => (
                   <li key={name}>{i + 1}. {name}</li>
@@ -448,7 +452,7 @@ export default function Dashboard({ addToast, active = true }) {
               >
                 <>
                   <Zap className="w-5 h-5 fill-current" />
-                  <span>원클릭 최적화 시작</span>
+                  <span>{tr("원클릭 최적화 시작")}</span>
                 </>
               </button>
 
@@ -462,7 +466,7 @@ export default function Dashboard({ addToast, active = true }) {
                   className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 px-8 py-4 rounded-xl flex items-center gap-2 transition-all"
                 >
                   <span className="w-5 h-5 flex items-center justify-center font-bold text-xl leading-none">&times;</span>
-                  <span className="font-bold">최적화 중지</span>
+                  <span className="font-bold">{tr("최적화 중지")}</span>
                 </button>
               )}
 
@@ -473,19 +477,19 @@ export default function Dashboard({ addToast, active = true }) {
           {lastRun && !isScanning && (
             <div className="w-full md:w-72 space-y-2">
               <div className="text-xs font-mono font-bold text-gray-500 dark:text-gray-400">
-                최근 실행 결과{lastRun.cancelled ? ' (중지함)' : lastRun.error ? ' (오류로 멈춤)' : ''} —{' '}
-                {lastRun.steps.filter((x) => x.ok).length}/{lastRun.steps.length} 단계 성공
-                {lastRun.pendingCount > 0 && `, ${lastRun.pendingCount}단계 진행 중`}
+                {tr("최근 실행 결과")}{lastRun.cancelled ? tr(' (중지함)') : lastRun.error ? tr(' (오류로 멈춤)') : ''} —{' '}
+                {lastRun.steps.filter((x) => x.ok).length}/{lastRun.steps.length}{' '}{tr("단계 성공")}
+                {lastRun.pendingCount > 0 && tr(", {0}단계 진행 중", [lastRun.pendingCount])}
               </div>
               {lastRun.steps.map((st, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   {st.ok
-                    ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" role="img" aria-label="성공" />
+                    ? <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" role="img" aria-label={tr("성공")} />
                     : st.pending
-                      ? <Loader2 className="w-4 h-4 text-amber-500 flex-shrink-0" role="img" aria-label="진행 중" />
+                      ? <Loader2 className="w-4 h-4 text-amber-500 flex-shrink-0" role="img" aria-label={tr("진행 중")} />
                       : st.cancelled
-                        ? <MinusCircle className="w-4 h-4 text-gray-400 flex-shrink-0" role="img" aria-label="중지됨" />
-                        : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" role="img" aria-label="실패" />}
+                        ? <MinusCircle className="w-4 h-4 text-gray-400 flex-shrink-0" role="img" aria-label={tr("중지됨")} />
+                        : <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" role="img" aria-label={tr("실패")} />}
                   <div className="min-w-0">
                     <div className="font-semibold text-black dark:text-white">{st.name}</div>
                     {st.detail && <div className="text-gray-500 dark:text-gray-400 break-words">{st.detail}</div>}
@@ -501,7 +505,7 @@ export default function Dashboard({ addToast, active = true }) {
           <div className="mt-6 pt-4 border-t border-black/10 dark:border-white/10 space-y-2">
             <div className="flex justify-between text-xs font-mono">
               <span className="text-gray-700 dark:text-gray-300">
-                {optStatus.current_task || '시작하는 중...'}
+                {optStatus.current_task || tr('시작하는 중...')}
               </span>
               <div className="flex gap-4">
                 <span className="text-gray-500 dark:text-gray-400">
@@ -523,7 +527,7 @@ export default function Dashboard({ addToast, active = true }) {
       <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-5">
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">마지막 원클릭 최적화</h4>
+            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">{tr("마지막 원클릭 최적화")}</h4>
             <div className="text-2xl font-black text-black dark:text-white">{lastOptimized}</div>
           </div>
           <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
@@ -533,7 +537,7 @@ export default function Dashboard({ addToast, active = true }) {
         
         <div className="glass-panel p-5 flex items-center justify-between">
           <div>
-            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">원클릭 최적화로 확보한 공간 (누적)</h4>
+            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">{tr("원클릭 최적화로 확보한 공간 (누적)")}</h4>
             <div className="text-2xl font-black text-black dark:text-white">{totalFreed.toFixed(1)} <span className="text-lg">MB</span></div>
           </div>
           <div className="w-12 h-12 rounded-full bg-cyan-500/10 flex items-center justify-center">
@@ -545,23 +549,23 @@ export default function Dashboard({ addToast, active = true }) {
       {/* NEW SECTION: System Info Block */}
       <div className="md:col-span-12 glass-panel p-6">
         <h3 className="text-sm font-bold text-black dark:text-white mb-4 flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-cyan-500" /> 시스템 정보
+          <Cpu className="w-4 h-4 text-cyan-500" />{' '}{tr("시스템 정보")}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400">프로세서</span>
+            <span className="text-gray-500 dark:text-gray-400">{tr("프로세서")}</span>
             <span className="text-black dark:text-white font-medium text-right truncate max-w-[300px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400">그래픽 (GPU)</span>
+            <span className="text-gray-500 dark:text-gray-400">{tr("그래픽 (GPU)")}</span>
             <span className="text-black dark:text-white font-medium text-right truncate max-w-[300px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400">메모리 (RAM)</span>
+            <span className="text-gray-500 dark:text-gray-400">{tr("메모리 (RAM)")}</span>
             <span className="text-black dark:text-white font-medium text-right">{ramTotalLabel(sysInfo)}</span>
           </div>
           <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-            <span className="text-gray-500 dark:text-gray-400">코어 / 스레드</span>
+            <span className="text-gray-500 dark:text-gray-400">{tr("코어 / 스레드")}</span>
             <span className="text-black dark:text-white font-medium text-right">{coresText}</span>
           </div>
           {/* 연결된 드라이브마다 한 줄. 예전에는 Windows 드라이브(C:)만 보였다. 목록을 못 받으면 Windows 드라이브만 */}
@@ -572,7 +576,7 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
           )) : (
             <div className="flex justify-between border-b border-black/5 dark:border-white/5 pb-2">
-              <span className="text-gray-500 dark:text-gray-400">{sysInfo.systemDrive || '시스템'} 드라이브</span>
+              <span className="text-gray-500 dark:text-gray-400">{sysInfo.systemDrive || tr('시스템')}{' '}{tr("드라이브")}</span>
               <span className="text-black dark:text-white font-medium text-right">{gb(sysInfo.diskTotalGB)}</span>
             </div>
           )}
@@ -590,7 +594,7 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.cpuModel}>{sysInfo.cpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{coresText} · CPU 사용률</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{coresText}{' '}{tr("· CPU 사용률")}</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(cpuUsage)}</span>
@@ -618,7 +622,7 @@ export default function Dashboard({ addToast, active = true }) {
             </div>
             <div>
               <h3 className="font-bold text-base text-black dark:text-white truncate max-w-[280px]" title={sysInfo.gpuModel}>{sysInfo.gpuModel}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">3D 엔진 사용률</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{tr("3D 엔진 사용률")}</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(gpuUsage, gpuState)}</span>
@@ -645,7 +649,7 @@ export default function Dashboard({ addToast, active = true }) {
               <MemoryStick className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-black dark:text-white">시스템 메모리 (RAM)</h3>
+              <h3 className="font-bold text-base text-black dark:text-white">{tr("시스템 메모리 (RAM)")}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{ramTotalLabel(sysInfo)}</p>
             </div>
           </div>
@@ -660,8 +664,8 @@ export default function Dashboard({ addToast, active = true }) {
         </div>
 
         <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
-          <span title="작업 관리자의 '사용 중' 과 같은 값(디스크 기록을 기다리는 '수정됨' 메모리 제외)">사용 중: {gb(sysInfo.ramInUseGB)}</span>
-          <span>사용 가능: {gb(sysInfo.ramAvailableGB)}</span>
+          <span title={tr("작업 관리자의 '사용 중' 과 같은 값(디스크 기록을 기다리는 '수정됨' 메모리 제외)")}>{tr("사용 중:")}{' '}{gb(sysInfo.ramInUseGB)}</span>
+          <span>{tr("사용 가능:")}{' '}{gb(sysInfo.ramAvailableGB)}</span>
         </div>
       </div>
 
@@ -673,9 +677,9 @@ export default function Dashboard({ addToast, active = true }) {
             <HardDrive className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="font-bold text-base text-black dark:text-white">드라이브 {sysInfo.drives.length}개</h3>
+            <h3 className="font-bold text-base text-black dark:text-white">{tr("드라이브 {0}개", [sysInfo.drives.length])}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              전체 {sizeText(sysInfo.drives.reduce((s, d) => s + (d.totalGB || 0), 0))} · 남은 용량 {sizeText(sysInfo.drives.reduce((s, d) => s + (d.freeGB || 0), 0))}
+              {tr("전체")}{' '}{sizeText(sysInfo.drives.reduce((s, d) => s + (d.totalGB || 0), 0))}{' '}{tr("· 남은 용량")}{' '}{sizeText(sysInfo.drives.reduce((s, d) => s + (d.freeGB || 0), 0))}
             </p>
           </div>
         </div>
@@ -691,7 +695,7 @@ export default function Dashboard({ addToast, active = true }) {
               <div className="w-full bg-gray-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
                 <div className={`${getUsageColor(d.percent)} h-full rounded-full transition-all duration-500`} style={{ width: barWidth(d.percent) }}></div>
               </div>
-              <div className="text-[0.6875rem] text-gray-500 dark:text-gray-400 mt-0.5">남은 용량 {sizeText(d.freeGB)}</div>
+              <div className="text-[0.6875rem] text-gray-500 dark:text-gray-400 mt-0.5">{tr("남은 용량")}{' '}{sizeText(d.freeGB)}</div>
             </div>
           ))}
         </div>
@@ -704,8 +708,8 @@ export default function Dashboard({ addToast, active = true }) {
               <HardDrive className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-black dark:text-white">로컬 드라이브{sysInfo.systemDrive ? ` (${sysInfo.systemDrive}\\)` : ''}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">전체 {gb(sysInfo.diskTotalGB)}</p>
+              <h3 className="font-bold text-base text-black dark:text-white">{tr("로컬 드라이브")}{sysInfo.systemDrive ? ` (${sysInfo.systemDrive}\\)` : ''}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{tr("전체")}{' '}{gb(sysInfo.diskTotalGB)}</p>
             </div>
           </div>
           <span className="text-3xl font-black font-mono text-black dark:text-white shrink-0">{pctText(diskUsage, loaded ? 'unavailable' : undefined)}</span>
@@ -719,8 +723,8 @@ export default function Dashboard({ addToast, active = true }) {
         </div>
 
         <div className="flex justify-between text-sm font-mono text-gray-500 dark:text-gray-400 mt-2">
-          <span>사용 중: {gb(sysInfo.diskUsedGB)}</span>
-          <span>남은 용량: {gb(sysInfo.diskFreeGB)}</span>
+          <span>{tr("사용 중:")}{' '}{gb(sysInfo.diskUsedGB)}</span>
+          <span>{tr("남은 용량:")}{' '}{gb(sysInfo.diskFreeGB)}</span>
         </div>
       </div>
       )}

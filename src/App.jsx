@@ -20,6 +20,8 @@ import InitialSetupWizard from './components/InitialSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import SettingsModal from './components/SettingsModal';
 import { applyTheme, applyDisplay, applyIcon, applyMode, isIconSetting, syncWindowIcon, syncPinnedIcon, cachedAppearance } from './theme';
+import { getLanguage, cacheLanguage } from './i18n';
+import { tr } from './i18n';
 
 export default function App() {
   const scrollWrapperRef = useRef(null);
@@ -67,9 +69,9 @@ export default function App() {
     if (!api || typeof api.markSetupWizardDone !== 'function') return;
     try {
       const res = await api.markSetupWizardDone();
-      if (!res?.success) addToast(res?.message || '마법사 완료 기록을 저장하지 못했습니다.', 'error');
+      if (!res?.success) addToast(res?.message || tr('마법사 완료 기록을 저장하지 못했습니다.'), 'error');
     } catch (e) {
-      addToast(`마법사 완료 기록을 저장하지 못했습니다: ${e}`, 'error');
+      addToast(tr("마법사 완료 기록을 저장하지 못했습니다: {0}", [e]), 'error');
     }
   };
 
@@ -110,6 +112,15 @@ export default function App() {
             if (typeof window.pywebview.api.getUiAppearance === 'function') {
               try {
                 const saved = await window.pywebview.api.getUiAppearance();
+                // 화면 언어: 고른 적이 없으면 Windows 표시 언어(한국어가 아니면 영어). 지금 화면과 다르면 한 번 다시 불러온다.
+                const wantLang = saved?.language === 'en' || saved?.language === 'ko'
+                  ? saved.language
+                  : (String(navigator.language || 'ko').toLowerCase().startsWith('ko') ? 'ko' : 'en');
+                if (wantLang !== getLanguage()) {
+                  cacheLanguage(wantLang);
+                  window.location.reload();
+                  return;
+                }
                 const applied = applyTheme(saved?.theme, saved?.accent, saved?.background);
                 const display = applyDisplay({ scale: saved?.scale, reduceMotion: saved?.reduceMotion });
                 const mode = applyMode(saved?.mode);
@@ -256,7 +267,7 @@ export default function App() {
                 {toast.message}
               </p>
             </div>
-            <button onClick={() => removeToast(toast.id)} aria-label="알림 닫기" className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
+            <button onClick={() => removeToast(toast.id)} aria-label={tr("알림 닫기")} className="shrink-0 p-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-gray-500">
               <X className="w-3 h-3" />
             </button>
           </div>

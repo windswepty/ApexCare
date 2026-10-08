@@ -6,6 +6,7 @@ import {
   accentProblems, readableAccent, resemblesWarningColor, fitBackground,
   ICON_PRESETS, iconColors, applyIcon, syncWindowIcon, applyMode,
 } from '../theme';
+import { tr, getLanguage, cacheLanguage } from '../i18n';
 
 // 키보드로 갈 수 있는 것(Tab 이 창 안에서만 돌게 할 때 쓴다)
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -90,12 +91,12 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
       const r = await api.setRestorePointSetting(next);
       if (r?.success) {
         setRpEnabled(next);
-        addToast?.(next ? '시스템을 바꾸기 전에 Windows 복원 지점을 만듭니다.' : '복원 지점을 만들지 않습니다.', 'success');
+        addToast?.(next ? tr('시스템을 바꾸기 전에 Windows 복원 지점을 만듭니다.') : tr('복원 지점을 만들지 않습니다.'), 'success');
       } else {
-        addToast?.(r?.message || '설정을 저장하지 못했습니다.', 'error');
+        addToast?.(r?.message || tr('설정을 저장하지 못했습니다.'), 'error');
       }
     } catch (e) {
-      addToast?.(`설정을 저장하지 못했습니다: ${e}`, 'error');
+      addToast?.(tr("설정을 저장하지 못했습니다: {0}", [e]), 'error');
     }
     setRpSaving(false);
   };
@@ -103,7 +104,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   // 적용 → 저장 → 실패 시 되돌림. patch: 바꿀 화면 설정 일부
   const commit = async (key, patch, save, okMessage) => {
     if (!api || typeof save !== 'function') {
-      if (addToast) addToast('API가 준비되지 않아 화면 설정을 저장할 수 없습니다.', 'error');
+      if (addToast) addToast(tr('API가 준비되지 않아 화면 설정을 저장할 수 없습니다.'), 'error');
       return;
     }
     const prev = current;
@@ -114,7 +115,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
       const colors = applyIcon(a.icon, applied.id, a.accent, a.background);
       if (a.icon || prev.icon) {
         syncWindowIcon(a.icon, colors).then((r) => {
-          if (r && r.success === false && addToast) addToast(`작업 표시줄 고정 단추: ${r.message}`, 'error');
+          if (r && r.success === false && addToast) addToast(tr("작업 표시줄 고정 단추: {0}", [r.message]), 'error');
         });
       }
       onAppearanceChange({ ...a, id: applied.id, mode: applyMode(a.mode), ...applyDisplay(a) });
@@ -123,11 +124,11 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
     setSaving(key);
     try {
       const res = await save();
-      if (!res?.success) throw new Error(res?.message || '저장 실패');
+      if (!res?.success) throw new Error(res?.message || tr('저장 실패'));
       if (addToast) addToast(okMessage, 'success');
     } catch (e) {
       show(prev);
-      if (addToast) addToast(`화면 설정을 저장하지 못했습니다: ${e.message || e}`, 'error');
+      if (addToast) addToast(tr("화면 설정을 저장하지 못했습니다: {0}", [e.message || e]), 'error');
     } finally {
       setSaving(null);
     }
@@ -137,63 +138,79 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
   // 색 조합을 바꿔도 화면이 거의 그대로였다.
   const chooseTheme = (id) => {
     if (saving || id === themeId) return;
-    const cleared = [accent && '강조색', background && '배경색'].filter(Boolean);
+    const cleared = [accent && tr('강조색'), background && tr('배경색')].filter(Boolean);
     commit(`theme:${id}`, { id, accent: null, background: null },
       api && (async () => {
         const res = await api.setUiTheme(id);
         if (!res?.success) return res;
-        for (const [has, clear, what] of [[accent, () => api.setUiAccent(''), '강조색'],
-          [background, () => api.setUiBackground(''), '배경색']]) {
+        for (const [has, clear, what] of [[accent, () => api.setUiAccent(''), tr('강조색')],
+          [background, () => api.setUiBackground(''), tr('배경색')]]) {
           if (!has) continue;
           const r = await clear();
           if (!r?.success) {
-            return { success: false, message: `색 조합은 저장했지만 직접 지정한 ${what}을 해제하지 못했습니다(${r?.message || '저장 실패'})` };
+            return { success: false, message: tr("색 조합은 저장했지만 직접 지정한 {0}을 해제하지 못했습니다({1})", [what, r?.message || tr('저장 실패')]) };
           }
         }
         return res;
       }),
-      cleared.length ? `색 조합을 저장했습니다. 직접 지정했던 ${cleared.join('·')}은 해제했습니다.` : '색 조합을 저장했습니다.');
+      cleared.length ? tr("색 조합을 저장했습니다. 직접 지정했던 {0}은 해제했습니다.", [cleared.join('·')]) : tr('색 조합을 저장했습니다.'));
   };
 
   const saveAccent = (value) => {
     if (saving) return;
     commit('accent', { accent: value }, api && (() => api.setUiAccent(value || '')),
-      value ? '강조색을 저장했습니다.' : '색 조합의 기본 강조색으로 되돌렸습니다.');
+      value ? tr('강조색을 저장했습니다.') : tr('색 조합의 기본 강조색으로 되돌렸습니다.'));
   };
 
   const saveBackground = (value) => {
     if (saving) return;
     commit('background', { background: value }, api && (() => api.setUiBackground(value || '')),
-      value ? '배경색을 저장했습니다.' : '색 조합의 기본 배경색으로 되돌렸습니다.');
+      value ? tr('배경색을 저장했습니다.') : tr('색 조합의 기본 배경색으로 되돌렸습니다.'));
   };
 
   const saveScale = (value) => {
     if (saving || value === scale) return;
-    commit('scale', { scale: value }, api && (() => api.setUiScale(value)), `글자·화면 크기를 ${value}% 로 저장했습니다.`);
+    commit('scale', { scale: value }, api && (() => api.setUiScale(value)), tr("글자·화면 크기를 {0}% 로 저장했습니다.", [value]));
   };
 
   const saveMotion = (value) => {
     if (saving) return;
     commit('motion', { reduceMotion: value }, api && (() => api.setUiReduceMotion(value)),
-      value ? '움직임 줄이기를 켰습니다.' : '움직임 줄이기를 껐습니다.');
+      value ? tr('움직임 줄이기를 켰습니다.') : tr('움직임 줄이기를 껐습니다.'));
+  };
+
+  // 언어는 화면 전체 문장이 바뀌어서 저장한 뒤 화면을 다시 불러온다(진행 중인 작업은 백엔드에서 그대로 이어진다)
+  const [langSaving, setLangSaving] = useState(false);
+  const saveLanguage = async (value) => {
+    if (langSaving || value === getLanguage() || !api?.setUiLanguage) return;
+    setLangSaving(true);
+    try {
+      const r = await api.setUiLanguage(value);
+      if (!r?.success) throw new Error(r?.message || tr('저장 실패'));
+      cacheLanguage(value);
+      window.location.reload();
+    } catch (e) {
+      addToast?.(tr('언어 설정을 저장하지 못했습니다: {0}', [e.message || e]), 'error');
+      setLangSaving(false);
+    }
   };
 
   const saveMode = (value) => {
     if (saving || value === mode) return;
     commit('mode', { mode: value }, api && (() => api.setUiMode(value)),
-      value === 'light' ? '밝은 화면으로 바꿨습니다.' : '어두운 화면으로 바꿨습니다.');
+      value === 'light' ? tr('밝은 화면으로 바꿨습니다.') : tr('어두운 화면으로 바꿨습니다.'));
   };
 
   const saveIcon = (value) => {
     if (saving || value === icon) return;
     commit('icon', { icon: value }, api && (() => api.setUiIcon(value)),
-      value ? '앱 아이콘 색을 저장했습니다.' : '앱 아이콘을 기본 색으로 되돌렸습니다.');
+      value ? tr('앱 아이콘 색을 저장했습니다.') : tr('앱 아이콘을 기본 색으로 되돌렸습니다.'));
   };
 
   const resetAll = () => {
     if (saving) return;
     commit('reset', { id: DEFAULT_THEME_ID, accent: null, background: null, scale: 100, reduceMotion: false, icon: '', mode: 'dark' },
-      api && (() => api.resetUiAppearance()), '화면 설정을 모두 기본값으로 되돌렸습니다.');
+      api && (() => api.resetUiAppearance()), tr('화면 설정을 모두 기본값으로 되돌렸습니다.'));
   };
 
   if (!isOpen) return null;
@@ -227,9 +244,9 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
         <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50 dark:bg-slate-800/30 flex-shrink-0">
           <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
             <Settings className="w-5 h-5" />
-            <h2 id="settings-title" className="font-bold">환경 설정</h2>
+            <h2 id="settings-title" className="font-bold">{tr("환경 설정")}</h2>
           </div>
-          <button ref={closeRef} onClick={onClose} aria-label="닫기" className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+          <button ref={closeRef} onClick={onClose} aria-label={tr("닫기")} className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
@@ -240,15 +257,14 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <div>
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
                 <Palette className="w-4 h-4 text-cyan-400" />
-                색 조합
+                {tr("색 조합")}
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                고르면 배경·패널·강조색이 함께 바뀌고 다음 실행 때도 유지됩니다. 직접 지정한 강조색·배경색은 해제됩니다.
-                경고·위험을 알리는 빨강·주황은 색 조합과 관계없이 그대로입니다.
+                {tr("고르면 배경·패널·강조색이 함께 바뀌고 다음 실행 때도 유지됩니다. 직접 지정한 강조색·배경색은 해제됩니다. 경고·위험을 알리는 빨강·주황은 색 조합과 관계없이 그대로입니다.")}
               </p>
             </div>
 
-            <div role="radiogroup" aria-label="색 조합" className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div role="radiogroup" aria-label={tr("색 조합")} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {THEMES.map((theme) => {
                 const s = swatch(theme);
                 const selected = theme.id === themeId;
@@ -279,7 +295,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                       {selected && <Check className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />}
                     </div>
                     <span className="text-[0.625rem] text-gray-500 dark:text-slate-400">
-                      {saving === `theme:${theme.id}` ? '저장 중…' : theme.description}
+                      {saving === `theme:${theme.id}` ? tr('저장 중…') : theme.description}
                     </span>
                   </button>
                 );
@@ -292,31 +308,31 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <div>
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
                 <Pipette className="w-4 h-4 text-cyan-400" />
-                강조색 직접 지정
+                {tr("강조색 직접 지정")}
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                글자를 읽기 어려운 색(대비 4.5:1 미만)은 적용할 수 없습니다. 이럴 때는 읽을 수 있는 가장 가까운 색을 제안합니다.
+                {tr("글자를 읽기 어려운 색(대비 4.5:1 미만)은 적용할 수 없습니다. 이럴 때는 읽을 수 있는 가장 가까운 색을 제안합니다.")}
               </p>
             </div>
 
             {savedButUnused && (
               <p className="text-xs text-amber-400 flex gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                저장된 강조색 {accent} 은 지금 색 조합에서 읽기 어려워 기본 강조색을 쓰고 있습니다.
+                {tr("저장된 강조색")}{' '}{accent}{' '}{tr("은 지금 색 조합에서 읽기 어려워 기본 강조색을 쓰고 있습니다.")}
               </p>
             )}
 
             <div className="flex items-center gap-3">
               <input
                 type="color"
-                aria-label="강조색 고르기"
+                aria-label={tr("강조색 고르기")}
                 value={draftValid ? draft : '#000000'}
                 onChange={(e) => setBoth(e.target.value)}
                 className="w-11 h-11 rounded-lg border border-black/10 dark:border-slate-700 bg-transparent cursor-pointer p-0.5"
               />
               <input
                 type="text"
-                aria-label="강조색 코드"
+                aria-label={tr("강조색 코드")}
                 value={hexText}
                 maxLength={7}
                 spellCheck={false}
@@ -331,23 +347,23 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
               />
               {/* 미리보기: 지금 색 조합의 패널 위에 강조 글자와 강조 버튼 */}
               <div className="flex-1 min-w-0 rounded-lg px-3 py-2 flex items-center justify-between gap-2" style={{ background: preview.zinc[9] }}>
-                <span className="text-xs font-bold truncate" style={{ color: preview.accent[4] }}>강조 글자</span>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-md flex-shrink-0" style={{ background: preview.accent[5], color: preview.black }}>버튼</span>
+                <span className="text-xs font-bold truncate" style={{ color: preview.accent[4] }}>{tr("강조 글자")}</span>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-md flex-shrink-0" style={{ background: preview.accent[5], color: preview.black }}>{tr("버튼")}</span>
               </div>
             </div>
             {!HEX_RE.test(hexText) && (
-              <p className="text-xs text-rose-400">#과 16진수 6자리로 입력하세요. 예: #22d3ee</p>
+              <p className="text-xs text-rose-400">{tr("#과 16진수 6자리로 입력하세요. 예: #22d3ee")}</p>
             )}
 
             {problems.length > 0 && (
               <div className="rounded-lg border border-rose-500/40 bg-rose-500/5 p-3 space-y-2">
                 <p className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  이 색은 지금 색 조합에서 읽기 어렵습니다
+                  {tr("이 색은 지금 색 조합에서 읽기 어렵습니다")}
                 </p>
                 <ul className="text-[0.6875rem] text-gray-600 dark:text-slate-300 space-y-0.5 font-mono">
                   {problems.map(p => (
-                    <li key={p.name}>{p.name}: {p.ratio.toFixed(2)}:1 (필요 {p.floor.toFixed(1)}:1)</li>
+                    <li key={p.name}>{p.name}: {p.ratio.toFixed(2)}{tr(":1 (필요")}{' '}{p.floor.toFixed(1)}:1)</li>
                   ))}
                 </ul>
                 <button
@@ -356,7 +372,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                   className="text-xs font-bold px-3 py-1.5 rounded-md bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 flex items-center gap-1.5"
                 >
                   <Wand2 className="w-3.5 h-3.5" />
-                  읽을 수 있게 조정
+                  {tr("읽을 수 있게 조정")}
                   <span className="inline-block w-3 h-3 rounded-sm border border-white/20" style={{ background: fixed }} />
                   <span className="font-mono">{fixed}</span>
                 </button>
@@ -366,7 +382,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             {draftValid && problems.length === 0 && resemblesWarningColor(draft) && (
               <p className="text-xs text-amber-400 flex gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                빨강·주황 계열이라 경고·위험 표시와 헷갈릴 수 있습니다. 적용은 할 수 있습니다.
+                {tr("빨강·주황 계열이라 경고·위험 표시와 헷갈릴 수 있습니다. 적용은 할 수 있습니다.")}
               </p>
             )}
 
@@ -377,7 +393,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                 onClick={() => saveAccent(draft.toLowerCase())}
                 className="flex-1 px-4 py-2 rounded-lg font-bold text-sm bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                {saving === 'accent' ? '저장 중…' : isSaved ? '적용됨' : isStored ? '저장됨 (이 색 조합에서는 쓰지 않음)' : '이 강조색 적용'}
+                {saving === 'accent' ? tr('저장 중…') : isSaved ? tr('적용됨') : isStored ? tr('저장됨 (이 색 조합에서는 쓰지 않음)') : tr('이 강조색 적용')}
               </button>
               {accent && (
                 <button
@@ -387,7 +403,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                   className="px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 disabled:opacity-40 flex items-center gap-1.5 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  기본 강조색
+                  {tr("기본 강조색")}
                 </button>
               )}
             </div>
@@ -398,24 +414,24 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <div>
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
                 <PaintBucket className="w-4 h-4 text-cyan-400" />
-                배경색 직접 지정
+                {tr("배경색 직접 지정")}
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                고른 색으로 배경·패널·테두리를 물들입니다. 글자가 잘 보이도록 밝기는 어두운 화면에 맞추고, 색만 반영합니다.
+                {tr("고른 색으로 배경·패널·테두리를 물들입니다. 글자가 잘 보이도록 밝기는 어두운 화면에 맞추고, 색만 반영합니다.")}
               </p>
             </div>
 
             <div className="flex items-center gap-3">
               <input
                 type="color"
-                aria-label="배경색 고르기"
+                aria-label={tr("배경색 고르기")}
                 value={bgValid ? bgDraft : '#000000'}
                 onChange={(e) => setBg(e.target.value)}
                 className="w-11 h-11 rounded-lg border border-black/10 dark:border-slate-700 bg-transparent cursor-pointer p-0.5"
               />
               <input
                 type="text"
-                aria-label="배경색 코드"
+                aria-label={tr("배경색 코드")}
                 value={bgText}
                 maxLength={7}
                 spellCheck={false}
@@ -431,20 +447,20 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
               {/* 미리보기: 배경 위의 패널, 그 안의 본문·흐린 글자·강조 글자 */}
               <div className="flex-1 min-w-0 rounded-lg p-1.5" style={{ background: bgPreview.black }}>
                 <div className="rounded-md px-2.5 py-1.5 border" style={{ background: bgPreview.zinc[9], borderColor: bgPreview.zinc[8] }}>
-                  <div className="text-xs font-bold truncate" style={{ color: bgPreview.slate[2] }}>본문 글자</div>
+                  <div className="text-xs font-bold truncate" style={{ color: bgPreview.slate[2] }}>{tr("본문 글자")}</div>
                   <div className="text-[0.625rem] truncate" style={{ color: bgPreview.slate[5] }}>
-                    흐린 글자 · <span style={{ color: bgPreview.accent[4] }}>강조</span>
+                    {tr("흐린 글자 ·")}{' '}<span style={{ color: bgPreview.accent[4] }}>{tr("강조")}</span>
                   </div>
                 </div>
               </div>
             </div>
             {!HEX_RE.test(bgText) && (
-              <p className="text-xs text-rose-400">#과 16진수 6자리로 입력하세요. 예: #2e1065</p>
+              <p className="text-xs text-rose-400">{tr("#과 16진수 6자리로 입력하세요. 예: #2e1065")}</p>
             )}
             {bgFit?.softened && (
               <p className="text-xs text-amber-400 flex gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                이 색 그대로는 글자를 읽기 어려워 조금 옅게(채도를 낮춰) 적용합니다.
+                {tr("이 색 그대로는 글자를 읽기 어려워 조금 옅게(채도를 낮춰) 적용합니다.")}
               </p>
             )}
 
@@ -455,7 +471,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                 onClick={() => saveBackground(bgDraft.toLowerCase())}
                 className="flex-1 px-4 py-2 rounded-lg font-bold text-sm bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                {saving === 'background' ? '저장 중…' : bgSaved ? '적용됨' : '이 배경색 적용'}
+                {saving === 'background' ? tr('저장 중…') : bgSaved ? tr('적용됨') : tr('이 배경색 적용')}
               </button>
               {background && (
                 <button
@@ -465,7 +481,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                   className="px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 disabled:opacity-40 flex items-center gap-1.5 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  기본 배경색
+                  {tr("기본 배경색")}
                 </button>
               )}
             </div>
@@ -476,14 +492,13 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <div>
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
                 <Sparkles className="w-4 h-4 text-cyan-400" />
-                앱 아이콘 색
+                {tr("앱 아이콘 색")}
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                사이드바·제목 표시줄·로딩 화면의 로고와 작업 표시줄 아이콘(이 계정에서 고정해 둔 단추 포함)이 함께 바뀝니다.
-                바탕화면·시작 메뉴 바로 가기는 이 PC 의 모든 계정이 함께 쓰는 것이라 그대로 둡니다.
+                {tr("사이드바·제목 표시줄·로딩 화면의 로고와 작업 표시줄 아이콘(이 계정에서 고정해 둔 단추 포함)이 함께 바뀝니다. 바탕화면·시작 메뉴 바로 가기는 이 PC 의 모든 계정이 함께 쓰는 것이라 그대로 둡니다.")}
               </p>
             </div>
-            <div role="radiogroup" aria-label="앱 아이콘 색" className="grid grid-cols-4 gap-2">
+            <div role="radiogroup" aria-label={tr("앱 아이콘 색")} className="grid grid-cols-4 gap-2">
               {ICON_PRESETS.map((p) => {
                 const c = iconColors(p.id, shown);
                 const selected = icon === p.id;
@@ -511,7 +526,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                 <div className="flex items-center gap-1">
                   <input
                     type="color"
-                    aria-label="아이콘 바탕색 고르기"
+                    aria-label={tr("아이콘 바탕색 고르기")}
                     value={iconDraft}
                     onChange={(e) => setIconDraft(e.target.value)}
                     className="w-5 h-5 rounded border border-black/10 dark:border-slate-700 bg-transparent cursor-pointer p-0"
@@ -522,7 +537,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                     onClick={() => saveIcon(iconDraft.toLowerCase())}
                     className="text-[0.6875rem] font-bold text-cyan-400 disabled:opacity-40"
                   >
-                    {icon === iconDraft.toLowerCase() ? '적용됨' : '직접 지정'}
+                    {icon === iconDraft.toLowerCase() ? tr('적용됨') : tr('직접 지정')}
                   </button>
                 </div>
               </div>
@@ -533,13 +548,36 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
           <section className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
               <Monitor className="w-4 h-4 text-cyan-400" />
-              화면
+              {tr("화면")}
             </div>
 
             <div className="space-y-1.5">
-              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">화면 밝기</div>
-              <div role="radiogroup" aria-label="화면 밝기" className="grid grid-cols-2 gap-2">
-                {[['dark', '어둡게', Moon], ['light', '밝게', Sun]].map(([m, label, Icon]) => (
+              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">{tr("언어 · Language")}</div>
+              <div role="radiogroup" aria-label={tr("언어 · Language")} className="grid grid-cols-2 gap-2">
+                {[['ko', '한국어'], ['en', 'English']].map(([l, label]) => (
+                  <button
+                    key={l}
+                    type="button"
+                    role="radio"
+                    aria-checked={getLanguage() === l}
+                    disabled={langSaving || saving !== null}
+                    onClick={() => saveLanguage(l)}
+                    className={`py-2 rounded-lg text-sm font-bold border transition-colors disabled:cursor-wait ${
+                      getLanguage() === l
+                        ? 'border-cyan-400 bg-cyan-500/10 text-cyan-400'
+                        : 'border-black/10 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">{tr("화면 밝기")}</div>
+              <div role="radiogroup" aria-label={tr("화면 밝기")} className="grid grid-cols-2 gap-2">
+                {[['dark', tr('어둡게'), Moon], ['light', tr('밝게'), Sun]].map(([m, label, Icon]) => (
                   <button
                     key={m}
                     type="button"
@@ -560,8 +598,8 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             </div>
 
             <div className="space-y-1.5">
-              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">글자·화면 크기</div>
-              <div role="radiogroup" aria-label="글자·화면 크기" className="grid grid-cols-4 gap-2">
+              <div className="text-xs font-semibold text-gray-700 dark:text-slate-300">{tr("글자·화면 크기")}</div>
+              <div role="radiogroup" aria-label={tr("글자·화면 크기")} className="grid grid-cols-4 gap-2">
                 {UI_SCALES.map((s) => (
                   <button
                     key={s}
@@ -576,7 +614,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
                         : 'border-black/10 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-slate-500'
                     }`}
                   >
-                    {s}%{s === 100 ? ' (기본)' : ''}
+                    {s}%{s === 100 ? tr(' (기본)') : ''}
                   </button>
                 ))}
               </div>
@@ -591,8 +629,8 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
               className="w-full flex items-center justify-between gap-3 rounded-lg border border-black/10 dark:border-slate-700 px-3 py-2.5 text-left hover:border-slate-500 transition-colors disabled:cursor-wait"
             >
               <span>
-                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">움직임 줄이기</span>
-                <span className="block text-[0.6875rem] text-gray-500 dark:text-slate-400">화면 전환 애니메이션과 부드러운 스크롤을 끕니다</span>
+                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">{tr("움직임 줄이기")}</span>
+                <span className="block text-[0.6875rem] text-gray-500 dark:text-slate-400">{tr("화면 전환 애니메이션과 부드러운 스크롤을 끕니다")}</span>
               </span>
               <span className={`relative w-10 h-6 rounded-full flex-shrink-0 transition-colors ${reduceMotion ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-slate-700'}`}>
                 <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${reduceMotion ? 'left-5' : 'left-1'}`} />
@@ -606,7 +644,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
               className="w-full px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              {saving === 'reset' ? '되돌리는 중…' : isDefault ? '화면 설정이 모두 기본값입니다' : '화면 설정 모두 기본값으로'}
+              {saving === 'reset' ? tr('되돌리는 중…') : isDefault ? tr('화면 설정이 모두 기본값입니다') : tr('화면 설정 모두 기본값으로')}
             </button>
           </section>
 
@@ -614,7 +652,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
           <section className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
               <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              안전
+              {tr("안전")}
             </div>
             <button
               type="button"
@@ -625,10 +663,10 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
               className="w-full flex items-center justify-between gap-3 rounded-lg border border-black/10 dark:border-slate-700 px-3 py-2.5 text-left hover:border-slate-500 transition-colors disabled:cursor-wait"
             >
               <span>
-                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">바꾸기 전에 Windows 복원 지점 만들기</span>
+                <span className="block text-xs font-semibold text-gray-700 dark:text-slate-300">{tr("바꾸기 전에 Windows 복원 지점 만들기")}</span>
                 <span className="block text-[0.6875rem] text-gray-500 dark:text-slate-400">
-                  성능 모드·기본 앱 정리·맞춤 튜닝 전에 만듭니다. Windows 는 24시간에 한 번만 만들고, 시스템 보호가 꺼져 있으면 만들 수 없습니다(그때도 결과를 알려 드립니다).
-                  {rpEnabled === null && ' 설정을 읽지 못했습니다.'}
+                  {tr("성능 모드·기본 앱 정리·맞춤 튜닝 전에 만듭니다. Windows 는 24시간에 한 번만 만들고, 시스템 보호가 꺼져 있으면 만들 수 없습니다(그때도 결과를 알려 드립니다).")}
+                  {rpEnabled === null && tr(' 설정을 읽지 못했습니다.')}
                 </span>
               </span>
               <span className={`relative w-10 h-6 rounded-full flex-shrink-0 transition-colors ${rpEnabled ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-slate-700'}`}>
@@ -642,17 +680,17 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             <section className="space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-slate-100">
                 <Wand2 className="w-4 h-4 text-cyan-400" />
-                초기 설정 마법사
+                {tr("초기 설정 마법사")}
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-400">
-                PC 사양에 맞는 서비스 설정을 다시 확인합니다. 여는 것만으로는 아무것도 바뀌지 않습니다.
+                {tr("PC 사양에 맞는 서비스 설정을 다시 확인합니다. 여는 것만으로는 아무것도 바뀌지 않습니다.")}
               </p>
               <button
                 type="button"
                 onClick={onOpenSetupWizard}
                 className="px-4 py-2 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 transition-colors"
               >
-                마법사 다시 열기
+                {tr("마법사 다시 열기")}
               </button>
             </section>
           )}
@@ -661,7 +699,7 @@ export default function SettingsModal({ isOpen, onClose, addToast, appearance, o
             onClick={onClose}
             className="w-full px-4 py-2.5 rounded-lg font-bold text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 transition-colors"
           >
-            닫기
+            {tr("닫기")}
           </button>
         </div>
       </div>

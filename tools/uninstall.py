@@ -26,6 +26,32 @@ RESULT_PATH = os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "uni
 REMOVED_APPS_PATH = os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "debloat_removed.json")
 
 
+def _english():
+    """화면 언어: APEX CARE 에서 고른 언어가 있으면 그것, 없으면 Windows 표시 언어(한국어가 아니면 영어). 앱과 같은 규칙."""
+    try:
+        with open(os.path.join(os.environ.get("APPDATA", ""), "APEX_CARE_DATA", "settings.json"), encoding="utf-8") as f:
+            chosen = json.load(f).get("ui_language")
+        if chosen in ("ko", "en"):
+            return chosen == "en"
+    except Exception:
+        pass
+    try:
+        import ctypes
+        return (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF) != 0x12     # LANG_KOREAN
+    except Exception:
+        return False
+
+
+ENGLISH = _english()
+
+
+def _T(ko, en):
+    return en if ENGLISH else ko
+
+
+TITLE = _T("APEX CARE 삭제", "Uninstall APEX CARE")
+
+
 def _removed_app_count():
     """디블로터로 제거하고 아직 되살리지 않은 앱 수. 읽지 못하면 0."""
     try:
@@ -73,36 +99,40 @@ def _revert_system_changes(install_dir):
     """
     exe = os.path.join(install_dir, APP_EXE)
     if not os.path.isfile(exe):
-        return False, f"{APP_EXE} 가 없어 설정을 되돌리지 못했습니다."
+        return False, _T(f"{APP_EXE} 가 없어 설정을 되돌리지 못했습니다.",
+                         f"Settings could not be restored because {APP_EXE} is missing.")
     try:
         os.remove(RESULT_PATH)             # 지난번 결과를 이번 결과로 착각하지 않게
     except FileNotFoundError:
         pass
     except OSError as e:
-        return False, f"이전 결과 파일을 지우지 못했습니다: {e}"
+        return False, _T(f"이전 결과 파일을 지우지 못했습니다: {e}", f"Could not delete the previous result file: {e}")
 
     try:
         r = subprocess.run([exe, "--revert-for-uninstall"], shell=False,
                            creationflags=CREATE_NO_WINDOW, timeout=REVERT_TIMEOUT_SEC)
         rc = r.returncode
     except subprocess.TimeoutExpired:
-        return False, f"설정 되돌리기가 {REVERT_TIMEOUT_SEC}초 안에 끝나지 않았습니다."
+        return False, _T(f"설정 되돌리기가 {REVERT_TIMEOUT_SEC}초 안에 끝나지 않았습니다.",
+                         f"Restoring settings did not finish within {REVERT_TIMEOUT_SEC} seconds.")
     except Exception as e:
-        return False, f"설정 되돌리기를 시작하지 못했습니다: {e}"
+        return False, _T(f"설정 되돌리기를 시작하지 못했습니다: {e}", f"Could not start restoring settings: {e}")
 
     try:
         with open(RESULT_PATH, encoding="utf-8") as f:
             res = json.load(f)
     except Exception:
-        return False, f"설정 되돌리기 결과를 읽지 못했습니다 (종료 코드 {rc})."
+        return False, _T(f"설정 되돌리기 결과를 읽지 못했습니다 (종료 코드 {rc}).",
+                         f"Could not read the result of restoring settings (exit code {rc}).")
 
     if rc == 0 and res.get("success"):
         return True, ""
     failed = res.get("failed") or []
     lines = [f"- {f.get('name', '?')}: {f.get('detail', '')}".rstrip(": ") for f in failed[:10]]
     if len(failed) > 10:
-        lines.append(f"- 외 {len(failed) - 10}개")
-    return False, "되돌리지 못한 항목:\n" + ("\n".join(lines) if lines else f"(종료 코드 {rc})")
+        lines.append(_T(f"- 외 {len(failed) - 10}개", f"- and {len(failed) - 10} more"))
+    return False, (_T("되돌리지 못한 항목:\n", "Items that could not be restored:\n")
+                   + ("\n".join(lines) if lines else _T(f"(종료 코드 {rc})", f"(exit code {rc})")))
 
 
 def _app_icon():
@@ -127,13 +157,19 @@ def main():
     removed_apps = _removed_app_count()
     # 사용자가 일부러 지운 앱을 프로그램 제거 때 다시 설치하지 않는다. 대신 그 사실을 먼저 알린다.
     # 화면 이름은 앱 사이드바와 같아야 사용자가 찾아갈 수 있다('Windows 기본 앱 정리', '변경 내역 · 되돌리기').
-    removed_note = (f"\n\n'Windows 기본 앱 정리' 로 제거한 앱 {removed_apps}개는 다시 설치하지 않습니다. 필요하면 "
-                    "'아니요' 를 누르고 APEX CARE 의 'Windows 기본 앱 정리' 화면 → '제거한 앱' 에서 먼저 되살리세요."
+    removed_note = (_T(f"\n\n'Windows 기본 앱 정리' 로 제거한 앱 {removed_apps}개는 다시 설치하지 않습니다. 필요하면 "
+                       "'아니요' 를 누르고 APEX CARE 의 'Windows 기본 앱 정리' 화면 → '제거한 앱' 에서 먼저 되살리세요.",
+                       f"\n\n{removed_apps} apps removed with 'Windows built-in apps' will not be reinstalled. If needed, "
+                       "press 'No' and restore them first under 'Windows built-in apps' → 'Removed apps' in APEX CARE.")
                     if removed_apps else "")
-    if _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
-                "APEX CARE 프로그램을 삭제하시겠습니까?\n\n"
-                "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석·Cortana 정책, "
-                "맞춤 튜닝, 이 앱으로 켜거나 끈 시작 프로그램)을 바꾸기 전 상태로 되돌립니다." + removed_note,
+    if _message(QMessageBox.Icon.Warning, TITLE,
+                _T("APEX CARE 프로그램을 삭제하시겠습니까?\n\n"
+                   "삭제하기 전에 APEX CARE 가 바꾼 설정(성능 모드, 게임 부스트, 원격 분석·Cortana 정책, "
+                   "맞춤 튜닝, 이 앱으로 켜거나 끈 시작 프로그램)을 바꾸기 전 상태로 되돌립니다.",
+                   "Do you want to uninstall APEX CARE?\n\n"
+                   "Before uninstalling, the settings APEX CARE changed (performance modes, game boost, telemetry and "
+                   "Cortana policies, tailored tuning, startup programs turned on or off with this app) are restored to "
+                   "how they were before.") + removed_note,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
         sys.exit(0)
@@ -143,17 +179,21 @@ def main():
     # 엄격한 위치 확인: 설치 마법사가 설치하는 곳(%ProgramFiles%\APEX CARE)에서 실행될 때만 지운다
     expected_dir = install_dir_expected()
     if os.path.normcase(install_dir) != os.path.normcase(expected_dir):
-        _message(QMessageBox.Icon.Critical, "제거 오류",
-                 f"정상적인 설치 경로가 아닙니다.\n이 프로그램은 설치된 위치({expected_dir})에서만 실행할 수 있습니다.\n"
-                 f"현재 경로: {install_dir}")
+        _message(QMessageBox.Icon.Critical, _T("제거 오류", "Uninstall error"),
+                 _T(f"정상적인 설치 경로가 아닙니다.\n이 프로그램은 설치된 위치({expected_dir})에서만 실행할 수 있습니다.\n"
+                    f"현재 경로: {install_dir}",
+                    f"This is not the normal install location.\nThis program can run only from where it was installed "
+                    f"({expected_dir}).\nCurrent location: {install_dir}"))
         sys.exit(1)
 
     # 실행 중인 앱을 강제 종료하지 않는다. 강제 종료하면 게임 부스트·우선순위 정리가 돌지 않고,
     # 되돌리기와 앱이 같은 기록 파일을 동시에 쓴다.
     if _app_running():
-        _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
-                 "APEX CARE 가 실행 중입니다(또는 실행 여부를 확인하지 못했습니다).\n"
-                 "APEX CARE 창을 닫은 뒤 다시 삭제해 주세요.")
+        _message(QMessageBox.Icon.Warning, TITLE,
+                 _T("APEX CARE 가 실행 중입니다(또는 실행 여부를 확인하지 못했습니다).\n"
+                    "APEX CARE 창을 닫은 뒤 다시 삭제해 주세요.",
+                    "APEX CARE is running (or it could not be checked whether it is running).\n"
+                    "Close the APEX CARE window and uninstall again."))
         sys.exit(1)
 
     QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -164,10 +204,14 @@ def main():
 
     if not reverted:
         # 되돌리지 못했는데 앱을 지우면 되돌릴 방법이 사라진다. 기본 선택은 '아니요'.
-        if _message(QMessageBox.Icon.Warning, "설정을 모두 되돌리지 못했습니다",
-                    f"{why}\n\n그래도 삭제하시겠습니까?\n"
-                    "삭제하면 남은 설정을 이 프로그램으로 되돌릴 수 없습니다. '아니요' 를 누르고 "
-                    "APEX CARE 의 '변경 내역 · 되돌리기' 화면에서 다시 시도하는 것을 권합니다.",
+        if _message(QMessageBox.Icon.Warning, _T("설정을 모두 되돌리지 못했습니다", "Not all settings could be restored"),
+                    f"{why}\n\n" + _T("그래도 삭제하시겠습니까?\n"
+                                        "삭제하면 남은 설정을 이 프로그램으로 되돌릴 수 없습니다. '아니요' 를 누르고 "
+                                        "APEX CARE 의 '변경 내역 · 되돌리기' 화면에서 다시 시도하는 것을 권합니다.",
+                                        "Uninstall anyway?\n"
+                                        "After uninstalling, the remaining settings cannot be restored with this program. "
+                                        "We recommend pressing 'No' and trying again on the 'Change history · Undo' "
+                                        "screen in APEX CARE."),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             sys.exit(1)
@@ -181,10 +225,15 @@ def main():
         bat_path = os.path.join(work_dir, "cleanup.bat")
         _write_cleanup_bat(bat_path, install_dir)
     except (OSError, UnicodeEncodeError) as e:
-        first = ("설정은 되돌렸지만" if reverted else "설정 일부를 되돌리지 못한 채로")
-        _message(QMessageBox.Icon.Warning, "APEX CARE 삭제",
-                 f"{first} 설치 폴더를 지우는 준비를 하지 못했습니다: {e}\n"
-                 f"아래 폴더를 직접 지워 주세요.\n{install_dir}")
+        if ENGLISH:
+            first = ("Settings were restored, but" if reverted else "Some settings were not restored, and")
+            text = (f"{first} preparing to delete the install folder failed: {e}\n"
+                    f"Please delete this folder yourself.\n{install_dir}")
+        else:
+            first = ("설정은 되돌렸지만" if reverted else "설정 일부를 되돌리지 못한 채로")
+            text = (f"{first} 설치 폴더를 지우는 준비를 하지 못했습니다: {e}\n"
+                    f"아래 폴더를 직접 지워 주세요.\n{install_dir}")
+        _message(QMessageBox.Icon.Warning, TITLE, text)
         sys.exit(1)
 
     # 배치 파일의 작업 폴더를 설치 폴더 밖으로 둔다. 탐색기에서 제거 프로그램을 실행하면 작업 폴더가
@@ -238,8 +287,9 @@ def _cleanup_bat_lines(bat_path, install_dir, shortcuts):
     끝에 실제로 지워졌는지에 따라 다른 메시지를 띄운다(지우지 못했는데 '제거되었습니다' 라고 하지 않는다).
     작업 폴더는 배치가 든 폴더의 상위(%SystemRoot%\\Temp)다. 배치 폴더를 작업 폴더로 두면 끝에 그 폴더를 지울 수 없다.
     """
-    ok_msg = "APEX CARE가 제거되었습니다."
-    fail_msg = f"APEX CARE 설치 폴더를 지우지 못했습니다. 이 폴더를 직접 지워 주세요:\n{install_dir}"
+    ok_msg = _T("APEX CARE가 제거되었습니다.", "APEX CARE has been uninstalled.")
+    fail_msg = _T(f"APEX CARE 설치 폴더를 지우지 못했습니다. 이 폴더를 직접 지워 주세요:\n{install_dir}",
+                  f"Could not delete the APEX CARE install folder. Please delete this folder yourself:\n{install_dir}")
     work_dir = ntpath.dirname(bat_path)
     lines = [
         '@echo off',

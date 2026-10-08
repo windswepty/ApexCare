@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   XCircle
 } from 'lucide-react';
+import { tr } from '../i18n';
 
 // 예전 화면의 문제:
 //   - 백엔드 응답 전·실패 시 14.2 / 7.8 / 32 GB 같은 지어낸 값을 실제 측정값처럼 보여줬다.
@@ -16,7 +17,7 @@ import {
 //   - 프로세스 종료를 확인 없이, 결과를 받기 전에 목록에서 먼저 지웠다.
 // 이제 백엔드가 측정한 값만 보여주고, 없으면 '측정 중' / '알 수 없음' 으로 둔다.
 
-const fmtGB = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)} GB` : '알 수 없음');
+const fmtGB = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)} GB` : tr('알 수 없음'));
 
 export default function RamBooster({ addToast, active = true }) {
   // null: 아직 받지 못함. { error: true }: 받지 못했음.
@@ -68,7 +69,7 @@ export default function RamBooster({ addToast, active = true }) {
     if (isPurging) return;
     const api = window.pywebview && window.pywebview.api;
     if (!api || typeof api.purgeRam !== 'function') {
-      if (addToast) addToast('API가 준비되지 않아 대기 메모리를 비울 수 없습니다.', 'error');
+      if (addToast) addToast(tr('API가 준비되지 않아 대기 메모리를 비울 수 없습니다.'), 'error');
       return;
     }
     setIsPurging(true);
@@ -77,12 +78,12 @@ export default function RamBooster({ addToast, active = true }) {
       const res = await api.purgeRam();
       if (res?.success) {
         setPurgeResult(res);
-        if (addToast) addToast(res.message || '대기 메모리를 비웠습니다.', 'success');
+        if (addToast) addToast(res.message || tr('대기 메모리를 비웠습니다.'), 'success');
       } else {
-        if (addToast) addToast(res?.message || '대기 메모리를 비우지 못했습니다.', 'error');
+        if (addToast) addToast(res?.message || tr('대기 메모리를 비우지 못했습니다.'), 'error');
       }
     } catch (e) {
-      if (addToast) addToast(`대기 메모리를 비우지 못했습니다: ${e}`, 'error');
+      if (addToast) addToast(tr("대기 메모리를 비우지 못했습니다: {0}", [e]), 'error');
     } finally {
       setIsPurging(false);
     }
@@ -96,7 +97,7 @@ export default function RamBooster({ addToast, active = true }) {
     const api = window.pywebview && window.pywebview.api;
     setConfirmPid(null);
     if (!api || typeof api.killProcess !== 'function') {
-      if (addToast) addToast('API가 준비되지 않아 프로세스를 종료할 수 없습니다.', 'error');
+      if (addToast) addToast(tr('API가 준비되지 않아 프로세스를 종료할 수 없습니다.'), 'error');
       return;
     }
     setKillingPid(proc.pid);
@@ -106,13 +107,13 @@ export default function RamBooster({ addToast, active = true }) {
       if (res?.success) {
         // 결과를 받은 뒤에만 목록에서 뺀다
         setProcesses(prev => (prev || []).filter(p => p.pid !== proc.pid));
-        if (addToast) addToast(res.message || `'${proc.name}' 프로세스를 종료했습니다.`, 'success');
+        if (addToast) addToast(res.message || tr("'{0}' 프로세스를 종료했습니다.", [proc.name]), 'success');
       } else {
         // 시스템 보호 프로세스 차단 사유를 백엔드 한국어 메시지 그대로 보여준다
-        if (addToast) addToast(res?.message || '프로세스 종료에 실패했습니다.', 'error');
+        if (addToast) addToast(res?.message || tr('프로세스 종료에 실패했습니다.'), 'error');
       }
     } catch (e) {
-      if (addToast) addToast(`프로세스 종료에 실패했습니다: ${e}`, 'error');
+      if (addToast) addToast(tr("프로세스 종료에 실패했습니다: {0}", [e]), 'error');
     } finally {
       setKillingPid(null);
     }
@@ -123,13 +124,13 @@ export default function RamBooster({ addToast, active = true }) {
   const hasBreakdown = !loading && !unavailable &&
     [ram.inUseGB, ram.modifiedGB, ram.standbyGB, ram.freeGB].every(v => typeof v === 'number');
   const noStandby = typeof ram?.standbyGB === 'number' && ram.standbyGB < 0.1;
-  const waiting = loading ? '측정 중…' : null;
+  const waiting = loading ? tr('측정 중…') : null;
 
   const segments = hasBreakdown ? [
-    { key: 'inUse', label: '사용 중', gb: ram.inUseGB, cls: 'bg-cyan-500' },
-    { key: 'modified', label: '수정됨', gb: ram.modifiedGB, cls: 'bg-amber-500' },
-    { key: 'standby', label: '대기 (캐시)', gb: ram.standbyGB, cls: 'bg-purple-500' },
-    { key: 'free', label: '여유', gb: ram.freeGB, cls: 'bg-gray-300 dark:bg-slate-700' },
+    { key: 'inUse', label: tr('사용 중'), gb: ram.inUseGB, cls: 'bg-cyan-500' },
+    { key: 'modified', label: tr('수정됨'), gb: ram.modifiedGB, cls: 'bg-amber-500' },
+    { key: 'standby', label: tr('대기 (캐시)'), gb: ram.standbyGB, cls: 'bg-purple-500' },
+    { key: 'free', label: tr('여유'), gb: ram.freeGB, cls: 'bg-gray-300 dark:bg-slate-700' },
   ] : [];
 
   return (
@@ -141,10 +142,9 @@ export default function RamBooster({ addToast, active = true }) {
             <Cpu className="w-4 h-4" />
             MEMORY
           </div>
-          <h2 className="text-2xl font-black text-black dark:text-white">RAM 메모리 최적화</h2>
+          <h2 className="text-2xl font-black text-black dark:text-white">{tr("RAM 메모리 최적화")}</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400 mt-1 max-w-2xl">
-            대기(Standby) 메모리는 Windows 가 최근에 읽은 파일을 담아 둔 캐시입니다. 다른 프로그램이 메모리를 요청하면 Windows 가 알아서 내어주므로 평소에는 비울 필요가 없습니다.
-            비우면 '여유' 수치는 늘지만 캐시가 사라져 한동안 파일·게임 로딩이 느려질 수 있습니다.
+            {tr("대기(Standby) 메모리는 Windows 가 최근에 읽은 파일을 담아 둔 캐시입니다. 다른 프로그램이 메모리를 요청하면 Windows 가 알아서 내어주므로 평소에는 비울 필요가 없습니다. 비우면 '여유' 수치는 늘지만 캐시가 사라져 한동안 파일·게임 로딩이 느려질 수 있습니다.")}
           </p>
         </div>
 
@@ -158,15 +158,15 @@ export default function RamBooster({ addToast, active = true }) {
           {isPurging ? (
             <>
               <RotateCcw className="w-5 h-5 animate-spin" />
-              <span>대기 메모리 비우는 중...</span>
+              <span>{tr("대기 메모리 비우는 중...")}</span>
             </>
           ) : (
             <>
               <Zap className="w-5 h-5 fill-current" />
               <span>
-                {noStandby ? '비울 대기 메모리가 없습니다'
-                  : typeof ram?.standbyGB === 'number' ? `대기 메모리 (${ram.standbyGB.toFixed(1)} GB) 비우기`
-                  : '대기 메모리 비우기'}
+                {noStandby ? tr('비울 대기 메모리가 없습니다')
+                  : typeof ram?.standbyGB === 'number' ? tr("대기 메모리 ({0} GB) 비우기", [ram.standbyGB.toFixed(1)])
+                  : tr('대기 메모리 비우기')}
               </span>
             </>
           )}
@@ -182,13 +182,13 @@ export default function RamBooster({ addToast, active = true }) {
               <h4 className="font-bold text-emerald-300 text-sm">{purgeResult.message}</h4>
               {typeof purgeResult.freeBeforeGB === 'number' && typeof purgeResult.freeAfterGB === 'number' && (
                 <p className="text-xs text-gray-700 dark:text-slate-300 font-mono">
-                  여유 메모리 {purgeResult.freeBeforeGB.toFixed(1)} GB → {purgeResult.freeAfterGB.toFixed(1)} GB (비운 직후 측정)
+                  {tr("여유 메모리")}{' '}{purgeResult.freeBeforeGB.toFixed(1)} GB → {purgeResult.freeAfterGB.toFixed(1)}{' '}{tr("GB (비운 직후 측정)")}
                 </p>
               )}
             </div>
           </div>
           <button onClick={() => setPurgeResult(null)} className="text-xs text-gray-500 dark:text-slate-400 hover:text-black dark:hover:text-white underline flex-shrink-0">
-            닫기
+            {tr("닫기")}
           </button>
         </div>
       )}
@@ -196,30 +196,30 @@ export default function RamBooster({ addToast, active = true }) {
       {/* Memory composition */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="glass-panel p-4 border-l-4 border-l-cyan-400">
-          <span className="text-xs text-gray-500 dark:text-slate-400">사용 중</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("사용 중")}</span>
           <div className="text-2xl font-black font-mono text-black dark:text-white mt-1">{waiting || fmtGB(ram.inUseGB)}</div>
-          <span className="text-[0.625rem] text-slate-500">프로그램과 Windows 가 쓰는 메모리</span>
+          <span className="text-[0.625rem] text-slate-500">{tr("프로그램과 Windows 가 쓰는 메모리")}</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-purple-500">
-          <span className="text-xs text-gray-500 dark:text-slate-400">대기 (Standby)</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("대기 (Standby)")}</span>
           <div className="text-2xl font-black font-mono text-purple-400 mt-1">{waiting || fmtGB(ram.standbyGB)}</div>
-          <span className="text-[0.625rem] text-slate-500">최근 파일 캐시 · 필요하면 자동 반환</span>
+          <span className="text-[0.625rem] text-slate-500">{tr("최근 파일 캐시 · 필요하면 자동 반환")}</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-emerald-400">
-          <span className="text-xs text-gray-500 dark:text-slate-400">여유 (Free)</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("여유 (Free)")}</span>
           <div className="text-2xl font-black font-mono text-emerald-400 mt-1">{waiting || fmtGB(ram.freeGB)}</div>
-          <span className="text-[0.625rem] text-slate-500">아무것도 담기지 않은 메모리</span>
+          <span className="text-[0.625rem] text-slate-500">{tr("아무것도 담기지 않은 메모리")}</span>
         </div>
 
         <div className="glass-panel p-4 border-l-4 border-l-slate-500">
-          <span className="text-xs text-gray-500 dark:text-slate-400">메모리 사용률</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("메모리 사용률")}</span>
           <div className="text-2xl font-black font-mono text-gray-800 dark:text-slate-200 mt-1">
-            {waiting || (typeof ram.pct === 'number' ? `${ram.pct}%` : '알 수 없음')}
+            {waiting || (typeof ram.pct === 'number' ? `${ram.pct}%` : tr('알 수 없음'))}
           </div>
           <span className="text-[0.625rem] text-slate-500 font-mono">
-            {loading ? '' : `전체 ${fmtGB(ram.totalGB)} · 사용 가능 ${fmtGB(ram.availableGB)}`}
+            {loading ? '' : tr("전체 {0} · 사용 가능 {1}", [fmtGB(ram.totalGB), fmtGB(ram.availableGB)])}
           </span>
         </div>
       </div>
@@ -227,9 +227,9 @@ export default function RamBooster({ addToast, active = true }) {
       {/* Composition bar */}
       <div className="glass-panel p-5 space-y-3">
         <div className="flex justify-between items-center text-xs font-mono gap-4">
-          <span className="text-gray-700 dark:text-slate-300 font-bold">메모리 구성</span>
+          <span className="text-gray-700 dark:text-slate-300 font-bold">{tr("메모리 구성")}</span>
           <span className="text-gray-500 dark:text-slate-400 text-right">
-            Windows 성능 카운터 값 (작업 관리자와 같은 출처) · 2초마다 갱신
+            {tr("Windows 성능 카운터 값 (작업 관리자와 같은 출처) · 2초마다 갱신")}
           </span>
         </div>
         {hasBreakdown ? (
@@ -253,12 +253,12 @@ export default function RamBooster({ addToast, active = true }) {
               ))}
             </div>
             <p className="text-[0.625rem] text-slate-500 text-center">
-              수정됨: 디스크에 기록되기를 기다리는 메모리입니다. 기록이 끝나면 대기로 옮겨집니다.
+              {tr("수정됨: 디스크에 기록되기를 기다리는 메모리입니다. 기록이 끝나면 대기로 옮겨집니다.")}
             </p>
           </>
         ) : (
           <p className="text-xs text-gray-500 dark:text-slate-400 py-2">
-            {loading ? '측정 중…' : '메모리 구성을 읽지 못했습니다. 성능 카운터를 사용할 수 없는 환경일 수 있습니다.'}
+            {loading ? tr('측정 중…') : tr('메모리 구성을 읽지 못했습니다. 성능 카운터를 사용할 수 없는 환경일 수 있습니다.')}
           </p>
         )}
       </div>
@@ -268,24 +268,24 @@ export default function RamBooster({ addToast, active = true }) {
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-gray-900 dark:text-slate-100 text-sm flex items-center gap-2">
             <Activity className="w-4 h-4 text-cyan-400" />
-            메모리를 많이 쓰는 프로세스 {processes ? `(상위 ${processes.length}개)` : ''}
+            {tr("메모리를 많이 쓰는 프로세스")}{' '}{processes ? tr("(상위 {0}개)", [processes.length]) : ''}
           </h3>
-          <span className="text-xs text-gray-500 dark:text-slate-400">메모리 사용량 순</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">{tr("메모리 사용량 순")}</span>
         </div>
 
         {processes === null ? (
-          <p className="text-xs text-gray-500 dark:text-slate-400 py-2">측정 중…</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400 py-2">{tr("측정 중…")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs font-mono">
               <thead>
                 <tr className="border-b border-black/10 dark:border-slate-800 text-gray-500 dark:text-slate-400">
-                  <th className="pb-3 px-2">프로세스명</th>
+                  <th className="pb-3 px-2">{tr("프로세스명")}</th>
                   <th className="pb-3 px-2">PID</th>
-                  <th className="pb-3 px-2">메모리 (작업 집합)</th>
+                  <th className="pb-3 px-2">{tr("메모리 (작업 집합)")}</th>
                   <th className="pb-3 px-2">CPU</th>
-                  <th className="pb-3 px-2">우선순위</th>
-                  <th className="pb-3 px-2 text-right">작업</th>
+                  <th className="pb-3 px-2">{tr("우선순위")}</th>
+                  <th className="pb-3 px-2 text-right">{tr("작업")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -294,7 +294,7 @@ export default function RamBooster({ addToast, active = true }) {
                     <td className="py-3 px-2 font-bold text-gray-800 dark:text-slate-200">{proc.name}</td>
                     <td className="py-3 px-2 text-gray-500 dark:text-slate-400">{proc.pid}</td>
                     <td className="py-3 px-2 text-cyan-400 font-bold">{proc.memoryMB} MB</td>
-                    <td className="py-3 px-2 text-cyan-400">{proc.cpuPct ?? <span className="text-slate-500">측정 중</span>}</td>
+                    <td className="py-3 px-2 text-cyan-400">{proc.cpuPct ?? <span className="text-slate-500">{tr("측정 중")}</span>}</td>
                     <td className="py-3 px-2">
                       <span className={`px-2 py-0.5 rounded text-[0.625rem] ${
                         proc.priority === '높음' || proc.priority === '실시간'
@@ -307,18 +307,18 @@ export default function RamBooster({ addToast, active = true }) {
                     <td className="py-3 px-2 text-right">
                       {confirmPid === proc.pid ? (
                         <div className="flex items-center justify-end gap-2">
-                          <span className="text-[0.625rem] text-rose-300 text-right">저장하지 않은 작업은 사라집니다</span>
+                          <span className="text-[0.625rem] text-rose-300 text-right">{tr("저장하지 않은 작업은 사라집니다")}</span>
                           <button
                             onClick={() => killProcess(proc)}
                             className="text-white bg-rose-600 hover:bg-rose-500 px-2 py-1 rounded font-bold"
                           >
-                            강제 종료
+                            {tr("강제 종료")}
                           </button>
                           <button
                             onClick={() => setConfirmPid(null)}
                             className="text-gray-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/10 px-2 py-1 rounded"
                           >
-                            취소
+                            {tr("취소")}
                           </button>
                         </div>
                       ) : (
@@ -328,7 +328,7 @@ export default function RamBooster({ addToast, active = true }) {
                           className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-2 py-1 rounded transition-all flex items-center gap-1 ml-auto disabled:opacity-40"
                         >
                           <XCircle className="w-3.5 h-3.5" />
-                          {killingPid === proc.pid ? '종료 중…' : '프로세스 종료'}
+                          {killingPid === proc.pid ? tr('종료 중…') : tr('프로세스 종료')}
                         </button>
                       )}
                     </td>

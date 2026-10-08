@@ -419,6 +419,21 @@ def set_ui_icon(value):
 
 
 UI_MODES = ("dark", "light")
+UI_LANGUAGES = ("ko", "en")          # src/i18n.js 의 LANGUAGES 와 같아야 한다
+
+
+def get_ui_language():
+    """화면 언어. 한 번도 고른 적이 없으면 None(화면이 Windows 표시 언어로 정한다)."""
+    value = load_config().get("ui_language")
+    return value if value in UI_LANGUAGES else None
+
+
+def set_ui_language(value):
+    if value not in UI_LANGUAGES:
+        return {"success": False, "message": f"지원하지 않는 언어입니다: {value}"}
+    if not update_config(lambda c: c.__setitem__("ui_language", value)) or load_config().get("ui_language") != value:
+        return {"success": False, "message": "설정 파일에 저장하지 못했습니다."}
+    return {"success": True, "language": value}
 
 
 def get_ui_mode():
@@ -439,7 +454,7 @@ def get_ui_appearance():
     """화면 설정 전부(색 조합·강조색·배경색·크기·움직임 줄이기·아이콘 색)."""
     return {"theme": get_ui_theme(), "accent": get_ui_accent(), "background": get_ui_background(),
             "scale": get_ui_scale(), "reduceMotion": get_ui_reduce_motion(), "icon": get_ui_icon(),
-            "mode": get_ui_mode()}
+            "mode": get_ui_mode(), "language": get_ui_language()}
 
 
 _UI_DEFAULTS = {k: DEFAULT_CONFIG[k] for k in ("ui_theme", "ui_accent", "ui_background", "ui_scale",
